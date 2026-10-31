@@ -1,0 +1,143 @@
+/**
+ * Spell checking, offline: Hunspell dictionaries (SCOWL, en-GB / en-US) shipped with the app, checked
+ * with nspell. Misspelled words get a red wavy underline; right-click offers suggestions.
+ */
+import type { PrimeDocument } from "@prime/pdm";
+import nspell from "nspell";
+import type { Node } from "prosemirror-model";
+import { Plugin, PluginKey } from "prosemirror-state";
+import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
+
+export type Speller = ReturnType<typeof nspell>;
+
+const PERSONAL = "prime-word:dictionary";
+
+/** Words the user added ("Add to dictionary"), kept in this app's local storage. */
+function personalWords(): string[] {
+  try { return JSON.parse(localStorage.getItem(PERSONAL) ?? "[]"); } catch { return []; }
+}
+
+export function addToDictionary(speller: Speller, word: string) {
+  speller.add(word);
+  try { localStorage.setItem(PERSONAL, JSON.stringify([...new Set([...personalWords(), word])])); } catch { /* storage unavailable */ }
+}
+
+/** The dictionary for a document: US English when the document says so, otherwise British English. */
+export function documentLanguage(doc: PrimeDocument): "en-US" | "en-GB" {
+  const lang = doc.styles.defaults.run?.extra?.find((x) => x.name === "w:lang")?.xml ?? "";
+  return /w:val="en-US"/i.test(lang) ? "en-US" : "en-GB";
+}
+
+const loaded = new Map<string, Promise<Speller>>();
+
+export function loadSpeller(lang: "en-US" | "en-GB"): Promise<Speller> {
+  let p = loaded.get(lang);
+  if (!p) {
+    p = Promise.all([
+      fetch(`./dictionaries/${lang}/index.aff`).then((r) => r.text()),
+      fetch(`./dictionaries/${lang}/index.dic`).then((r) => r.text()),
+    ]).then(([aff, dic]) => {
+      const speller = nspell(aff, dic);
+      for (const w of personalWords()) speller.add(w);
+      return speller;
+    });
+    loaded.set(lang, p);
+  }
+  return p;
+}
+
+export interface Misspelling {
+  from: number;
+  to: number;
+  word: string;
+}
+
+const WORD = /\p{L}[\p{L}'’]*\p{L}|\p{L}/gu;
+
+/** Misspelled words in the document (skipping acronyms, words with digits, web and e-mail addresses). */
+export function findMisspellings(doc: Node, speller: Speller, ignored: Set<string>, cache: Map<string, boolean>): Misspelling[] {
+  const out: Misspelling[] = [];
+  const correct = (w: string) => {
+    let ok = cache.get(w);
+    if (ok === undefined) {
+      ok = speller.correct(w);
+      cache.set(w, ok);
+    }
+    return ok;
+  };
+  doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    let text = "";
+    const at: number[] = [];
+    node.forEach((child, offset) => {
+      const s = child.isText ? child.text! : " ";
+      for (let i = 0; i < s.length; i++) at.push(pos + 1 + offset + i);
+      text += s;
+    });
+    for (const m of text.matchAll(WORD)) {
+      const raw = m[0];
+      const word = raw.replace(/’/g, "'").replace(/^'+|'+$/g, "");
+      if (word.length < 2 || ignored.has(word)) continue;
+      if (word === word.toUpperCase()) continue; // acronyms: GDP, NASA
+      // Part of an address or code (example.com, someone@mail, C:\path)?
+      const before = text[m.index! - 1] ?? " ";
+      const after = text[m.index! + raw.length] ?? " ";
+      if (/[@./\\_:]/.test(before) || /[@\\/_]/.test(after) || (after === "." && /\p{L}/u.test(text[m.index! + raw.length + 1] ?? ""))) continue;
+      if (correct(word) || correct(word.toLowerCase())) continue;
+      out.push({ from: at[m.index!], to: at[m.index! + raw.length - 1] + 1, word });
+    }
+    return false;
+  });
+  return out;
+}
+
+interface SpellState {
+  issues: Misspelling[];
+  decorations: DecorationSet;
+}
+
+export const spellKey = new PluginKey<SpellState>("spelling");
+
+/** Underlines misspellings; re-checks the document shortly after each change. */
+export function spellPlugin(getSpeller: () => Speller | undefined, ignored: Set<string>): Plugin<SpellState> {
+  const cache = new Map<string, boolean>();
+  const build = (doc: Node): SpellState => {
+    const speller = getSpeller();
+    if (!speller) return { issues: [], decorations: DecorationSet.empty };
+    const issues = findMisspellings(doc, speller, ignored, cache);
+    return { issues, decorations: DecorationSet.create(doc, issues.map((i) => Decoration.inline(i.from, i.to, { class: "pw-misspelled" }))) };
+  };
+  return new Plugin<SpellState>({
+    key: spellKey,
+    state: {
+      init: (_, state) => build(state.doc),
+      apply(tr, old) {
+        if (tr.getMeta(spellKey) === "recheck") { cache.clear(); return build(tr.doc); }
+        if (!tr.docChanged) return old;
+        // Keep underlines in place while typing; the full re-check follows when typing pauses.
+        return { issues: old.issues, decorations: old.decorations.map(tr.mapping, tr.doc) };
+      },
+    },
+    props: { decorations: (state) => spellKey.getState(state)?.decorations },
+    view(view) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      return {
+        update(v, prev) {
+          if (v.state.doc === prev.doc) return;
+          clearTimeout(timer);
+          timer = setTimeout(() => recheck(v), 400);
+        },
+        destroy() { clearTimeout(timer); },
+      };
+    },
+  });
+}
+
+export function recheck(view: EditorView) {
+  view.dispatch(view.state.tr.setMeta(spellKey, "recheck").setMeta("addToHistory", false));
+}
+
+/** The misspelling at a document position, if any. */
+export function misspellingAt(view: EditorView, pos: number): Misspelling | undefined {
+  return spellKey.getState(view.state)?.issues.find((i) => i.from <= pos && pos <= i.to);
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@prime/pdm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prime Document Model: the editor-independent document representation (ADR-004)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
+}

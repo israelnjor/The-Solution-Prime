@@ -1,0 +1,17 @@
+{
+  "name": "prime-productivity",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/pdm packages/docx packages/layout packages/pdf packages/editor",
+    "clean": "tsc -b --clean packages/pdm packages/docx packages/layout packages/pdf packages/editor",
+    "dev": "npm run build && npm run dev -w @prime/word"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

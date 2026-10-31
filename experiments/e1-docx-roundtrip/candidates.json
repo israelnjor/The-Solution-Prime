@@ -1,0 +1,44 @@
+[
+  {
+    "name": "identity",
+    "role": "control",
+    "description": "Byte copy. Must produce zero findings; validates the checker.",
+    "cmd": ["{python}", "candidates/identity.py", "{in}", "{out}"]
+  },
+  {
+    "name": "python-docx",
+    "role": "control",
+    "description": "Open + save with python-docx, no edits.",
+    "cmd": ["{python}", "candidates/python_docx_resave.py", "{in}", "{out}"]
+  },
+  {
+    "name": "word-resave",
+    "role": "reference",
+    "description": "Open + re-save in Microsoft Word. Shows Word's own normalisation.",
+    "cmd": ["{python}", "candidates/word_resave.py", "{in}", "{out}"]
+  },
+  {
+    "name": "prime-docx",
+    "role": "candidate",
+    "description": "Our own engine (@prime/docx): DOCX -> Prime Document Model -> JSON snapshot -> DOCX.",
+    "requires": "../../packages/docx/dist/cli.js",
+    "setup": "npm install && npm run build  (from the repo root)",
+    "cmd": ["node", "../../packages/docx/dist/cli.js", "roundtrip", "{in}", "{out}"]
+  },
+  {
+    "name": "prime-editor",
+    "role": "candidate",
+    "description": "Gate E3: DOCX -> model -> ProseMirror editor document (JSON) -> model -> DOCX.",
+    "requires": "../../packages/editor/dist/cli.js",
+    "setup": "npm install && npm run build  (from the repo root)",
+    "cmd": ["node", "../../packages/editor/dist/cli.js", "roundtrip", "{in}", "{out}"]
+  },
+  {
+    "name": "html-pipeline",
+    "role": "candidate",
+    "description": "mammoth (DOCX->HTML) + html-to-docx (HTML->DOCX): the naive web-editor path.",
+    "requires": "candidates/html-pipeline/node_modules",
+    "setup": "cd candidates/html-pipeline && npm install",
+    "cmd": ["node", "candidates/html-pipeline/convert.mjs", "{in}", "{out}"]
+  }
+]

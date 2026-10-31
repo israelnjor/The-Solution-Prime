@@ -1,0 +1,32 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Prime Word: native dialogs; read/write only files the user picks (atomic saves via app commands); app recovery folder; installed fonts for PDF export; Office cloud fonts.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$LOCALDATA/Microsoft/FontCache/4/CloudFonts"
+        },
+        {
+          "path": "$LOCALDATA/Microsoft/FontCache/4/CloudFonts/**"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@prime/editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prime Word editor core: ProseMirror schema derived from the Prime Document Model, conversion, commands (ADR-005)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": { "prime-editor": "dist/cli.js" },
+  "dependencies": {
+    "@prime/docx": "0.1.0",
+    "@prime/layout": "0.1.0",
+    "@prime/pdm": "0.1.0",
+    "prosemirror-commands": "1.6.2",
+    "prosemirror-history": "1.4.1",
+    "prosemirror-keymap": "1.2.2",
+    "prosemirror-model": "1.24.1",
+    "prosemirror-state": "1.4.3",
+    "prosemirror-view": "1.37.1"
+  }
+}

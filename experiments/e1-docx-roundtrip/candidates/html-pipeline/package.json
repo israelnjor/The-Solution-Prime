@@ -1,0 +1,10 @@
+{
+  "name": "prime-e1-html-pipeline",
+  "private": true,
+  "type": "module",
+  "description": "Experiment 1 candidate: mammoth (DOCX->HTML) + html-to-docx (HTML->DOCX)",
+  "dependencies": {
+    "html-to-docx": "^1.8.0",
+    "mammoth": "^1.8.0"
+  }
+}

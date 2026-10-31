@@ -1,0 +1,60 @@
+{
+  "A_basic_formatting": {
+    "file": "A_basic_formatting.docx",
+    "description": "A — Basic formatting.",
+    "features": [
+      "headings",
+      "character formatting",
+      "colors",
+      "fonts",
+      "alignment",
+      "indentation",
+      "bullets",
+      "numbered lists",
+      "nested lists",
+      "special characters",
+      "line breaks"
+    ]
+  },
+  "B_structured_content": {
+    "file": "B_structured_content.docx",
+    "description": "B — Structured content: tables, hyperlinks, images, captions.",
+    "features": [
+      "tables",
+      "cell shading",
+      "merged cells",
+      "hyperlinks",
+      "inline images",
+      "captions",
+      "image in table"
+    ]
+  },
+  "C_multipage_layout": {
+    "file": "C_multipage_layout.docx",
+    "description": "C — Multi-page layout: margins, page breaks, headers/footers, sections.",
+    "features": [
+      "margins",
+      "page breaks",
+      "headers",
+      "footers",
+      "page numbers",
+      "different first page",
+      "sections",
+      "landscape"
+    ]
+  },
+  "D_complex_report": {
+    "file": "D_complex_report.docx",
+    "description": "D — Complex report: everything combined, tables crossing page boundaries.",
+    "features": [
+      "mixed formatting",
+      "long tables across pages",
+      "repeating header rows",
+      "lists",
+      "images",
+      "hyperlinks",
+      "headers/footers",
+      "page numbers"
+    ]
+  }
+}

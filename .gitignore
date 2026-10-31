@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+__pycache__/
+experiments/*/results/
+~$*
+dist/
+*.tsbuildinfo
+experiments/*/corpus-private/
+apps/word/public/dictionaries/
