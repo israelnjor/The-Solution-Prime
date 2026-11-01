@@ -212,3 +212,19 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .spell-menu .suggestion { font-weight: 600; }
 .spell-menu .none { padding: 6px 10px; color: var(--muted); }
 .spell-menu hr { border: none; border-top: 1px solid var(--chrome-border); margin: 4px 0; }
+.recent-menu { position: relative; display: inline-block; }
+.recent-popup {
+  position: absolute; z-index: 50; top: calc(100% + 4px); left: 0; width: 380px; max-height: 420px; overflow: auto;
+  padding: 6px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+.recent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.recent-list li { display: flex; align-items: stretch; border-radius: 4px; }
+.recent-list li:hover { background: #e9edf3; }
+.recent-open { flex: 1; min-width: 0; display: grid; text-align: left; gap: 1px; padding: 6px 10px; border: none; background: none; cursor: pointer; font: inherit; }
+.recent-open span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-open strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-list li.missing .recent-open { cursor: default; opacity: 0.55; }
+.recent-remove { border: none; background: none; cursor: pointer; padding: 0 10px; color: var(--muted); font-size: 16px; }
+.recent-remove:hover { color: #000; }
+.recent-empty { color: var(--muted); margin: 6px 10px; }
+.templates h4 { margin: 16px 0 6px; }

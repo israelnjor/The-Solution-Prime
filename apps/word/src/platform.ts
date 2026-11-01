@@ -5,14 +5,21 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { readFile } from "@tauri-apps/plugin-fs";
 
 export const isDesktop = "__TAURI_INTERNALS__" in window;
 
-/** Where a document lives, so Save can write back to it. */
+/**
+ * Where a document lives, so Save can write back to it. `modified` is when the file last changed as far
+ * as we know (opened or saved by us); a later change means another program saved it.
+ */
 export type DocumentLocation =
-  | { kind: "path"; path: string }
-  | { kind: "handle"; handle: BrowserFileHandle };
+  | { kind: "path"; path: string; modified?: number }
+  | { kind: "handle"; handle: BrowserFileHandle; modified?: number };
+
+/** Save refused: the file changed on disk after `modified` (saving would overwrite someone's work). */
+export class ChangedOnDiskError extends Error {
+  constructor() { super("The file was changed by another program."); }
+}
 
 export interface OpenedFile {
   bytes: Uint8Array;
@@ -36,18 +43,40 @@ const FILTERS = [{ name: "Word document", extensions: ["docx"] }];
 
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
+/** Desktop: reads a document the user chose or opened before (see read_document in lib.rs). */
+export async function openPath(path: string): Promise<OpenedFile> {
+  const modified = await invoke<number | null>("document_modified", { path });
+  const bytes = new Uint8Array(await invoke<ArrayBuffer>("read_document", { path }));
+  return { bytes, name: baseName(path), location: { kind: "path", path, ...(modified ? { modified } : {}) } };
+}
+
+export interface RecentDocument {
+  path: string;
+  name: string;
+  exists: boolean;
+}
+
+/** Recently opened or saved documents, most recent first (desktop only). */
+export async function recentDocuments(): Promise<RecentDocument[]> {
+  return isDesktop ? invoke<RecentDocument[]>("recent_documents") : [];
+}
+
+export async function forgetRecent(path: string): Promise<void> {
+  if (isDesktop) await invoke("forget_recent", { path });
+}
+
 /** Asks the user for a document. Undefined when they cancel. */
 export async function openDocument(): Promise<OpenedFile | undefined> {
   if (isDesktop) {
     const path = await openDialog({ multiple: false, directory: false, filters: FILTERS });
     if (typeof path !== "string") return undefined;
-    return { bytes: await readFile(path), name: baseName(path), location: { kind: "path", path } };
+    return openPath(path);
   }
   if (browser.showOpenFilePicker) {
     let handles: BrowserFileHandle[];
     try { handles = await browser.showOpenFilePicker({ types: PICKER_TYPES }); } catch { return undefined; }
     const f = await handles[0].getFile();
-    return { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name, location: { kind: "handle", handle: handles[0] } };
+    return { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name, location: { kind: "handle", handle: handles[0], modified: f.lastModified } };
   }
   return new Promise((resolve) => {
     const input = document.createElement("input");
@@ -63,10 +92,12 @@ export async function openDocument(): Promise<OpenedFile | undefined> {
 
 /**
  * Saves to `location`, or asks where to save (Save As) when there is none.
- * Returns the new location and name, or undefined when the user cancels.
+ * Returns the new location and name, or undefined when the user cancels. Throws ChangedOnDiskError when
+ * the file changed since `location.modified`, unless `overwrite` is set.
  */
-export async function saveDocument(bytes: Uint8Array, name: string, location?: DocumentLocation):
+export async function saveDocument(bytes: Uint8Array, name: string, location?: DocumentLocation, overwrite = false):
   Promise<{ location?: DocumentLocation; name: string } | undefined> {
+  const known = overwrite ? undefined : location?.modified;
   if (isDesktop) {
     let path = location?.kind === "path" ? location.path : undefined;
     if (!path) {
@@ -75,8 +106,15 @@ export async function saveDocument(bytes: Uint8Array, name: string, location?: D
       if (!/\.docx$/i.test(path)) path += ".docx";
     }
     // Atomic save (temporary file, flushed, renamed over the original) — see save_document in lib.rs.
-    await invoke("save_document", bytes, { headers: { "x-path": encodeURIComponent(path) } });
-    return { location: { kind: "path", path }, name: baseName(path) };
+    let modified: number;
+    try {
+      modified = await invoke<number>("save_document", bytes, {
+        headers: { "x-path": encodeURIComponent(path), ...(known && location?.kind === "path" ? { "x-known-modified": String(known) } : {}) },
+      });
+    } catch (e) {
+      throw String(e) === "CHANGED_ON_DISK" ? new ChangedOnDiskError() : new Error(String(e));
+    }
+    return { location: { kind: "path", path, modified }, name: baseName(path) };
   }
   const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: MIME });
   let handle = location?.kind === "handle" ? location.handle : undefined;
@@ -84,10 +122,13 @@ export async function saveDocument(bytes: Uint8Array, name: string, location?: D
     try { handle = await browser.showSaveFilePicker({ suggestedName: name, types: PICKER_TYPES }); } catch { return undefined; }
   }
   if (handle) {
+    if (known && handle === (location?.kind === "handle" ? location.handle : undefined) && (await handle.getFile()).lastModified > known) {
+      throw new ChangedOnDiskError();
+    }
     const w = await handle.createWritable();
     await w.write(blob);
     await w.close();
-    return { location: { kind: "handle", handle }, name: handle.name };
+    return { location: { kind: "handle", handle, modified: (await handle.getFile()).lastModified }, name: handle.name };
   }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

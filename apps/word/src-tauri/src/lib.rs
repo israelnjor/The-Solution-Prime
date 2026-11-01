@@ -19,7 +19,112 @@ fn startup_document(app: AppHandle) -> Option<(String, Vec<u8>)> {
     let path = std::env::args().skip(1).find(|a| a.to_lowercase().ends_with(".docx"))?;
     let bytes = fs::read(&path).ok()?;
     let _ = app.fs_scope().allow_file(&path);
+    remember(&app, &path);
     Some((path, bytes))
+}
+
+const RECENT_MAX: usize = 12;
+
+/// Recently opened or saved documents, most recent first, in the app's data folder (paths only).
+fn recent_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("recent.json"))
+}
+
+fn recent_list(app: &AppHandle) -> Vec<String> {
+    recent_file(app)
+        .ok()
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn store_recent(app: &AppHandle, list: &[String]) {
+    if let (Ok(file), Ok(json)) = (recent_file(app), serde_json::to_vec(list)) {
+        let _ = atomic_write(&file, &json);
+    }
+}
+
+/// Windows paths are case-insensitive.
+fn same_path(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+fn remember(app: &AppHandle, path: &str) {
+    if !path.to_lowercase().ends_with(".docx") {
+        return; // e.g. a PDF export written through save_document
+    }
+    let mut list = recent_list(app);
+    list.retain(|p| !same_path(p, path));
+    list.insert(0, path.to_string());
+    list.truncate(RECENT_MAX);
+    store_recent(app, &list);
+}
+
+fn is_recent(app: &AppHandle, path: &str) -> bool {
+    recent_list(app).iter().any(|p| same_path(p, path))
+}
+
+/// A file's last-modified time in milliseconds since 1970, if it exists.
+fn modified_ms(path: &Path) -> Option<u64> {
+    let t = fs::metadata(path).ok()?.modified().ok()?;
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
+}
+
+/// Files the user chose (dialog, "Open with") or documents opened before (recent list) — nothing else.
+fn may_access(app: &AppHandle, path: &str) -> bool {
+    app.fs_scope().is_allowed(path) || (path.to_lowercase().ends_with(".docx") && is_recent(app, path))
+}
+
+#[derive(serde::Serialize)]
+struct RecentDocument {
+    path: String,
+    name: String,
+    exists: bool,
+}
+
+#[tauri::command]
+fn recent_documents(app: AppHandle) -> Vec<RecentDocument> {
+    recent_list(&app)
+        .into_iter()
+        .map(|path| {
+            let p = Path::new(&path);
+            RecentDocument {
+                name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                exists: p.is_file(),
+                path,
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn forget_recent(app: AppHandle, path: String) {
+    let mut list = recent_list(&app);
+    list.retain(|p| !same_path(p, &path));
+    store_recent(&app, &list);
+}
+
+/// Reads a document the user chose or opened before, and records it as recent.
+#[tauri::command]
+fn read_document(app: AppHandle, path: String) -> Result<Response, String> {
+    if !may_access(&app, &path) {
+        return Err("Prime Word may only open files you chose".into());
+    }
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let _ = app.fs_scope().allow_file(&path);
+    remember(&app, &path);
+    Ok(Response::new(bytes))
+}
+
+/// When a document was last changed on disk (to notice changes by other programs before saving).
+#[tauri::command]
+fn document_modified(app: AppHandle, path: String) -> Option<u64> {
+    if !may_access(&app, &path) {
+        return None;
+    }
+    modified_ms(Path::new(&path))
 }
 
 /// Automation switches from the command line (`--pw-export-pdf=<path>`, `--pw-type=<text>`), used for
@@ -87,13 +192,23 @@ fn raw_body<'a>(request: &'a Request) -> Result<&'a [u8], String> {
 }
 
 /// Saves a document the user chose (via a dialog or by opening it). Paths outside that scope are refused.
+/// With `x-known-modified`, refuses ("CHANGED_ON_DISK") when the file changed after that time — another
+/// program saved it — so a newer version is never overwritten silently. Returns the new modified time.
 #[tauri::command]
-fn save_document(app: AppHandle, request: Request) -> Result<(), String> {
-    let path = PathBuf::from(header(&request, "x-path")?);
-    if !app.fs_scope().is_allowed(&path) {
+fn save_document(app: AppHandle, request: Request) -> Result<u64, String> {
+    let name = header(&request, "x-path")?;
+    if !may_access(&app, &name) {
         return Err("Prime Word may only save to files you chose".into());
     }
-    atomic_write(&path, raw_body(&request)?).map_err(|e| e.to_string())
+    let path = PathBuf::from(&name);
+    if let Some(known) = header(&request, "x-known-modified").ok().and_then(|v| v.parse::<u64>().ok()) {
+        if modified_ms(&path).is_some_and(|now| now > known) {
+            return Err("CHANGED_ON_DISK".into());
+        }
+    }
+    atomic_write(&path, raw_body(&request)?).map_err(|e| e.to_string())?;
+    remember(&app, &name);
+    Ok(modified_ms(&path).unwrap_or(0))
 }
 
 fn recovery_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -173,6 +288,10 @@ pub fn run() {
         .manage(fonts::FontIndex::default())
         .invoke_handler(tauri::generate_handler![
             startup_document,
+            recent_documents,
+            forget_recent,
+            read_document,
+            document_modified,
             automation_args,
             save_document,
             recovery_save,

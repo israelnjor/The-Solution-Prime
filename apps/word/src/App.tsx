@@ -25,7 +25,7 @@ import { documentLanguage, loadSpeller, type Misspelling, misspellingAt, recheck
 import { loadCloudFonts } from "./fonts";
 import { PageSheets } from "./PageSheets";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
-import { confirmAction, type DocumentLocation, isDesktop, openDocument, saveDocument } from "./platform";
+import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
 import { LINK_EVENT, Ribbon } from "./Ribbon";
 
@@ -105,7 +105,19 @@ export function App() {
     if (!v) return;
     const { base, location, name } = fileRef.current;
     try {
-      const saved = await saveDocument(writeDocx(fromProseMirror(v.state.doc, base)), name, saveAs ? undefined : location);
+      const bytes = writeDocx(fromProseMirror(v.state.doc, base));
+      let saved;
+      try {
+        saved = await saveDocument(bytes, name, saveAs ? undefined : location);
+      } catch (e) {
+        if (!(e instanceof ChangedOnDiskError)) throw e;
+        // Another program saved this file after we opened it: never overwrite that silently.
+        const overwrite = await confirmAction(
+          `${name} was changed by another program after you opened it.\n\n` +
+          "Yes: replace it with your version (the other changes are lost).\nNo: save your version as a new file.",
+          "File changed on disk");
+        saved = await saveDocument(bytes, name, overwrite ? location : undefined, true);
+      }
       if (!saved) return;
       setFile((f) => ({ ...f, name: saved.name, location: saved.location ?? f.location }));
       setDirty(false);
@@ -216,6 +228,16 @@ export function App() {
     if (opened && (await discardCurrent())) load(opened.bytes, opened.name, opened.location);
   };
 
+  const openRecent = async (path: string) => {
+    if (!(await discardCurrent())) return;
+    try {
+      const opened = await openPath(path);
+      load(opened.bytes, opened.name, opened.location);
+    } catch (e) {
+      alert(`Prime Word could not open ${path}:\n${String(e)}`);
+    }
+  };
+
   /** A new, unsaved document from a template (blank by default). */
   const newDocument = async (template?: Template) => {
     if (!(await discardCurrent())) return;
@@ -228,7 +250,7 @@ export function App() {
   /** Restores unsaved work from an earlier session (kept as unsaved: nothing is overwritten). */
   const restore = async (s: Snapshot) => {
     if (!(await discardCurrent())) return;
-    setFile({ base: s.doc, name: s.name, warnings: s.warnings, fonts: 0, ...(s.path ? { location: { kind: "path" as const, path: s.path } } : {}) });
+    setFile({ base: s.doc, name: s.name, warnings: s.warnings, fonts: 0, ...(s.path ? { location: { kind: "path" as const, path: s.path, modified: s.savedAt } } : {}) });
     setDirty(true);
     dirtyRef.current = true;
     await saveSnapshot({ ...s, id: SESSION, savedAt: Date.now() }); // now this session's
@@ -290,8 +312,11 @@ export function App() {
   useEffect(() => {
     if (!isDesktop) return;
     void invoke<[string, number[]] | null>("startup_document").then((doc) => {
-      if (doc) load(Uint8Array.from(doc[1]), doc[0].split(/[\\/]/).pop()!, { kind: "path", path: doc[0] });
-      setStartupDone(true);
+      if (!doc) return setStartupDone(true);
+      void invoke<number | null>("document_modified", { path: doc[0] }).then((modified) => {
+        load(Uint8Array.from(doc[1]), doc[0].split(/[\\/]/).pop()!, { kind: "path", path: doc[0], ...(modified ? { modified } : {}) });
+        setStartupDone(true);
+      });
     });
   }, []);
 
@@ -364,7 +389,7 @@ export function App() {
     <div className="app">
       <Ribbon
         view={v} doc={file.base} mode={mode}
-        onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onSave={(saveAs) => void save(saveAs)}
+        onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)} onSave={(saveAs) => void save(saveAs)}
         onExportPdf={() => void exportToPdf()} onPrint={() => void print()}
         onFind={(replace) => setFind(replace ? "replace" : "find")}
         onHeaderFooter={() => setEditingHeaderFooter(true)}
@@ -440,7 +465,7 @@ export function App() {
           ignored={ignoredWords.current} onClose={() => setSpellMenu(undefined)} />
       )}
       {pickingTemplate && (
-        <TemplatePicker onClose={() => setPickingTemplate(false)} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />
+        <TemplatePicker onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />
       )}
       {editingParagraph && v && <ParagraphDialog view={v} doc={file.base} onClose={() => setEditingParagraph(false)} />}
       {editingHeaderFooter && v && measurerRef.current && (

@@ -10,6 +10,7 @@ import { redo, undo } from "prosemirror-history";
 import type { Command } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
+import { RecentMenu } from "./RecentList";
 
 const FONTS = ["Aptos", "Arial", "Book Antiqua", "Calibri", "Calibri Light", "Cambria", "Candara", "Century Gothic",
   "Consolas", "Constantia", "Corbel", "Courier New", "Garamond", "Georgia", "Palatino Linotype", "Segoe UI",
@@ -38,6 +39,7 @@ export interface RibbonProps {
   doc: PrimeDocument;
   onNew(): void;
   onOpen(): void;
+  onOpenRecent(path: string): void;
   onSave(saveAs?: boolean): void;
   onExportPdf(): void;
   onPrint(): void;
@@ -69,7 +71,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   const [popover, setPopover] = useState<"link" | "table" | "margins" | null>(null);
   const [custom, setCustom] = useState({ top: 2.54, bottom: 2.54, left: 2.54, right: 2.54 });
@@ -121,6 +123,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onSave, onExportPdf, onPri
             <div className="group">
               <button onClick={onNew} title="New document">New</button>
               <button onClick={onOpen} title="Open a .docx (Ctrl+O)">Open</button>
+              <RecentMenu onOpen={onOpenRecent} />
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
               <button onClick={() => onSave(true)} title="Save as a new file">Save As</button>
               <button onClick={onExportPdf} title="Export as PDF">Export PDF</button>

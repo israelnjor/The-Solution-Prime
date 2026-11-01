@@ -49,6 +49,7 @@ Editing (ribbon tabs Home / Insert / Layout / Table):
 | View | Print Layout / Web Layout, zoom 25–200% |
 | Output | Export PDF (fonts embedded from the installed fonts), Print (Ctrl+P: opens the PDF in the default viewer) |
 | Safety | Autosave for recovery 3 s after typing stops; after a crash, the next start offers Restore / Discard. Saves are atomic (temp file → flush → rename), so a crash mid-save cannot corrupt the document. Closing with unsaved changes asks first. |
+| Files | Recent documents (Home → Recent ▾, and in New); missing files are greyed out and can be removed from the list. If another program changed the file since you opened it, Save asks before overwriting (or saves your version as a new file) |
 
 Desktop automation (tests, batch use): `prime-word.exe <file.docx> --pw-export-pdf=<out.pdf>` exports
 and exits; `--pw-type=<text>` types into the opened document.
