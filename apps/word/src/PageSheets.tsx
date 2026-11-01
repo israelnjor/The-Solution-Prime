@@ -1,6 +1,6 @@
 import type { LayoutResult, Page, PlacedImage } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp" };
 
@@ -47,7 +47,7 @@ function Chrome({ page, total, doc, top }: { page: Page; total: number; doc: Pri
  * which hide what runs through the space between pages (e.g. table borders); headers and footers.
  * A mask is dropped where the screen's content overflowed a page, so text is never hidden.
  */
-export function PageSheets({ layout, doc, gap, overflow, children }: {
+export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow, children }: {
   layout?: LayoutResult; doc: PrimeDocument; gap: number; overflow: Set<number>; children: ReactNode;
 }) {
   const section = doc.sections[0]?.props ?? {};
@@ -89,4 +89,7 @@ export function PageSheets({ layout, doc, gap, overflow, children }: {
       </div>
     </div>
   );
-}
+},
+// Redraw only for a new layout or overflow: the editor inside (children) manages its own content, and
+// re-rendering a long document's sheets on every keystroke made typing slow.
+(a, b) => a.layout === b.layout && a.doc === b.doc && a.gap === b.gap && a.overflow === b.overflow);

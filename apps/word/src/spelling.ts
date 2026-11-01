@@ -2,6 +2,7 @@
  * Spell checking, offline: Hunspell dictionaries (SCOWL, en-GB / en-US) shipped with the app, checked
  * with nspell. Misspelled words get a red wavy underline; right-click offers suggestions.
  */
+import { timed } from "@prime/editor";
 import type { PrimeDocument } from "@prime/pdm";
 import nspell from "nspell";
 import type { Node } from "prosemirror-model";
@@ -104,7 +105,7 @@ export function spellPlugin(getSpeller: () => Speller | undefined, ignored: Set<
   const build = (doc: Node): SpellState => {
     const speller = getSpeller();
     if (!speller) return { issues: [], decorations: DecorationSet.empty };
-    const issues = findMisspellings(doc, speller, ignored, cache);
+    const issues = timed("spelling", () => findMisspellings(doc, speller, ignored, cache));
     return { issues, decorations: DecorationSet.create(doc, issues.map((i) => Decoration.inline(i.from, i.to, { class: "pw-misspelled" }))) };
   };
   return new Plugin<SpellState>({

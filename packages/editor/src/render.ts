@@ -9,7 +9,8 @@
 import { MathTypesetter, type Measurer, type ResolvedRun, Resolver } from "@prime/layout";
 import type { Paragraph, PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
-import { Plugin } from "prosemirror-state";
+import { Plugin, type Transaction } from "prosemirror-state";
+import { AddMarkStep, RemoveMarkStep, ReplaceStep } from "prosemirror-transform";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import type { Render } from "./schema.js";
 
@@ -162,6 +163,23 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
 /**
  * Paragraph styling and list labels, recomputed in document order whenever the document changes.
  */
+/**
+ * Whether a transaction only changed text (or character formatting) inside existing paragraphs: no
+ * paragraph was added, removed, split, joined or given new properties. Then no paragraph's own
+ * formatting or list number can have changed — the case for nearly every keystroke.
+ */
+function textOnly(tr: Transaction): boolean {
+  return tr.steps.every((step, i) => {
+    if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) return true;
+    if (!(step instanceof ReplaceStep) || step.slice.openStart || step.slice.openEnd) return false;
+    const $from = tr.docs[i].resolve(step.from);
+    if (!$from.parent.isTextblock || !$from.sameParent(tr.docs[i].resolve(step.to))) return false;
+    let inline = true;
+    step.slice.content.forEach((n) => { inline &&= n.isInline; });
+    return inline;
+  });
+}
+
 export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin {
   const build = (pm: Node): DecorationSet => {
     const resolver = new Resolver(doc);
@@ -214,7 +232,7 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
   return new Plugin({
     state: {
       init: (_, state) => build(state.doc),
-      apply: (tr, old) => (tr.docChanged ? build(tr.doc) : old),
+      apply: (tr, old) => (!tr.docChanged ? old : textOnly(tr) ? old.map(tr.mapping, tr.doc) : build(tr.doc)),
     },
     props: { decorations(state) { return this.getState(state); } },
   });

@@ -132,7 +132,8 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .pw-notice {
   position: absolute; top: -22px; left: 0; right: 0; font-size: 11px; color: #7a5a00; text-align: center;
 }
-.pw-page-gap { display: block; height: 0; pointer-events: none; user-select: none; }
+/* flow-root: margins never collapse through a gap, so growing it by d moves what follows by exactly d (see fit in paged.ts). */
+.pw-page-gap { display: flow-root; height: 0; pointer-events: none; user-select: none; }
 
 .pw-editor.paged .pw-section-break, .pw-editor.paged .pw-page-break { display: none; }
 

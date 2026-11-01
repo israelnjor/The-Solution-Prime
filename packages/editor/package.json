@@ -6,7 +6,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": { "prime-editor": "dist/cli.js" },
+  "bin": {
+    "prime-editor": "dist/cli.js"
+  },
   "dependencies": {
     "@prime/docx": "0.1.0",
     "@prime/layout": "0.1.0",
@@ -16,6 +18,7 @@
     "prosemirror-keymap": "1.2.2",
     "prosemirror-model": "1.24.1",
     "prosemirror-state": "1.4.3",
+    "prosemirror-transform": "1.12.4",
     "prosemirror-view": "1.37.1"
   }
 }

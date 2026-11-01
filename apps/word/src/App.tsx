@@ -15,7 +15,7 @@ import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { type Command, EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Profiler, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { FindPanel } from "./FindPanel";
 import { HeaderFooterEditor } from "./HeaderFooterEditor";
 import { ParagraphDialog } from "./ParagraphDialog";
@@ -45,6 +45,18 @@ interface Loaded {
 function fontUsage(doc: PrimeDocument): string {
   const theme = doc.package.parts.find((p) => /theme\/theme\d*\.xml$/.test(p.name));
   return JSON.stringify(doc.styles) + JSON.stringify(doc.sections) + (theme ? atob(theme.data) : "");
+}
+
+/** Dev self-test run (?selftest=…): turns on the "pw:" performance timings the tests read. */
+const SELFTEST = new URLSearchParams(location.search).has("selftest");
+if (SELFTEST) (globalThis as { primeTiming?: boolean }).primeTiming = true;
+
+/** Word count, remembered per document version (the status bar asks on every render). */
+const wordCounts = new WeakMap<object, number>();
+function countWords(doc: Parameters<typeof wordCount>[0]): number {
+  let n = wordCounts.get(doc);
+  if (n === undefined) wordCounts.set(doc, (n = wordCount(doc)));
+  return n;
 }
 
 export function App() {
@@ -159,7 +171,7 @@ export function App() {
         findPlugin(),
         pastePlugin(() => fileRef.current.base),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
-        ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: setOverflow })] : []),
+        ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
       ],
     });
     const v = new EditorView(mount.current, {
@@ -320,17 +332,19 @@ export function App() {
     });
   }, []);
 
-  // Dev self-tests (browser only): ?selftest=paste | copy | spell, after the document has loaded.
+  // Dev self-tests (browser only): ?selftest=paste | copy | spell | perf | align, after the document has loaded.
   useEffect(() => {
     const test = new URLSearchParams(location.search).get("selftest");
     if (!test || isDesktop || !layout || layoutOf !== file.base || automationDone.current) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
       if (test === "copy") copySelfTest(v, () => fileRef.current.base);
       if (test === "spell") spellSelfTest(v);
+      if (test === "perf") perfSelfTest(v);
+      if (test === "align") alignSelfTest();
     });
   }, [layout, layoutOf, file.base]);
 
@@ -386,6 +400,7 @@ export function App() {
   const margins = section.margins ?? {};
 
   return (
+    <Profiler id="app" onRender={(_id, _phase, ms) => { if (SELFTEST) performance.measure("pw:render", { start: performance.now() - ms, end: performance.now() }); }}>
     <div className="app">
       <Ribbon
         view={v} doc={file.base} mode={mode}
@@ -442,7 +457,7 @@ export function App() {
       <footer className="status">
         <span>{file.name}</span>
         {mode === "print" && layout && <span>{layout.pages.length} page{layout.pages.length > 1 ? "s" : ""}</span>}
-        <span>{v ? wordCount(v.state.doc) : 0} words</span>
+        <span>{v ? countWords(v.state.doc) : 0} words</span>
         <button className="link" onClick={() => setSpelling((on) => !on)} title="Turn spell checking on or off">
           {spelling ? `Spelling: ${v ? (spellKey.getState(v.state)?.issues.length ?? 0) : 0} to review` : "Spelling: off"}
         </button>
@@ -479,5 +494,6 @@ export function App() {
         </aside>
       )}
     </div>
+    </Profiler>
   );
 }

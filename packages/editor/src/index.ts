@@ -4,7 +4,7 @@ export { createRender, paragraphStyles, runCss } from "./render.js";
 export { isActive, paragraphProp, setParagraph, toggleRun, wordCount } from "./commands.js";
 export { blankDocument } from "./blank.js";
 export { resolvePageStarts, type ResolvedStart } from "./pages.js";
-export { PAGE_GAP, pagination, paginationKey, type PagedOptions } from "./paged.js";
+export { PAGE_GAP, pagination, paginationKey, type PagedOptions, mark, timed } from "./paged.js";
 export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
 export { changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, toggleList } from "./lists.js";
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";

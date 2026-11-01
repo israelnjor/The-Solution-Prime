@@ -73,6 +73,7 @@ see `apps/word/src-tauri/capabilities/default.json`.
 | [packages/pdf/](packages/pdf/) | `@prime/pdf` — PDF export from the layout engine: `node packages/pdf/dist/cli.js in.docx out.pdf` (ADR-008) |
 | [experiments/e1-docx-roundtrip/](experiments/e1-docx-roundtrip/) | Experiment 1: DOCX round-trip fidelity harness, fixtures and candidates |
 | [experiments/e2-layout/](experiments/e2-layout/) | Experiment 2: layout engine vs Word, marker by marker |
+| [experiments/e5-performance/](experiments/e5-performance/) | Experiment 5: typing speed and page alignment in a ~145-page document |
 | [scripts/try-docx.ps1](scripts/try-docx.ps1) | Test your own `.docx` files: `.\scripts\try-docx.ps1 <file-or-folder> [-OpenInWord]` |
 
 ## Setup (Windows)

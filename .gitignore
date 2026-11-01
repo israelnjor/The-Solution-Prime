@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 experiments/*/corpus-private/
 apps/word/public/dictionaries/
+experiments/e5-performance/*.docx
