@@ -8,7 +8,15 @@
 #>
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
+$release = Join-Path $root "apps\word\src-tauri\target\release"
+$exe = Join-Path $release "prime-word.exe"
 $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
+
+# A running Prime Word locks its .exe against deletion but not renaming (see build-desktop.ps1).
+Get-ChildItem $release -Filter "prime-word.old-*.exe" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+if (Test-Path $exe) {
+  try { Rename-Item $exe "prime-word.old-$(Get-Date -Format yyyyMMddHHmmss).exe" } catch { Write-Host "Could not move the old build aside: $($_.Exception.Message)" }
+}
 
 Push-Location $root
 try {

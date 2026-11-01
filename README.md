@@ -26,17 +26,25 @@ Browser (no Rust needed): `npm run dev` from the repo root, then open http://loc
 file. To rebuild the desktop app while Prime Word is open, use `scripts\build-desktop.ps1` (it moves
 the running .exe aside; restart Prime Word to get the new build).
 
-Editing (ribbon tabs Home / Insert / Table):
+**Installer:** `scripts\build-installer.ps1` builds
+`apps\word\src-tauri\target\release\bundle\nsis\Prime Word_<version>_x64-setup.exe`. It installs for
+the current user (no administrator prompt), with a Start menu entry under *Prime Productivity*,
+*Open with → Prime Word* for `.docx` files and an uninstaller in Settings → Apps. The first build
+downloads the NSIS tools from Tauri's official releases; Tauri checks their hashes.
+
+Editing (ribbon tabs Home / Insert / Layout / Table):
 
 | | |
 |---|---|
 | Text | Font, size, colour, highlight; Bold/Italic/Underline/Strike (Ctrl+B/I/U); paragraph styles |
-| Paragraphs | Bullets, numbering, list levels (Tab / Shift+Tab; Enter on an empty item ends the list); alignment |
+| Paragraphs | Bullets, numbering, list levels (Tab / Shift+Tab; Enter on an empty item ends the list); alignment; line spacing (1.0–3.0, at least, exactly), spacing before/after, indents and hanging indent (Paragraph dialog); borders (bottom / top / box) |
 | Insert | Page break (Ctrl+Enter), table, picture, hyperlink (Ctrl+K) |
 | Tables | Rows above/below, columns left/right, delete row/column/table; Tab / Shift+Tab move between cells (Tab in the last cell adds a row) |
 | Find | Find (Ctrl+F) and Replace (Ctrl+H) with match case / whole words |
 | Layout | Margins (Normal / Narrow / Moderate / Wide / custom in cm), orientation, paper size (Letter, A4, Legal, A5, Executive) — whole document |
-| Header & Footer | Edit the section's header and footer (Insert tab); insert page number or "Page X of Y" fields |
+| Header & Footer | Per section (Insert tab): different first page, "Same as previous section", page number and "Page X of Y" fields |
+| New | Templates: Blank, Letter, Report, CV, Invoice, Memo |
+| Spelling | Offline, British English by default (US English for documents marked en-US), from the SCOWL Hunspell dictionaries (MIT/BSD). Red wavy underline; right-click for suggestions, Ignore All, Add to Dictionary. Skips acronyms, web and e-mail addresses. Toggle in the status bar |
 | Clipboard | Copy/paste within Prime Word is lossless (model properties travel in `data-pw-*` attributes). From Word and the web: headings, alignment, bold/italic/underline/strike, font, size, colour, highlight, super/subscript, links, bulleted/numbered and nested lists (incl. Word's own list markup), tables (borders, shading, merged columns) and embedded pictures |
 | View | Print Layout / Web Layout, zoom 25–200% |
 | Output | Export PDF (fonts embedded from the installed fonts), Print (Ctrl+P: opens the PDF in the default viewer) |
