@@ -25,6 +25,9 @@ class Word:
     def __exit__(self, *exc):
         try:
             self.app.Quit(WD_DO_NOT_SAVE_CHANGES)
+        except Exception:
+            # Word shares one hidden instance between sessions: another session may have closed it already.
+            pass
         finally:
             pythoncom.CoUninitialize()
 

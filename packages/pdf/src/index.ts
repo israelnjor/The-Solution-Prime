@@ -3,7 +3,7 @@
  * print and preview — the PDF shows exactly the pages the layout engine computed.
  */
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, rgb } from "pdf-lib";
+import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, rgb } from "pdf-lib";
 import type { FontKey, ImageSource, LayoutResult, Page, Segment } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 
@@ -11,6 +11,17 @@ import type { PrimeDocument } from "@prime/pdm";
 export interface FontSource {
   fontData(font: FontKey): Uint8Array | undefined;
   split?(text: string, font: FontKey): { text: string; font: FontKey }[];
+}
+
+/**
+ * Symbol fonts (Symbol, Wingdings…): Word writes their characters at U+F020–F0FF, while the fonts
+ * themselves often list them at 0x20–0xFF. Use the font's own code where it has only that one.
+ */
+export function symbolText(text: string, has: (cp: number) => boolean): string {
+  return text.replace(/[-]/g, (c) => {
+    const cp = c.charCodeAt(0);
+    return !has(cp) && has(cp - 0xf000) ? String.fromCharCode(cp - 0xf000) : c;
+  });
 }
 
 const HIGHLIGHT: Record<string, string> = {
@@ -83,6 +94,14 @@ class Renderer {
         else out.drawRectangle({ x: img.x, y: Y(img.y + img.height), width: img.width, height: img.height, borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5 });
       }
       for (const seg of line.segments) await this.segment(out, p, line.baseline, seg);
+      // Ink: each stroke as a path (SVG coordinates: from the page's top-left, y downwards).
+      for (const st of line.strokes ?? []) {
+        if (st.points.length < 2) continue;
+        const pts = st.points.length === 2 ? [...st.points, st.points[0] + 0.01, st.points[1]] : st.points;
+        let path = `M ${pts[0]} ${pts[1]}`;
+        for (let i = 2; i < pts.length; i += 2) path += ` L ${pts[i]} ${pts[i + 1]}`;
+        out.drawSvgPath(path, { x: 0, y: p.height, borderColor: color(st.color), borderWidth: st.width, borderLineCap: LineCapStyle.Round });
+      }
       for (const r of line.rules) {
         out.drawLine({ start: { x: r.x1, y: Y(r.y1) }, end: { x: r.x2, y: Y(r.y2) }, thickness: r.width, color: rgb(0, 0, 0) });
       }
@@ -96,8 +115,11 @@ class Renderer {
     const y = p.height - (baseline + shift + (seg.dy ?? 0));
     const pieces = this.source.split ? this.source.split(text, seg.font) : [{ text, font: seg.font }];
     let x = seg.x;
-    for (const piece of pieces) {
-      const font = await this.font(piece.font);
+    for (const raw of pieces) {
+      const font = await this.font(raw.font);
+      // pdf-lib keeps the fontkit font it embeds; it tells which characters the font has.
+      const face = (font as unknown as { embedder?: { font?: { hasGlyphForCodePoint?(cp: number): boolean } } }).embedder?.font;
+      const piece = face?.hasGlyphForCodePoint ? { ...raw, text: symbolText(raw.text, (cp) => face.hasGlyphForCodePoint!(cp)) } : raw;
       let width: number;
       try {
         width = font.widthOfTextAtSize(piece.text, size);

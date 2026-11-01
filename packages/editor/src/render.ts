@@ -7,11 +7,12 @@
  * Equations are drawn as SVG by the math typesetter.
  */
 import { MathTypesetter, type Measurer, type ResolvedRun, Resolver } from "@prime/layout";
-import type { Paragraph, PrimeDocument } from "@prime/pdm";
+import { type FloatInfo, type Paragraph, type PrimeDocument, paragraphText, type TextInline } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { Plugin, type Transaction } from "prosemirror-state";
 import { AddMarkStep, RemoveMarkStep, ReplaceStep } from "prosemirror-transform";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { inkSvg } from "./ink.js";
 import type { Render } from "./schema.js";
 
 const pt = (v: number) => `${Math.round(v * 100) / 100}pt`;
@@ -116,6 +117,10 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
         p.vMerge === "continue" ? "border-top-color:transparent" : "",
         p.vAlign ? `vertical-align:${p.vAlign === "center" ? "middle" : p.vAlign}` : ""].filter(Boolean);
       if (css.length) attrs.style = css.join(";");
+      // w:hideMark: an empty cell's paragraph mark adds no height to its row (as in the layout).
+      if (p.extra?.some((x: { name: string }) => x.name === "w:hideMark") && node.childCount === 1 && node.firstChild!.childCount === 0) {
+        attrs.class = "pw-hidemark";
+      }
       return ["td", attrs, 0];
     },
     image: (node) => {
@@ -128,6 +133,9 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
       }];
     },
     runPreserved: (node) => {
+      // Floating pictures and text boxes: drawn by the layout in Print Layout (see paged.ts), and below
+      // their paragraph in Web Layout (see floatCanvas). The anchor itself shows nothing.
+      if (node.attrs.float) return ["span", { class: "pw-float-anchor", "data-pw-runpreserved": json(node.attrs) }];
       const p = node.attrs.preserved as { name: string; xml: string };
       const extent = /<wp:inline[ >][\s\S]*?<wp:extent cx="(\d+)" cy="(\d+)"/.exec(p.xml);
       const relId = /r:embed="([^"]+)"/.exec(p.xml)?.[1];
@@ -144,6 +152,7 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
       }
       const data = { "data-pw-runpreserved": json(node.attrs) };
       if (p.name === "w:footnoteReference") return ["sup", { class: "pw-chip", contenteditable: "false", ...data }, "†"];
+      if (p.name === "w:commentReference") return chip("💬", "Comment — see Review → Comments", data);
       return chip("◆", `${p.name} (kept unchanged; not editable yet)`, data);
     },
     inlinePreserved: (node) => {
@@ -151,7 +160,7 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
       const data = { "data-pw-inlinepreserved": json(node.attrs) };
       if (p.name === "m:oMath" || p.name === "m:oMathPara") return mathSvg(p.xml, data["data-pw-inlinepreserved"]);
       if (/^w:(bookmark|commentRange|perm|proofErr)/.test(p.name)) return ["span", { class: "pw-hidden", ...data }];
-      if (p.name === "w:commentReference") return chip("💬", "Comment (kept unchanged; not editable yet)", data);
+      if (p.name === "w:commentReference") return chip("💬", "Comment — see Review → Comments", data);
       return chip("◆", `${p.name} (kept unchanged; not editable yet)`, data);
     },
     blockPreserved: (node) => ["div", { class: "pw-chip-block", contenteditable: "false", "data-pw-preserved": json(node.attrs.preserved) },
@@ -180,23 +189,92 @@ function textOnly(tr: Transaction): boolean {
   });
 }
 
+/**
+ * Web Layout (no pages, no layout engine): a paragraph's floating objects in one block below it,
+ * placed relative to each other as in the document (offsets from the column and the paragraph);
+ * the text continues below them. Text box heights are estimated from their text.
+ */
+function floatCanvas(floats: FloatInfo[], doc: PrimeDocument, resolver: Resolver): HTMLElement {
+  const section = doc.sections[0]?.props ?? {};
+  const mg = section.margins ?? {};
+  const W = (section.pageWidth ?? 612) - (mg.left ?? 72) - (mg.right ?? 72);
+  const items = floats.flatMap((f) => {
+    const x = f.x.offset !== undefined ? f.x.offset - (f.x.from === "page" || f.x.from === "leftMargin" ? mg.left ?? 72 : 0)
+      : f.x.align === "right" || f.x.align === "outside" ? W - f.width : f.x.align === "center" ? (W - f.width) / 2 : 0;
+    const y = ["paragraph", "line"].includes(f.y.from) ? f.y.offset ?? 0 : 0;
+    const part = f.imagePart ? doc.package.parts.find((p) => p.name === f.imagePart) : undefined;
+    const el = document.createElement("span");
+    if (part) {
+      const img = document.createElement("img");
+      img.src = dataUrl(IMAGE_TYPES[part.name.split(".").pop()!.toLowerCase()] ?? "application/octet-stream", part.data);
+      img.alt = "";
+      img.style.cssText = "width:100%;height:100%";
+      el.appendChild(img);
+      return [{ el, x, y, width: f.width, height: f.height }];
+    }
+    if (f.kind === "ink" && f.ink) {
+      el.appendChild(inkSvg(f.ink, f.width, f.height));
+      return [{ el, x, y, width: f.width, height: f.height }];
+    }
+    if (f.kind !== "textbox" || !f.blocks) return [];
+    let chars = 0;
+    for (const b of f.blocks) {
+      if (b.type !== "paragraph") continue;
+      const rp = resolver.paragraph({ ...b, content: [] });
+      const first = b.content.find((i): i is TextInline => i.type === "text");
+      const line = document.createElement("span");
+      line.style.cssText = `display:block;${runCss(resolver.run(rp.styleId, first?.props ?? b.props.markRun))};text-align:${rp.align === "center" ? "center" : rp.align === "right" ? "right" : "left"}`;
+      line.textContent = paragraphText(b);
+      chars += line.textContent.length;
+      el.appendChild(line);
+    }
+    const height = f.autoHeight || f.height < 1 ? Math.max(1, Math.ceil((chars * 5) / Math.max(f.width, 1))) * 14 : f.height;
+    return [{ el, x, y, width: f.width, height }];
+  });
+  const canvas = document.createElement("div");
+  canvas.className = "pw-float-canvas";
+  canvas.contentEditable = "false";
+  if (!items.length) return canvas;
+  const top = Math.min(...items.map((i) => i.y));
+  const left = Math.min(0, ...items.map((i) => i.x));
+  canvas.style.height = `${Math.max(...items.map((i) => i.y + i.height)) - top}pt`;
+  for (const i of items) {
+    i.el.style.cssText += `;position:absolute;left:${i.x - left}pt;top:${i.y - top}pt;width:${i.width}pt;height:${i.height}pt`;
+    canvas.appendChild(i.el);
+  }
+  return canvas;
+}
+
 export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin {
   const build = (pm: Node): DecorationSet => {
     const resolver = new Resolver(doc);
+    // A second resolver to look at the next paragraph (the first counts list numbers in order).
+    const peek = new Resolver(doc);
     const decorations: Decoration[] = [];
     const visit = (node: Node, pos: number, tableStyle?: string) => {
-      node.forEach((child, offset) => {
+      let prev: { styleId: string; contextual: boolean } | undefined;
+      node.forEach((child, offset, index) => {
         const at = pos + offset;
+        if (child.type.name !== "paragraph") prev = undefined;
         if (child.type.name === "paragraph") {
           const p: Paragraph = { type: "paragraph", props: child.attrs.props, content: [] };
           const rp = resolver.paragraph(p, tableStyle);
-          const run = resolver.run(rp.styleId, undefined, tableStyle);
+          // Contextual spacing: no space between paragraphs of the same style that both ask for it.
+          const next = node.maybeChild(index + 1);
+          const nrp = next?.type.name === "paragraph" ? peek.paragraph({ type: "paragraph", props: next.attrs.props, content: [] }, tableStyle) : undefined;
+          const joinBefore = !!prev && rp.contextualSpacing && prev.contextual && prev.styleId === rp.styleId;
+          const joinAfter = !!nrp && rp.contextualSpacing && nrp.contextualSpacing && nrp.styleId === rp.styleId;
+          prev = { styleId: rp.styleId, contextual: rp.contextualSpacing };
+          // The paragraph mark's formatting (what Word sizes an empty line by, and usually the text's):
+          // the paragraph's base font and line height. The style's own font can differ (e.g. a large
+          // Title style with 16pt text), and a mismatched base font would stretch every line.
+          const run = rp.mark;
           const lineHeight = rp.lineRule === "exact" ? rp.line / 20
             : rp.lineRule === "atLeast" ? Math.max(rp.line / 20, measurer.metrics({ family: run.font, bold: run.bold, italic: run.italic }).lineHeight * run.size)
             : measurer.metrics({ family: run.font, bold: run.bold, italic: run.italic }).lineHeight * run.size * (rp.line / 240);
           const css = [
             runCss(run),
-            `margin:${pt(rp.spaceBefore)} ${pt(rp.right)} ${pt(rp.spaceAfter)} ${pt(rp.left)}`,
+            `margin:${pt(joinBefore ? 0 : rp.spaceBefore)} ${pt(rp.right)} ${pt(joinAfter ? 0 : rp.spaceAfter)} ${pt(rp.left)}`,
             `text-indent:${pt(rp.firstLine)}`,
             `text-align:${rp.align === "both" || rp.align === "distribute" ? "justify" : rp.align === "end" ? "right" : rp.align === "start" ? "left" : rp.align}`,
             `line-height:${pt(lineHeight)}`,
@@ -206,6 +284,12 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
             }),
           ].filter(Boolean).join(";");
           decorations.push(Decoration.node(at, at + child.nodeSize, { style: css, "data-style": rp.styleId }));
+          const floats: FloatInfo[] = [];
+          child.forEach((n) => { if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float); });
+          if (floats.length) {
+            const key = `floats-${floats.map((f) => `${f.x.offset}:${f.y.offset}:${f.width}:${f.height}`).join("|")}`;
+            decorations.push(Decoration.widget(at + child.nodeSize, () => floatCanvas(floats, doc, resolver), { side: -1, key }));
+          }
           if (rp.listLabel !== undefined) {
             const label = rp.listLabel;
             const lr = rp.labelRun ?? rp.mark;
@@ -214,7 +298,9 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
               const span = document.createElement("span");
               span.className = "pw-list-label";
               span.contentEditable = "false";
-              span.style.cssText = `${runCss(lr)};display:inline-block;min-width:${pt(width)};text-indent:0`;
+              // line-height 0: the label's font (e.g. Symbol) must not make the line taller than the
+              // layout's, or the screen's pages would run longer than the document's.
+              span.style.cssText = `${runCss(lr)};display:inline-block;min-width:${pt(width)};text-indent:0;line-height:0`;
               span.textContent = label;
               return span;
             }, { side: -1, key: `label-${at}-${label}` }));

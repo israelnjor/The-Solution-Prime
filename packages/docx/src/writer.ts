@@ -91,6 +91,7 @@ class Writer {
     this.put(main, encoder.encode(`${XML_DECL}<w:document${attrString(rootAttrs, "")}><w:body>${body}</w:body></w:document>`),
       pkg.contentTypes.overrides[main] ?? ContentType.document);
     this.put(relsPath(main), encoder.encode(rels.xml()));
+    this.pruneComments(body);
     if (!this.files["_rels/.rels"]) {
       // A document created from scratch has no package relationships to carry through.
       const root = new Rels("");
@@ -99,6 +100,19 @@ class Writer {
     }
     this.put("[Content_Types].xml", encoder.encode(this.contentTypes()));
     return zipSync(this.files, { level: 6 });
+  }
+
+  /**
+   * Comments whose markers are no longer in the text (deleted, or undone after being added) are left out
+   * of word/comments.xml, so Word does not show comments on nothing.
+   */
+  private pruneComments(body: string) {
+    const file = this.files["word/comments.xml"];
+    if (!file) return;
+    const used = new Set([...body.matchAll(/<w:commentReference\b[^>]*w:id="([^"]*)"/g)].map((m) => m[1]));
+    const xml = new TextDecoder().decode(file);
+    const kept = xml.replace(/<w:comment\b[^>]*?w:id="([^"]*)"[\s\S]*?<\/w:comment>/g, (whole, id) => (used.has(id) ? whole : ""));
+    if (kept !== xml) this.files["word/comments.xml"] = encoder.encode(kept);
   }
 
   private put(name: string, data: Uint8Array, contentType?: string) {

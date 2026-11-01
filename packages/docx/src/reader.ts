@@ -1,9 +1,10 @@
 /** DOCX -> Prime Document Model. */
 import { unzipSync } from "fflate";
 import {
-  type Block, type HeaderFooterKind, type ImageInline, type Inline, type Paragraph, type PrimeDocument,
+  type Block, type FloatInfo, type FloatPosition, type HeaderFooterKind, type ImageInline, type Inline, type Paragraph, type PrimeDocument,
   type Relationship, SCHEMA_VERSION, type Section, type Story, type Table, type TableRow,
 } from "@prime/pdm";
+import { readInk } from "./inkml.js";
 import { IMAGE_TYPES, MODELED_REL_TYPES, RelType, EMU_PER_PT } from "./ooxml.js";
 import { readCellProps, readParagraphProps, readRowProps, readRunProps, readSectionProps, readTableProps } from "./props.js";
 import { readNumbering, readStyles } from "./styles.js";
@@ -300,16 +301,94 @@ class Reader {
         add({ type: "fieldChar", kind: attr(c, "fldCharType") as "begin" | "separate" | "end" });
       } else if (n === "w:instrText" || n === "w:delInstrText") add({ type: "instr", text: textContent(c) });
       else if (n === "w:drawing") {
-        add(this.readDrawing(c, ctx) ?? this.runPreserved(c, ctx, child(c, "wp:inline") ? "w:drawing/inline" : n));
-      }
-      else add(this.runPreserved(c, ctx));
+        add(this.readDrawing(c, ctx) ?? this.floating(c, c, ctx) ?? this.runPreserved(c, ctx, child(c, "wp:inline") ? "w:drawing/inline" : n));
+      } else if (n === "mc:AlternateContent") {
+        // Word 2010+ shapes and text boxes: the modern form is the first choice (VML is the fallback).
+        const drawing = elements(c).filter((x) => qname(x) === "mc:Choice").map((x) => child(x, "w:drawing")).find(Boolean);
+        add(this.floating(c, drawing, ctx) ?? this.runPreserved(c, ctx));
+      } else add(this.runPreserved(c, ctx));
     }
     return out;
   }
 
-  runPreserved(e: Element, ctx: StoryContext, label = qname(e)): Extract<Inline, { type: "runPreserved" }> {
-    if (!["w:sym", "w:noBreakHyphen", "w:softHyphen"].includes(label)) this.notePreserved(label);
+  runPreserved(e: Element, ctx: StoryContext, label = qname(e), shown = false): Extract<Inline, { type: "runPreserved" }> {
+    if (!shown && !["w:sym", "w:noBreakHyphen", "w:softHyphen"].includes(label)) this.notePreserved(label);
     return { type: "runPreserved", preserved: ctx.keep(e) };
+  }
+
+  /**
+   * A floating drawing (wp:anchor) Prime Word can show: kept verbatim, with its layout description.
+   * Not reported as "kept unchanged" (it is shown, moved and resized); plain shapes still are.
+   */
+  floating(e: Element, drawing: Element | undefined, ctx: StoryContext): Extract<Inline, { type: "runPreserved" }> | undefined {
+    const anchor = drawing && child(drawing, "wp:anchor");
+    const float = anchor && this.readFloat(anchor, ctx);
+    if (!float) return undefined;
+    return { ...this.runPreserved(e, ctx, qname(e), float.kind !== "shape"), float };
+  }
+
+  readFloat(anchor: Element, ctx: StoryContext): FloatInfo | undefined {
+    const pt = (v: string | null | undefined) => Number(v ?? 0) / EMU_PER_PT;
+    const extent = child(anchor, "wp:extent");
+    if (!extent) return undefined;
+    const position = (name: string): FloatPosition => {
+      const e = child(anchor, name);
+      const offset = e && child(e, "wp:posOffset");
+      const align = e && child(e, "wp:align");
+      return {
+        from: e?.getAttribute("relativeFrom") ?? "column",
+        ...(offset ? { offset: pt(textContent(offset)) } : align ? { align: textContent(align).trim() } : { offset: 0 }),
+      };
+    };
+    const wrapEl = elements(anchor).find((e) => /^wp:wrap/.test(qname(e)));
+    const wrapName = wrapEl ? qname(wrapEl).slice("wp:wrap".length) : "None";
+    const wrap = ({ Square: "square", Tight: "tight", Through: "through", TopAndBottom: "topAndBottom" } as const)[wrapName as "Square"] ?? "none";
+    const side = wrapEl?.getAttribute("wrapText") as FloatInfo["side"] | null;
+    const data = child(child(anchor, "a:graphic") ?? anchor, "a:graphicData");
+    const uri = data?.getAttribute("uri") ?? "";
+    const float: FloatInfo = {
+      kind: "shape",
+      width: pt(extent.getAttribute("cx")),
+      height: pt(extent.getAttribute("cy")),
+      x: position("wp:positionH"),
+      y: position("wp:positionV"),
+      wrap,
+      ...(side ? { side } : {}),
+      ...(anchor.getAttribute("behindDoc") === "1" ? { behind: true } : {}),
+      dist: {
+        top: pt(anchor.getAttribute("distT")), bottom: pt(anchor.getAttribute("distB")),
+        left: pt(anchor.getAttribute("distL")), right: pt(anchor.getAttribute("distR")),
+      },
+    };
+    if (data && uri.endsWith("/picture")) {
+      const blip = data.getElementsByTagNameNS(NS.a, "blip")[0];
+      const rel = blip && ctx.rels.get(attr(blip, "embed", NS.r) ?? "");
+      if (rel && !rel.external) return { ...float, kind: "picture", imagePart: rel.target };
+      return float;
+    }
+    if (data && uri.endsWith("/wordprocessingInk")) {
+      // Ink: its strokes live in a part of their own (word/ink/inkN.xml).
+      const part = elements(data).find((e) => e.localName === "contentPart");
+      const rel = part && ctx.rels.get(attr(part, "id", NS.r) ?? "");
+      const file = rel && !rel.external ? this.files[rel.target] : undefined;
+      const ink = file ? readInk(this.decoder.decode(file)) : undefined;
+      return ink ? { ...float, kind: "ink", ink } : float;
+    }
+    const shape = data && child(data, "wps:wsp");
+    const content = shape && child(shape, "wps:txbx") && child(child(shape, "wps:txbx")!, "w:txbxContent");
+    if (shape && content) {
+      const body = child(shape, "wps:bodyPr");
+      const inset = (name: string, fallback: number) => (body?.getAttribute(name) != null ? pt(body.getAttribute(name)) : fallback);
+      return {
+        ...float,
+        kind: "textbox",
+        blocks: this.readBlocks(elements(content), ctx),
+        // Word's default inner margins: 0.1" left and right, 0.05" top and bottom.
+        insets: { left: inset("lIns", 7.2), right: inset("rIns", 7.2), top: inset("tIns", 3.6), bottom: inset("bIns", 3.6) },
+        ...(body && child(body, "a:spAutoFit") ? { autoHeight: true } : {}),
+      };
+    }
+    return float;
   }
 
   /** Inline pictures become ImageInline; anything fancier (floating, cropped, shapes) is preserved. */
@@ -421,6 +500,30 @@ function mergeText(items: Inline[]): Inline[] {
   return out;
 }
 
+/** Why a file is not something we can open, in words for the person opening it. */
+function notADocx(data: Uint8Array): string {
+  const starts = (...bytes: number[]) => bytes.every((b, i) => data[i] === b);
+  if (!data.length) return "The file is empty.";
+  if (starts(0x25, 0x50, 0x44, 0x46)) return "This is a PDF file, not a Word document.";
+  if (starts(0xd0, 0xcf, 0x11, 0xe0)) {
+    return "This is an older Word document (.doc). Prime Word opens .docx files: open it in Word and use Save As → Word Document (.docx).";
+  }
+  if (starts(0x7b, 0x5c, 0x72, 0x74, 0x66)) return "This is a Rich Text (.rtf) file, not a Word document (.docx).";
+  return "The file is damaged or is not a Word document (.docx). If it was downloaded or copied, try getting it again.";
+}
+
 export function readDocx(data: Uint8Array): ReadResult {
-  return new Reader(data).read();
+  let reader: Reader;
+  try {
+    reader = new Reader(data);
+  } catch {
+    throw new Error(notADocx(data));
+  }
+  try {
+    return reader.read();
+  } catch (e) {
+    const message = (e as Error).message ?? String(e);
+    if (/^XML parse error/.test(message)) throw new Error("Part of this document is damaged and cannot be read.");
+    throw e;
+  }
 }

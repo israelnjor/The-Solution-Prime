@@ -9,6 +9,7 @@ export const NS = {
   a: "http://schemas.openxmlformats.org/drawingml/2006/main",
   pic: "http://schemas.openxmlformats.org/drawingml/2006/picture",
   mc: "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  wps: "http://schemas.microsoft.com/office/word/2010/wordprocessingShape",
   v: "urn:schemas-microsoft-com:vml",
   xml: "http://www.w3.org/XML/1998/namespace",
   pr: "http://schemas.openxmlformats.org/package/2006/relationships",

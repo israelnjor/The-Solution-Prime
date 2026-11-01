@@ -66,7 +66,7 @@ function inlines(items: Inline[], schema: Schema, marks: readonly Mark[]): Node[
         break;
       case "fieldChar": out.push(n.field_char.create({ props: i.props ?? {}, kind: i.kind }, null, marks)); break;
       case "instr": out.push(n.instr.create({ props: i.props ?? {}, text: i.text }, null, marks)); break;
-      case "runPreserved": out.push(n.run_preserved.create({ props: i.props ?? {}, preserved: i.preserved }, null, marks)); break;
+      case "runPreserved": out.push(n.run_preserved.create({ props: i.props ?? {}, preserved: i.preserved, float: i.float ?? null }, null, marks)); break;
       case "preserved": out.push(n.inline_preserved.create({ preserved: i.preserved }, null, marks)); break;
       case "link":
         out.push(...inlines(i.content, schema, [...marks, schema.marks.link.create({
@@ -188,7 +188,7 @@ function leaf(node: Node): Inline {
       };
     case "field_char": return { type: "fieldChar", kind: a.kind, ...props(a.props) };
     case "instr": return { type: "instr", text: a.text, ...props(a.props) };
-    case "run_preserved": return { type: "runPreserved", preserved: a.preserved, ...props(a.props) };
+    case "run_preserved": return { type: "runPreserved", preserved: a.preserved, ...(a.float ? { float: a.float } : {}), ...props(a.props) };
     default: return { type: "preserved", preserved: a.preserved };
   }
 }

@@ -156,6 +156,20 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     })
 }
 
+/// A save failure in words for the person saving (the system's own message kept at the end).
+fn save_error(e: &std::io::Error) -> String {
+    use std::io::ErrorKind;
+    let why = match e.kind() {
+        ErrorKind::PermissionDenied => "The file is read-only, open in another program, or in a folder you cannot change. Use Save As to save a copy elsewhere.",
+        ErrorKind::NotFound => "The folder no longer exists (was it moved, or the drive removed?). Use Save As to choose another place.",
+        ErrorKind::StorageFull => "The disk is full. Free some space, or use Save As to save to another drive.",
+        _ if e.raw_os_error() == Some(112) => "The disk is full. Free some space, or use Save As to save to another drive.",
+        _ if e.raw_os_error() == Some(32) || e.raw_os_error() == Some(33) => "The file is open in another program. Close it there, or use Save As.",
+        _ => "The file could not be written.",
+    };
+    format!("{why} ({e})")
+}
+
 /// Percent-decoding for header values (paths travel percent-encoded: headers are ASCII-only).
 fn decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -206,7 +220,7 @@ fn save_document(app: AppHandle, request: Request) -> Result<u64, String> {
             return Err("CHANGED_ON_DISK".into());
         }
     }
-    atomic_write(&path, raw_body(&request)?).map_err(|e| e.to_string())?;
+    atomic_write(&path, raw_body(&request)?).map_err(|e| save_error(&e))?;
     remember(&app, &name);
     Ok(modified_ms(&path).unwrap_or(0))
 }

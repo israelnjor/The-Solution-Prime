@@ -1,0 +1,19 @@
+{
+  "name": "@prime/pdf-import",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PDF → Word: rebuilds an editable document from a PDF (ADR-009). pdf.js reads the PDF; the reconstruction is ours.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "prime-pdf-import": "dist/cli.js"
+  },
+  "dependencies": {
+    "@prime/docx": "0.1.0",
+    "@prime/editor": "0.1.0",
+    "@prime/pdm": "0.1.0",
+    "fflate": "0.8.2",
+    "pdfjs-dist": "6.4.299"
+  }
+}

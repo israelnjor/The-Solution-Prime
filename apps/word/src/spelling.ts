@@ -70,17 +70,24 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
     if (!node.isTextblock) return true;
     let text = "";
     const at: number[] = [];
+    // Text not to check: links and fields (addresses, references), and web/e-mail addresses typed as text.
+    const skip: boolean[] = [];
     node.forEach((child, offset) => {
       const s = child.isText ? child.text! : " ";
-      for (let i = 0; i < s.length; i++) at.push(pos + 1 + offset + i);
+      const linked = child.marks.some((m) => m.type.name === "link" || m.type.name === "field");
+      for (let i = 0; i < s.length; i++) { at.push(pos + 1 + offset + i); skip.push(linked); }
       text += s;
     });
+    for (const m of text.matchAll(/\S*(?:https?:\/\/|www\.|@)\S*/giu)) {
+      for (let i = m.index!; i < m.index! + m[0].length; i++) skip[i] = true;
+    }
     for (const m of text.matchAll(WORD)) {
       const raw = m[0];
       const word = raw.replace(/’/g, "'").replace(/^'+|'+$/g, "");
-      if (word.length < 2 || ignored.has(word)) continue;
+      if (word.length < 2 || ignored.has(word) || skip[m.index!]) continue;
       if (word === word.toUpperCase()) continue; // acronyms: GDP, NASA
-      // Part of an address or code (example.com, someone@mail, C:\path)?
+      if (!/^[\p{Script=Latin}']+$/u.test(word)) continue; // other scripts (Greek, Cyrillic…): not an English dictionary's call
+      // Part of a file name, path or code (report.docx, C:\path, snake_case)?
       const before = text[m.index! - 1] ?? " ";
       const after = text[m.index! + raw.length] ?? " ";
       if (/[@./\\_:]/.test(before) || /[@\\/_]/.test(after) || (after === "." && /\p{L}/u.test(text[m.index! + raw.length + 1] ?? ""))) continue;

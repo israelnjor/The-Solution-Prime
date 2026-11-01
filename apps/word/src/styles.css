@@ -100,7 +100,8 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .pw-editor p { margin: 0; min-height: 1em; }
 .pw-editor a { color: #0563c1; }
 .pw-table { border-collapse: collapse; table-layout: fixed; margin-left: -5.4pt; }
-.pw-table td { padding: 0 5.4pt; vertical-align: top; border: 0.5pt dotted #c8c8c8; }
+/* Word's 5.4pt cell margins, less half of each 0.5pt border (which CSS takes from the cell; Word does not). */
+.pw-table td { padding: 0 5.15pt; vertical-align: top; border: 0.5pt dotted #c8c8c8; }
 .pw-table.pw-borders td { border: 0.5pt solid #000; }
 .pw-hidden { display: none; }
 .pw-chip { display: inline-block; padding: 0 3px; border-radius: 3px; background: #eef2f8; color: #5a6b85; font-size: 0.85em; cursor: default; }
@@ -229,3 +230,67 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .recent-remove:hover { color: #000; }
 .recent-empty { color: var(--muted); margin: 6px 10px; }
 .templates h4 { margin: 16px 0 6px; }
+/* Room for floating pictures and text boxes where the layout wraps text around them (paged.ts). */
+.pw-wrap { pointer-events: none; user-select: none; }
+/* Floating objects: drawn by the layout in Print Layout; in Web Layout, floated beside the text. */
+.pw-float-anchor { display: none; }
+.pw-float-canvas { position: relative; margin: 6pt 0; pointer-events: none; user-select: none; white-space: normal; }
+.pw-float-canvas img { display: block; }
+.pw-editor.paged .pw-float-canvas { display: none; }
+/* A floating picture or text box, inside its anchor paragraph (which is position: relative). */
+.pw-float { position: absolute; z-index: 1; user-select: none; cursor: move; }
+.pw-float.pw-float-selected { outline: 1px solid #2b579a; }
+.pw-float-handle { display: none; position: absolute; width: 8px; height: 8px; background: #fff; border: 1px solid #2b579a; z-index: 2; }
+.pw-float-selected .pw-float-handle { display: block; }
+.pw-float-handle.pw-nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.pw-float-handle.pw-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.pw-float-handle.pw-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.pw-float-handle.pw-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.pw-float img { display: block; }
+.pw-float-text { position: absolute; white-space: pre; color: #000; }
+/* Empty cells marked w:hideMark take no height (see render.ts). */
+.pw-table td.pw-hidemark p { line-height: 0 !important; min-height: 0 !important; margin: 0 !important; font-size: 0 !important; }
+/* At the top of a page Word drops a paragraph's space before (the layout does too). */
+.pw-editor .pw-page-gap + p { margin-top: 0 !important; }
+.pw-table td.pw-hidemark { border-color: transparent; }
+/* Review: commented text, markup views (All / No markup = final text / Original), comments pane. */
+.pw-commented { background: rgb(255 214 102 / 0.35); }
+.pw-comment-active { background: rgb(255 193 7 / 0.6); }
+.pw-markup-none del.pw-del, .pw-markup-original ins.pw-ins { display: none; }
+.pw-markup-none ins.pw-ins, .pw-markup-original del.pw-del { color: inherit; text-decoration: none; }
+.comments-pane {
+  position: fixed; right: 0; top: 150px; bottom: 32px; width: 300px; z-index: 30; overflow: auto;
+  background: #fafbfd; border-left: 1px solid var(--chrome-border); padding: 10px 12px; display: grid; align-content: start; gap: 10px;
+}
+.comments-pane header { display: flex; justify-content: space-between; align-items: center; }
+.comments-pane .author { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.comments-pane input, .comments-pane textarea { font: inherit; padding: 5px 7px; border: 1px solid var(--chrome-border); border-radius: 4px; resize: vertical; }
+.comments-pane .comment { background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; padding: 8px 10px; display: grid; gap: 4px; cursor: pointer; }
+.comments-pane .comment.active { border-color: #d39e00; box-shadow: 0 0 0 2px rgb(255 193 7 / 0.35); }
+.comments-pane .comment.new { cursor: default; }
+.comments-pane .meta span { color: var(--muted); font-size: 12px; }
+.comments-pane .quote { color: var(--muted); font-size: 12px; border-left: 3px solid #ffd666; padding-left: 6px; }
+.comments-pane .text { white-space: pre-wrap; }
+.comments-pane .actions { display: flex; justify-content: flex-end; gap: 6px; }
+.comments-pane .delete { justify-self: end; font-size: 12px; }
+.comments-pane .empty { color: var(--muted); }
+/* Home screen. */
+.tabs button.brand { font-weight: 600; color: var(--accent); margin-right: 16px; border: none; background: none; }
+.home { position: fixed; inset: 0; z-index: 70; display: grid; grid-template-columns: 220px 1fr; background: #fff; }
+.home-rail { display: flex; flex-direction: column; gap: 4px; padding: 18px 12px; background: var(--accent); color: #fff; }
+.home-rail .home-logo { font-size: 20px; font-weight: 700; margin: 0 8px 18px; }
+.home-rail button { text-align: left; font: inherit; color: #fff; background: none; border: none; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.home-rail button:hover, .home-rail button.on { background: rgb(255 255 255 / 0.16); }
+.home-rail kbd { opacity: 0.7; font-size: 11px; margin-left: 6px; }
+.home-rail-foot { margin-top: auto; opacity: 0.7; font-size: 12px; padding: 0 8px; }
+.home-main { overflow: auto; padding: 28px 40px 40px; display: grid; align-content: start; gap: 22px; }
+.home-main h1 { margin: 0; font-weight: 600; }
+.home-main h2 { font-size: 15px; margin: 0 0 10px; color: #333; }
+.home-row { display: flex; align-items: center; justify-content: space-between; max-width: 760px; }
+.home-row button { font: inherit; }
+.home-main .recent-list { max-width: 760px; }
+.home-recovery { background: #fff8e1; border: 1px solid #ffe08a; border-radius: 8px; padding: 12px 14px; max-width: 760px; }
+/* Keyboard focus is always visible (mouse clicks do not show it). */
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, [role="tab"]:focus-visible {
+  outline: 2px solid #2b579a; outline-offset: 1px;
+}

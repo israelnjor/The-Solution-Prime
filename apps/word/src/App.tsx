@@ -2,7 +2,7 @@ import { readDocx, writeDocx } from "@prime/docx";
 import {
   blankDocument, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
-  wordCount,
+  wordCount, floatEditing, reviewPlugin,
 } from "@prime/editor";
 import type { LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
@@ -27,7 +27,9 @@ import { PageSheets } from "./PageSheets";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
-import { LINK_EVENT, Ribbon } from "./Ribbon";
+import { LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
+import { CommentsPane } from "./CommentsPane";
+import { Home } from "./Home";
 
 /** Raised by Ctrl+P in the editor. */
 const PRINT_EVENT = "prime-word:print";
@@ -66,7 +68,8 @@ export function App() {
   const [dirty, setDirty] = useState(false);
   const [showWarnings, setShowWarnings] = useState(false);
   /** Print Layout shows pages as they will print; Web Layout is one continuous column. */
-  const [mode, setMode] = useState<"print" | "web">("print");
+  // (Dev: ?mode=web opens in Web Layout.)
+  const [mode, setMode] = useState<"print" | "web">(() => (new URLSearchParams(location.search).get("mode") === "web" ? "web" : "print"));
   const [layout, setLayout] = useState<LayoutResult>();
   /** The document the current layout was made from (automation waits for the startup document's). */
   const [layoutOf, setLayoutOf] = useState<PrimeDocument>();
@@ -77,6 +80,14 @@ export function App() {
   const [editingHeaderFooter, setEditingHeaderFooter] = useState(false);
   const [editingParagraph, setEditingParagraph] = useState(false);
   const [pickingTemplate, setPickingTemplate] = useState(false);
+  // The home screen: at start (unless a document was given, or a dev test runs), and from the Prime Word button.
+  const [home, setHome] = useState(() => !/[?&](selftest|file)=/.test(location.search));
+  const [hasDocument, setHasDocument] = useState(false);
+  const leaveHome = () => { setHome(false); setHasDocument(true); };
+  // Review: how tracked changes are shown, and the comments pane (writing = a new comment is being typed).
+  const [markup, setMarkup] = useState<Markup>("all");
+  const [comments, setComments] = useState<"closed" | "open" | "writing">("closed");
+  const baseOf = useCallback(() => fileRef.current.base, []);
   // Spelling: on by default; the dictionary loads in the background.
   const [spelling, setSpelling] = useState(true);
   const speller = useRef<Speller>();
@@ -170,6 +181,8 @@ export function App() {
         paragraphStyles(file.base, measurer),
         findPlugin(),
         pastePlugin(() => fileRef.current.base),
+        floatEditing(),
+        reviewPlugin(),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
       ],
@@ -177,7 +190,8 @@ export function App() {
     const v = new EditorView(mount.current, {
       state,
       // Our own checker underlines misspellings; turn off the browser's so words are not underlined twice.
-      attributes: { spellcheck: "false" },
+      // For screen readers: the document is one multi-line text field.
+      attributes: { spellcheck: "false", role: "textbox", "aria-multiline": "true", "aria-label": "Document" },
       dispatchTransaction(tr) {
         v.updateState(v.state.apply(tr));
         if (tr.docChanged) {
@@ -222,6 +236,7 @@ export function App() {
       const { doc, warnings } = readDocx(bytes);
       setFile({ base: doc, name, location, warnings, fonts: 0 });
       setDirty(false);
+      leaveHome();
     } catch (e) {
       alert(`Prime Word could not open ${name}:\n${(e as Error).message}`);
     }
@@ -257,6 +272,7 @@ export function App() {
     const name = template && template.id !== "blank" ? `${template.name.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim()}1.docx` : "Document1.docx";
     setFile({ base, name, warnings: [], fonts: 0 });
     setDirty(false);
+    leaveHome();
   };
 
   /** Restores unsaved work from an earlier session (kept as unsaved: nothing is overwritten). */
@@ -268,6 +284,7 @@ export function App() {
     await saveSnapshot({ ...s, id: SESSION, savedAt: Date.now() }); // now this session's
     await deleteSnapshot(s.id);
     setRecovery((r) => r.filter((x) => x.id !== s.id));
+    leaveHome();
   };
 
   const discardRecovery = async (s: Snapshot) => {
@@ -275,6 +292,25 @@ export function App() {
     await deleteSnapshot(s.id);
     setRecovery((r) => r.filter((x) => x.id !== s.id));
   };
+
+  // F6 / Shift+F6: move the keyboard between the ribbon, the document and the status bar (as in Word).
+  useEffect(() => {
+    const regions = [
+      () => document.querySelector<HTMLElement>(".toolbar button:not(:disabled), .toolbar select"),
+      () => view.current?.dom as HTMLElement | undefined,
+      () => document.querySelector<HTMLElement>(".status button, .status input"),
+    ];
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "F6") return;
+      e.preventDefault();
+      const at = document.activeElement;
+      const current = at?.closest(".toolbar, .tabs") ? 0 : at?.closest(".status") ? 2 : 1;
+      const next = (current + (e.shiftKey ? 2 : 1)) % 3;
+      regions[next]()?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Offer unsaved work from a session that did not close cleanly.
   useEffect(() => { void orphanedSnapshots().then(setRecovery); }, []);
@@ -332,12 +368,15 @@ export function App() {
     });
   }, []);
 
-  // Dev self-tests (browser only): ?selftest=paste | copy | spell | perf | align, after the document has loaded.
+  // Dev self-tests (browser only): ?selftest=paste | copy | spell | perf | align | scroll | lines | floatdrag | review | keyboard, after the document has loaded.
   useEffect(() => {
     const test = new URLSearchParams(location.search).get("selftest");
-    if (!test || isDesktop || !layout || layoutOf !== file.base || automationDone.current) return;
+    if (!test || isDesktop || (mode === "print" && (!layout || layoutOf !== file.base)) || automationDone.current) return;
+    // With ?file=, wait for that document (not the blank one shown first).
+    const wanted = new URLSearchParams(location.search).get("file");
+    if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -345,6 +384,11 @@ export function App() {
       if (test === "spell") spellSelfTest(v);
       if (test === "perf") perfSelfTest(v);
       if (test === "align") alignSelfTest();
+      if (test === "scroll") scrollSelfTest();
+      if (test === "floatdrag") floatDragSelfTest();
+      if (test === "review") reviewSelfTest(v);
+      if (test === "keyboard") keyboardSelfTest();
+      if (test === "lines" && measurerRef.current) linesSelfTest(v, () => fileRef.current.base, measurerRef.current);
     });
   }, [layout, layoutOf, file.base]);
 
@@ -410,6 +454,12 @@ export function App() {
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
         onMode={(m) => { setMode(m); if (m === "web") setLayout(undefined); }}
+        markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)}
+        onComments={() => setComments((c) => (c === "closed" ? "open" : "closed"))}
+        onNewComment={() => {
+          if (!v || v.state.selection.empty) { flash("Select the text you want to comment on."); return; }
+          setComments("writing");
+        }}
       />
 
       <main className="canvas" onContextMenu={(e) => {
@@ -440,7 +490,7 @@ export function App() {
         <div className="zoomed" style={{ zoom: zoom / 100 }}>
           {mode === "print" ? (
             <PageSheets layout={layout} doc={file.base} gap={PAGE_GAP} overflow={overflow}>
-              <div ref={mount} className="pw-editor paged" />
+              <div ref={mount} className={`pw-editor paged pw-markup-${markup}`} />
             </PageSheets>
           ) : (
             <div className="page" style={{
@@ -448,13 +498,17 @@ export function App() {
               minHeight: `${section.pageHeight ?? 792}pt`,
               padding: `${margins.top ?? 72}pt ${margins.right ?? 72}pt ${margins.bottom ?? 72}pt ${margins.left ?? 72}pt`,
             }}>
-              <div ref={mount} className="pw-editor" />
+              <div ref={mount} className={`pw-editor pw-markup-${markup}`} />
             </div>
           )}
         </div>
       </main>
+      {comments !== "closed" && v && (
+        <CommentsPane view={v} base={baseOf} writing={comments === "writing"}
+          onWritten={() => setComments("open")} onClose={() => setComments("closed")} />
+      )}
 
-      <footer className="status">
+      <footer className="status" aria-label="Status bar">
         <span>{file.name}</span>
         {mode === "print" && layout && <span>{layout.pages.length} page{layout.pages.length > 1 ? "s" : ""}</span>}
         <span>{v ? countWords(v.state.doc) : 0} words</span>
@@ -469,15 +523,20 @@ export function App() {
           </button>
         )}
         <span className="zoom">
-          <button className="link" onClick={() => setZoom((z) => Math.max(25, z - 10))} title="Zoom out">−</button>
-          <input type="range" min={25} max={200} step={5} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} title="Zoom" />
-          <button className="link" onClick={() => setZoom((z) => Math.min(200, z + 10))} title="Zoom in">+</button>
+          <button className="link" onClick={() => setZoom((z) => Math.max(25, z - 10))} title="Zoom out" aria-label="Zoom out">−</button>
+          <input type="range" min={25} max={200} step={5} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} title="Zoom" aria-label="Zoom" />
+          <button className="link" onClick={() => setZoom((z) => Math.min(200, z + 10))} title="Zoom in" aria-label="Zoom in">+</button>
           <span className="zoom-value">{zoom}%</span>
         </span>
       </footer>
       {spellMenu && v && speller.current && (
         <SpellMenu view={v} speller={speller.current} issue={spellMenu.issue} x={spellMenu.x} y={spellMenu.y}
           ignored={ignoredWords.current} onClose={() => setSpellMenu(undefined)} />
+      )}
+      {home && (
+        <Home recovery={recovery} onPick={(t) => void newDocument(t)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)}
+          onRestore={(s) => void restore(s)} onDiscard={(s) => void discardRecovery(s)}
+          {...(hasDocument ? { onClose: () => setHome(false) } : {})} />
       )}
       {pickingTemplate && (
         <TemplatePicker onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />

@@ -4,13 +4,14 @@
  * are sized from the real screen positions, so every page's content starts exactly at the top of
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
-import { type LayoutResult, layoutDocument, type Measurer } from "@prime/layout";
+import { type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { fromProseMirror } from "./convert.js";
-import { type ResolvedStart, resolvePageStarts } from "./pages.js";
+import { inkSvg } from "./ink.js";
+import { type ResolvedFloat, type ResolvedStart, resolveFloats, resolvePageStarts, resolveWraps } from "./pages.js";
 
 /** Whether `timed` records (self-tests turn it on; entries would otherwise pile up over a session). */
 const timing = () => (globalThis as { primeTiming?: boolean }).primeTiming === true;
@@ -62,8 +63,110 @@ function gap(page: number, inline: boolean): () => HTMLElement {
   };
 }
 
-function decorations(doc: Node, starts: ResolvedStart[]): DecorationSet {
+/**
+ * Room for floating objects where the layout wraps text around them, at the start of the affected
+ * line: a block of the skip's height moves the line down (a float would not move an empty line), then
+ * CSS floats of the engine's sizes narrow it on either side.
+ */
+function wrapSpace(w: ReturnType<typeof resolveWraps>[number]): () => HTMLElement {
+  return () => {
+    const el = document.createElement("span");
+    el.className = "pw-wrap";
+    el.contentEditable = "false";
+    // Each box clears earlier ones on its side: CSS would otherwise set it beside them.
+    const box = (side: "left" | "right", width: string, height: number) => {
+      const b = document.createElement("span");
+      b.style.cssText = `float:${side};clear:${side};width:${width};height:${Math.max(0, height)}pt`;
+      el.appendChild(b);
+    };
+    if (w.skip > 0) {
+      const b = document.createElement("span");
+      b.style.cssText = `display:block;height:${w.skip}pt`;
+      el.appendChild(b);
+    }
+    if (w.left) box("left", `${w.left.width}pt`, w.left.height);
+    if (w.right) box("right", `${w.right.width}pt`, w.right.height);
+    return el;
+  };
+}
+
+/** Object URLs for image parts, made once per part (pictures are large; data URLs would be copied). */
+const imageUrls = new WeakMap<PrimeDocument, Map<string, string>>();
+function imageUrl(base: PrimeDocument, part: string): string | undefined {
+  let urls = imageUrls.get(base);
+  if (!urls) imageUrls.set(base, (urls = new Map()));
+  let url = urls.get(part);
+  if (url === undefined) {
+    const p = base.package.parts.find((x) => x.name === part);
+    const ext = part.split(".").pop()?.toLowerCase() ?? "";
+    const type = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp" } as Record<string, string>)[ext];
+    if (!p || !type) return undefined;
+    url = URL.createObjectURL(new Blob([Uint8Array.from(atob(p.data), (c) => c.charCodeAt(0))], { type }));
+    urls.set(part, url);
+  }
+  return url;
+}
+
+/**
+ * A floating picture or text box, drawn inside its anchor paragraph where the layout put it, so it
+ * moves with its text on screen. `left` is the paragraph's left indent (the layer's origin).
+ */
+function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HTMLElement {
+  return () => {
+    const el = document.createElement("span");
+    el.className = "pw-float";
+    el.contentEditable = "false";
+    el.style.cssText = `left:${f.x - left}pt;top:${f.y}pt;width:${f.width}pt;height:${f.height}pt`;
+    // For moving and resizing (floats.ts): which float, and its box in layout terms.
+    // Pictures and ink keep their proportions when resized; text boxes do not.
+    Object.assign(el.dataset, { index: String(f.index), x: String(f.x), y: String(f.y), w: String(f.width), h: String(f.height), kind: f.image || f.ink ? "picture" : "textbox" });
+    el.title = "Drag to move; drag a corner to resize; Delete to remove";
+    for (const corner of ["nw", "ne", "sw", "se"]) {
+      const h = document.createElement("span");
+      h.className = `pw-float-handle pw-${corner}`;
+      h.dataset.handle = corner;
+      el.appendChild(h);
+    }
+    const src = f.image?.part ? imageUrl(base, f.image.part) : undefined;
+    if (src) {
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = "";
+      img.style.cssText = "width:100%;height:100%";
+      el.appendChild(img);
+    }
+    if (f.ink) el.appendChild(inkSvg(f.ink, f.width, f.height));
+    for (const line of f.lines) {
+      for (const s of line.segments) {
+        const t = document.createElement("span");
+        t.className = "pw-float-text";
+        t.textContent = s.text;
+        t.style.cssText = `left:${s.x}pt;top:${line.y}pt;line-height:${line.height}pt;font-family:"${s.font.family}";font-size:${s.size}pt;` +
+          `font-weight:${s.font.bold ? 700 : 400};font-style:${s.font.italic ? "italic" : "normal"}` +
+          (s.color ? `;color:#${s.color}` : "") + (s.underline ? ";text-decoration:underline" : "");
+        el.appendChild(t);
+      }
+    }
+    return el;
+  };
+}
+
+function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeof resolveWraps>,
+  floats: ResolvedFloat[] = [], base?: PrimeDocument): DecorationSet {
   const out: Decoration[] = [];
+  if (base) {
+    const resolver = new Resolver(base);
+    for (const f of floats) {
+      const para = doc.nodeAt(f.pos);
+      if (!para || para.type.name !== "paragraph") continue;
+      const left = resolver.paragraph({ type: "paragraph", props: para.attrs.props, content: [] }).left;
+      out.push(Decoration.node(f.pos, f.pos + para.nodeSize, { style: "position:relative" }));
+      out.push(Decoration.widget(f.pos + 1, floatLayer(f, base, left), { side: -1, key: `float-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.lines.length}-${left}` }));
+    }
+  }
+  for (const w of wraps) {
+    out.push(Decoration.widget(w.pos, wrapSpace(w), { side: -1, key: `wrap-${w.page}-${w.skip}-${w.left?.width}-${w.left?.height}-${w.right?.width}-${w.right?.height}` }));
+  }
   for (const s of starts) {
     if (s.kind === "row") {
       const row = doc.nodeAt(s.pos);
@@ -113,6 +216,9 @@ export function pagination(opts: PagedOptions): Plugin {
   let layout: LayoutResult | undefined;
   /** The page starts currently drawn (from the layout, possibly moved earlier by `fit`). */
   let starts: ResolvedStart[] = [];
+  /** Where text wraps around floating objects, and the objects themselves (from the layout). */
+  let wraps: ReturnType<typeof resolveWraps> = [];
+  let floats: ResolvedFloat[] = [];
   /** Rounds of corrections (each moves every break that needs it) since the last layout: a loop guard. */
   let rounds = 0;
   /** Pages whose overflow has no earlier break (e.g. one block taller than the page), until the next layout. */
@@ -141,7 +247,9 @@ export function pagination(opts: PagedOptions): Plugin {
     const pitch = (first.height + PAGE_GAP) * PX;
     const box = timed("fit.reflow", () => view.dom.getBoundingClientRect());
     // Screen measurements include any zoom; sizes we set are in unzoomed CSS pixels.
-    const zoom = view.dom.offsetWidth ? box.width / view.dom.offsetWidth : 1;
+    // (Unrounded CSS width: offsetWidth is a whole number, and its rounding error grows down the document.)
+    const cssWidth = parseFloat(getComputedStyle(view.dom).width);
+    const zoom = cssWidth ? box.width / cssWidth : 1;
     const top = (el: Element) => (el.getBoundingClientRect().top - box.top) / zoom;
     const bottom = (el: Element) => (el.getBoundingClientRect().bottom - box.top) / zoom;
     const bodyTopAt = (page: number) => (page - 1) * pitch + ((layout!.pages[page - 1]?.bodyTop ?? first.bodyTop) - first.bodyTop) * PX;
@@ -177,7 +285,7 @@ export function pagination(opts: PagedOptions): Plugin {
           const moved = timed("fit.earlierBreak", () => earlierBreak(view, limit, Math.max(previousEnd, bodyTopAt(page - 1)), natural, plannedTop, plannedBottom));
           if (moved) {
             moves++;
-            mark("correction");
+            mark(`correction p${page} +${Math.round(natural - limit)}px`);
             starts = starts.map((s) => (s.page === page ? { page, kind: moved.kind, pos: moved.pos } : s));
             // The spacer moves up to the new break: content from there moves by its new size, and
             // content after the old break no longer has the old spacer's size.
@@ -234,8 +342,11 @@ export function pagination(opts: PagedOptions): Plugin {
       init: () => ({ decorations: DecorationSet.empty }),
       apply(tr, old) {
         const starts = tr.getMeta(paginationKey) as ResolvedStart[] | undefined;
-        if (starts) return { decorations: decorations(tr.doc, starts) };
+        if (starts) return { decorations: decorations(tr.doc, starts, wraps, floats, opts.base()) };
         if (!tr.docChanged) return old;
+        // Keep wrap points on their text until the next layout replaces them.
+        wraps = wraps.map((w) => ({ ...w, pos: tr.mapping.map(w.pos) }));
+        floats = floats.map((f) => ({ ...f, pos: tr.mapping.map(f.pos) }));
         return { decorations: old.decorations.map(tr.mapping, tr.doc) };
       },
     },
@@ -260,6 +371,8 @@ export function pagination(opts: PagedOptions): Plugin {
         layout = result;
         timed("onLayout", () => opts.onLayout?.(result));
         starts = timed("pageStarts", () => resolvePageStarts(view.state.doc, result.pageStarts));
+        wraps = resolveWraps(view.state.doc, result.wraps);
+        floats = resolveFloats(view.state.doc, result.floats);
         rounds = 0;
         unfixable = new Set();
         timed("drawBreaks", () => view.dispatch(view.state.tr.setMeta(paginationKey, starts).setMeta("addToHistory", false)));

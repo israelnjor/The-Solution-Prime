@@ -18,7 +18,8 @@ export interface FontMetrics {
 export interface Measurer {
   /** Advance width of the text at 1pt (multiply by the font size). */
   width(text: string, font: FontKey): number;
-  metrics(font: FontKey): FontMetrics;
+  /** Vertical metrics; `fallback`: the font only stands in for characters the run's font lacks. */
+  metrics(font: FontKey, fallback?: boolean): FontMetrics;
   /** Fonts used to draw `text`: the requested font plus fallbacks for characters it lacks. */
   faces?(text: string, font: FontKey): FontKey[];
 }

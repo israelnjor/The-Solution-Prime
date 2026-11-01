@@ -70,7 +70,15 @@ export function createSchema(render?: Render): Schema {
       table_row: {
         content: "table_cell+",
         attrs: { ...props, extra: { default: null } },
-        toDOM: (n) => ["tr", { "data-pw-props": json(n.attrs.props), ...(n.attrs.extra ? { "data-pw-extra": json(n.attrs.extra) } : {}) }, 0],
+        toDOM: (n) => {
+          // A set row height (w:trHeight, in twips): at least that tall ("exact" too: content may still
+          // grow it on screen, never shrink it below the layout's).
+          const h = n.attrs.props?.height?.val ? Number(n.attrs.props.height.val) / 20 : 0;
+          return ["tr", {
+            "data-pw-props": json(n.attrs.props), ...(n.attrs.extra ? { "data-pw-extra": json(n.attrs.extra) } : {}),
+            ...(h ? { style: `height:${h}pt` } : {}),
+          }, 0];
+        },
         parseDOM: [
           { tag: "tr[data-pw-props]", priority: 100, getAttrs: (el) => ({ props: parse(el as HTMLElement, "data-pw-props"), extra: parse(el as HTMLElement, "data-pw-extra") }) },
           { tag: "tr" },
@@ -155,7 +163,8 @@ export function createSchema(render?: Render): Schema {
         parseDOM: [{ tag: "span[data-pw-instr]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-instr") }],
       },
       run_preserved: {
-        group: "inline", inline: true, atom: true, attrs: { ...props, preserved: {} },
+        // `float`: where a floating picture or text box sits (FloatInfo), for display; null otherwise.
+        group: "inline", inline: true, atom: true, attrs: { ...props, preserved: {}, float: { default: null } },
         toDOM: (n) => render?.runPreserved(n) ?? ["span", { class: "pw-preserved", "data-pw-runpreserved": json(n.attrs) }],
         parseDOM: [{ tag: "[data-pw-runpreserved]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-runpreserved") }],
       },

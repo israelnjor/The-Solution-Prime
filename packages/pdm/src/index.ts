@@ -152,6 +152,44 @@ export interface RunPreservedInline {
   type: "runPreserved";
   preserved: Preserved;
   props?: RunProps;
+  /** For a floating picture or text box: where it sits and what it shows (for layout and display). */
+  float?: FloatInfo;
+}
+
+/** Where a floating object's position is measured from (wp:positionH / wp:positionV relativeFrom). */
+export interface FloatPosition {
+  from: string;
+  /** Offset in pt, or an alignment ("left", "center", "right", "top", "bottom", "inside", "outside"). */
+  offset?: number;
+  align?: string;
+}
+
+/**
+ * A floating object (wp:anchor), read for layout and display only: the object itself is written back
+ * verbatim from its preserved XML, so nothing about it can be lost.
+ */
+export interface FloatInfo {
+  kind: "picture" | "textbox" | "ink" | "shape";
+  /** Size in pt. A text box that grows with its text (`autoHeight`) gets its height from its content. */
+  width: number;
+  height: number;
+  x: FloatPosition;
+  y: FloatPosition;
+  wrap: "square" | "tight" | "through" | "topAndBottom" | "none";
+  /** Which sides text wraps on (wp:wrapSquare wrapText). */
+  side?: "bothSides" | "left" | "right" | "largest";
+  /** Drawn behind the text (only matters without wrapping). */
+  behind?: boolean;
+  /** Distance between the object and wrapped text, in pt. */
+  dist: { top: number; bottom: number; left: number; right: number };
+  /** Picture: its image part in the package (e.g. "word/media/image3.png"). */
+  imagePart?: string;
+  /** Text box: its content and inner margins (pt). */
+  blocks?: Block[];
+  insets?: { top: number; bottom: number; left: number; right: number };
+  autoHeight?: boolean;
+  /** Ink (pen strokes): x, y pairs relative to the box (0–1 each way), pen width in pt, colour. */
+  ink?: { strokes: number[][]; width: number; color: string };
 }
 
 /** Unsupported paragraph-level content (e.g. bookmarks), kept verbatim. */

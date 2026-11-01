@@ -32,6 +32,19 @@ export class CanvasMeasurer implements Measurer {
     return w;
   }
 
+  private normalLineHeight(font: string): number {
+    if (typeof document === "undefined" || !document.body) return 0;
+    const el = document.createElement("span");
+    el.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;line-height:normal;display:inline-block";
+    el.style.font = font;
+    el.style.lineHeight = "normal";
+    el.textContent = "Hg";
+    document.body.appendChild(el);
+    const h = el.getBoundingClientRect().height / PROBE;
+    el.remove();
+    return h;
+  }
+
   metrics(f: FontKey): FontMetrics {
     const key = this.font(f);
     let m = this.metricsCache.get(key);
@@ -40,7 +53,10 @@ export class CanvasMeasurer implements Measurer {
       const t = this.ctx.measureText("Hg");
       const ascent = (t.fontBoundingBoxAscent ?? PROBE * 0.9) / PROBE;
       const descent = (t.fontBoundingBoxDescent ?? PROBE * 0.25) / PROBE;
-      m = { lineHeight: ascent + descent, ascent };
+      // The font's external leading (Word adds it: Times New Roman 12pt lines are 13.8pt): the
+      // browser's normal line height beyond ascent + descent, measured once per font.
+      const extra = Math.max(0, this.normalLineHeight(key) - ascent - descent);
+      m = { lineHeight: ascent + descent + extra, ascent: ascent + extra };
       this.metricsCache.set(key, m);
     }
     return m;

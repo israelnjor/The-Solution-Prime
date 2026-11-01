@@ -39,12 +39,15 @@ Editing (ribbon tabs Home / Insert / Layout / Table):
 | Text | Font, size, colour, highlight; Bold/Italic/Underline/Strike (Ctrl+B/I/U); paragraph styles |
 | Paragraphs | Bullets, numbering, list levels (Tab / Shift+Tab; Enter on an empty item ends the list); alignment; line spacing (1.0–3.0, at least, exactly), spacing before/after, indents and hanging indent (Paragraph dialog); borders (bottom / top / box) |
 | Insert | Page break (Ctrl+Enter), table, picture, hyperlink (Ctrl+K) |
+| Floating objects | Floating pictures, text boxes (e.g. figure captions) and ink (handwritten signatures) are shown where Word puts them — also in table cells — with text wrapping around them (square, tight, top-and-bottom), on screen and in PDF. Click to select; drag to move; drag a corner to resize (pictures and ink keep their proportions); Delete removes. In Web Layout they appear below their paragraph, arranged as in the document. Other shapes are kept but not drawn |
 | Tables | Rows above/below, columns left/right, delete row/column/table; Tab / Shift+Tab move between cells (Tab in the last cell adds a row) |
 | Find | Find (Ctrl+F) and Replace (Ctrl+H) with match case / whole words |
 | Layout | Margins (Normal / Narrow / Moderate / Wide / custom in cm), orientation, paper size (Letter, A4, Legal, A5, Executive) — whole document |
 | Header & Footer | Per section (Insert tab): different first page, "Same as previous section", page number and "Page X of Y" fields |
-| New | Templates: Blank, Letter, Report, CV, Invoice, Memo |
-| Spelling | Offline, British English by default (US English for documents marked en-US), from the SCOWL Hunspell dictionaries (MIT/BSD). Red wavy underline; right-click for suggestions, Ignore All, Add to Dictionary. Skips acronyms, web and e-mail addresses. Toggle in the status bar |
+| Home | Start screen (and the Prime Word button): new from templates (Blank, Letter, Report, CV, Invoice, Memo), Open, recent documents, recovered unsaved work |
+| Review | Tracked changes shown (insertions/deletions); Previous/Next, Accept/Reject (at cursor or all, including paragraph breaks); All Markup / No Markup / Original. Comments pane: list, go to, add (on a selection, signed with your name), delete — saved in Word's format |
+| Keyboard | Alt+H/N/P/R open the Home/Insert/Layout/Review tabs; F6 / Shift+F6 move between ribbon, document and status bar; visible focus; screen-reader names on all controls |
+| Spelling | Offline, British English by default (US English for documents marked en-US), from the SCOWL Hunspell dictionaries (MIT/BSD). Red wavy underline; right-click for suggestions, Ignore All, Add to Dictionary. Skips acronyms, links, web and e-mail addresses, and words in other scripts. Toggle in the status bar |
 | Clipboard | Copy/paste within Prime Word is lossless (model properties travel in `data-pw-*` attributes). From Word and the web: headings, alignment, bold/italic/underline/strike, font, size, colour, highlight, super/subscript, links, bulleted/numbered and nested lists (incl. Word's own list markup), tables (borders, shading, merged columns) and embedded pictures |
 | View | Print Layout / Web Layout, zoom 25–200% |
 | Output | Export PDF (fonts embedded from the installed fonts), Print (Ctrl+P: opens the PDF in the default viewer) |

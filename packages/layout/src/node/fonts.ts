@@ -93,6 +93,8 @@ export class SystemFontMeasurer implements Measurer {
   /** The font that draws `cp`: the requested one, else the first fallback that has the glyph. */
   private drawer(cp: number, f: FontKey): FontKey {
     if (this.face(f).hasGlyphForCodePoint(cp)) return f;
+    // A symbol font's character written at U+F0xx (see symbolText in @prime/pdf) is the font's own.
+    if (cp >= 0xf020 && cp <= 0xf0ff && this.face(f).hasGlyphForCodePoint(cp - 0xf000)) return f;
     for (const family of GLYPH_FALLBACKS) {
       const fb = { family, bold: f.bold, italic: f.italic };
       if (this.families.has(family.toLowerCase()) && this.face(fb).hasGlyphForCodePoint(cp)) return fb;
@@ -106,8 +108,9 @@ export class SystemFontMeasurer implements Measurer {
       const k = `${f.family}|${f.bold}|${f.italic}|${ch}`;
       let w = this.widths.get(k);
       if (w === undefined) {
-        const cp = ch.codePointAt(0)!;
+        let cp = ch.codePointAt(0)!;
         const font = this.face(this.drawer(cp, f));
+        if (cp >= 0xf020 && cp <= 0xf0ff && !font.hasGlyphForCodePoint(cp) && font.hasGlyphForCodePoint(cp - 0xf000)) cp -= 0xf000;
         w = font.hasGlyphForCodePoint(cp) ? font.glyphForCodePoint(cp).advanceWidth / font.unitsPerEm : 0.5;
         this.widths.set(k, w);
       }
@@ -125,7 +128,7 @@ export class SystemFontMeasurer implements Measurer {
     return [...out.values()];
   }
 
-  metrics(f: FontKey): FontMetrics {
+  metrics(f: FontKey, fallback = false): FontMetrics {
     const font = this.face(f);
     const os2 = font["OS/2"];
     // Fonts flagged USE_TYPO_METRICS (e.g. Aptos) are spaced by their typographic metrics; others by
@@ -136,6 +139,12 @@ export class SystemFontMeasurer implements Measurer {
     }
     const ascent = os2?.winAscent ?? font.ascent;
     const descent = os2?.winDescent ?? Math.abs(font.descent);
-    return { lineHeight: (ascent + descent) / font.unitsPerEm, ascent: ascent / font.unitsPerEm };
+    // Plus the font's external leading, as Windows (GDI) defines it: the hhea line gap beyond what the
+    // Windows ascent and descent already cover. Times New Roman and Arial have some (12pt lines are
+    // 13.8pt in Word); Calibri and Cambria have none.
+    // Not for fallback fonts: a line with a few Chinese characters is not spaced by their font's gap.
+    const hhea = (font as unknown as { hhea?: { ascent: number; descent: number; lineGap: number } }).hhea;
+    const extra = fallback || !hhea ? 0 : Math.max(0, hhea.lineGap - (ascent + descent - (hhea.ascent - hhea.descent)));
+    return { lineHeight: (ascent + descent + extra) / font.unitsPerEm, ascent: (ascent + extra) / font.unitsPerEm };
   }
 }

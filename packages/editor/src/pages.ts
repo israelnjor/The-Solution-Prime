@@ -1,7 +1,7 @@
 /**
  * Maps the layout engine's page starts onto editor positions (pure, testable in Node).
  */
-import type { PageStart } from "@prime/layout";
+import type { PageStart, PlacedFloat, WrapPoint } from "@prime/layout";
 import type { Node } from "prosemirror-model";
 
 export type ResolvedStart =
@@ -21,6 +21,25 @@ function nodeAt(doc: Node, path: number[]): { node: Node; pos: number } | undefi
     node = node.child(index);
   }
   return { node, pos };
+}
+
+/** Wrap points (text around floating objects) at editor positions inside their paragraphs. */
+export function resolveWraps(doc: Node, wraps: WrapPoint[]): (WrapPoint & { pos: number })[] {
+  return wraps.flatMap((w) => {
+    const target = nodeAt(doc, w.path);
+    if (!target || target.node.type.name !== "paragraph") return [];
+    return [{ ...w, pos: target.pos + 1 + Math.min(w.offset, target.node.content.size) }];
+  });
+}
+
+export type ResolvedFloat = PlacedFloat & { pos: number };
+
+/** Floating objects at the position of their anchor paragraph (before it). */
+export function resolveFloats(doc: Node, floats: PlacedFloat[]): ResolvedFloat[] {
+  return floats.flatMap((f) => {
+    const target = nodeAt(doc, f.path);
+    return target?.node.type.name === "paragraph" ? [{ ...f, pos: target.pos }] : [];
+  });
 }
 
 export function resolvePageStarts(doc: Node, starts: PageStart[]): ResolvedStart[] {

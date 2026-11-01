@@ -12,11 +12,14 @@ function imageUrl(doc: PrimeDocument, img: PlacedImage): string | undefined {
   return part && IMAGE_TYPES[ext] ? `data:${IMAGE_TYPES[ext]};base64,${part.data}` : undefined;
 }
 
-/** Header and footer of one page, positioned exactly as the layout engine placed them. */
+/**
+ * Header and footer of one page, positioned exactly as the layout engine placed them. (Floating
+ * pictures and text boxes are drawn by the editor, with their anchor paragraph.)
+ */
 function Chrome({ page, total, doc, top }: { page: Page; total: number; doc: PrimeDocument; top: number }) {
   return (
     <>
-      {page.lines.filter((l) => l.story).map((line, i) => (
+      {page.lines.filter((l) => l.story === "header" || l.story === "footer").map((line, i) => (
         <div key={i}>
           {line.segments.map((s, j) => (
             <span key={j} className="pw-chrome-text" style={{

@@ -91,3 +91,20 @@ ours look heavier); display equations get slightly more vertical space; lines wi
   even/odd headers, picture borders in PDF, EMF/WMF/GIF pictures in PDF (drawn as boxes).
 - Fonts come from the machine. A document using a font that is not installed lays out with a
   substitute — the product will need to warn about that.
+
+## Findings, 2026-11-01 (a real 11-page Times New Roman document)
+
+Measured against Word with `compare_real.py` and small Word experiments (bullet lists in four fonts):
+
+- **Line height includes the font's external leading** (Windows/GDI: the hhea line gap beyond the
+  Windows ascent + descent). Times New Roman and Arial 12pt lines are 13.8pt in Word; Calibri and
+  Cambria have none. Not for fallback fonts (a line with a few CJK characters is not spaced by Yu Gothic's gap).
+- **A list label adds its ascent only**: Symbol bullet + Times New Roman 12pt = 12.06 (Symbol ascent)
+  + 2.60 (Times descent) = 14.66pt. Line spacing (e.g. 1.16) scales the text's height; the label's
+  extra is added unscaled.
+- **`w:hideMark`**: an empty cell's paragraph mark adds nothing to the row height.
+- Word breaks lines after hyphens inside words (never after "/").
+- Word reports positions (`Range.Information`) on a 0.3pt grid: average pitches over many lines.
+
+Result for that document: 17 → 186 of 199 paragraphs within 2pt of Word, all on the same page, 11 pages
+like Word (was 12). Fixtures A–F unchanged or better.

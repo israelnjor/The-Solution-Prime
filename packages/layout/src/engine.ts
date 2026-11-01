@@ -9,7 +9,7 @@
  * Not yet: custom tab stops, floating objects, footnotes, columns, hyphenation.
  */
 import {
-  type Block, type Inline, type Paragraph, type PrimeDocument, type Relationship, type Section, type Story, type Table,
+  type Block, type FloatInfo, type Inline, type Paragraph, type PrimeDocument, type Relationship, type Section, type Story, type Table,
   paragraphText,
 } from "@prime/pdm";
 import { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
@@ -80,8 +80,10 @@ export interface PositionedLine {
   segments: Segment[];
   images: PlacedImage[];
   rules: Rule[];
-  /** Set for header and footer lines. */
-  story?: "header" | "footer";
+  /** Set for header and footer lines, and for floating pictures and text boxes. */
+  story?: "header" | "footer" | "float";
+  /** Pen strokes (ink): x, y pairs on the page, pen width in pt, colour. */
+  strokes?: { points: number[]; width: number; color: string }[];
 }
 
 export interface Page {
@@ -109,6 +111,44 @@ export interface LayoutResult {
   paragraphs: { text: string; page: number; y: number }[];
   /** Where pages 2, 3, ... begin, in document terms — for drawing page breaks in the editor. */
   pageStarts: PageStart[];
+  /** Where text wraps around floating objects, in document terms — so the editor can do the same. */
+  wraps: WrapPoint[];
+  /** Floating objects relative to their anchor paragraph — so the editor can draw them with its text. */
+  floats: PlacedFloat[];
+}
+
+/**
+ * A floating object as placed: its box relative to the anchor paragraph (x from the column's left
+ * edge, y from the top of the paragraph's first line), and what it shows — a picture, or text lines
+ * positioned relative to the box.
+ */
+export interface PlacedFloat {
+  page: number;
+  path: number[];
+  /** Which of the paragraph's floating objects (in document order). */
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  image?: ImageSource;
+  lines: PositionedLine[];
+  /** Ink: strokes relative to the box (0–1 each way). */
+  ink?: FloatInfo["ink"];
+}
+
+/**
+ * A line where wrapping around floating objects starts (or changes): the line moves down by `skip`,
+ * then runs beside space taken on the left and/or right (sizes in pt, heights from the line's top
+ * after the skip). Body paragraphs only: path and offset as in PageStart.
+ */
+export interface WrapPoint {
+  page: number;
+  path: number[];
+  offset: number;
+  skip: number;
+  left?: { width: number; height: number };
+  right?: { width: number; height: number };
 }
 
 /**
@@ -143,6 +183,8 @@ interface MLine {
   fitHeight: number;
   /** Offset in the paragraph (editor position units) where the line starts. */
   startOffset: number;
+  /** Where wrapping around floating objects starts or changes on this line (see WrapPoint). */
+  wrap?: Omit<WrapPoint, "page" | "path" | "offset">;
 }
 
 interface ParaBox {
@@ -153,6 +195,26 @@ interface ParaBox {
   lines: MLine[];
   /** Plain text of the paragraph, used to identify it in results. */
   anchor: string;
+  /** The paragraph itself (re-broken around floating objects), and the floating objects anchored in it. */
+  para: Paragraph;
+  floats: FloatInfo[];
+}
+
+/**
+ * Where a line may go, for wrapping around floating objects: given the line's top (relative to the
+ * paragraph's first line) and estimated height, the free span of the column, or where to move down to.
+ */
+type Slot = (dy: number, height: number) =>
+  | { left: number; right: number; leftUntil: number; rightUntil: number }
+  | { skipTo: number };
+
+/** Narrowest gap beside a floating object that text flows into (Word leaves narrower gaps empty). */
+const MIN_WRAP = 36;
+
+/** Floating objects in a paragraph's content (inside links, fields and other containers too). */
+function floatsIn(items: Inline[]): FloatInfo[] {
+  return items.flatMap((i) => i.type === "runPreserved" ? (i.float ? [i.float] : [])
+    : "content" in i && Array.isArray(i.content) ? floatsIn(i.content as Inline[]) : []);
 }
 
 interface CellBox {
@@ -168,6 +230,8 @@ interface CellBox {
   lines: { line: MLine; dy: number }[];
   /** Paragraph anchors (text) with their offset from the cell top. */
   markers: [string, number][];
+  /** Floating objects anchored in the cell's paragraphs: their paragraph's top, path in the cell, index. */
+  floats?: { float: FloatInfo; dy: number; path: number[]; index: number }[];
 }
 
 interface RowBox {
@@ -187,10 +251,11 @@ interface TableBox {
 type Box = ParaBox | TableBox;
 
 /** Stacked content of a cell or a header/footer. */
-type StoryBox = Pick<CellBox, "height" | "lines" | "markers">;
+type StoryBox = Pick<CellBox, "height" | "lines" | "markers" | "floats">;
 
 type Atom = { offset: number } & (
-  | { kind: "word"; text: string; run: ResolvedRun; field?: Segment["field"] }
+  // `breakAfter`: the line may break after this piece although no space follows (after a hyphen).
+  | { kind: "word"; text: string; run: ResolvedRun; field?: Segment["field"]; breakAfter?: boolean }
   | { kind: "space"; text: string; run: ResolvedRun }
   | { kind: "tab"; run: ResolvedRun }
   | { kind: "br" }
@@ -202,9 +267,42 @@ type Atom = { offset: number } & (
 interface Face {
   font: FontKey;
   size: number;
+  /** Drawing characters the run's own font lacks (Word spaces such lines more tightly). */
+  fallback?: boolean;
+  /** A list label's font: counts above the baseline only (Word measures its descent from the text). */
+  label?: boolean;
 }
 
 const key = (r: ResolvedRun): FontKey => ({ family: r.font, bold: r.bold, italic: r.italic });
+
+/**
+ * Characters of the symbol fonts, as Word writes them (U+F0xx, or 0xxx), with their Unicode
+ * equivalents: the bullets Word offers, mostly. Symbol fonts are drawn badly by PDF libraries (their
+ * character tables are not Unicode), so these are drawn as the Unicode character in a regular font.
+ */
+const SYMBOL_CHARS: Record<string, Record<number, string>> = {
+  symbol: { 0xb7: "•", 0x2d: "−", 0xae: "→", 0xac: "←", 0xad: "↑", 0xaf: "↓", 0xd7: "·", 0xa8: "♦", 0xa9: "♥", 0xaa: "♠", 0xa7: "♣", 0xb0: "°", 0xb1: "±", 0xb4: "×", 0xb8: "÷", 0xb9: "≠", 0xa3: "≤", 0xb3: "≥", 0xa5: "∞", 0xd6: "√", 0xe0: "◊" },
+  wingdings: { 0x6c: "●", 0x6e: "■", 0x6f: "□", 0x71: "❑", 0x75: "◆", 0x76: "❖", 0x77: "⬥", 0xa7: "▪", 0xa8: "◻", 0x9f: "•", 0xd8: "➢", 0xe0: "➔", 0xe8: "➔", 0xfc: "✓", 0xfb: "✗", 0xfe: "☑", 0xfd: "☒", 0x4a: "☺", 0x4c: "☹", 0xab: "★" },
+};
+const SYMBOL_FALLBACK = "Segoe UI Symbol";
+
+/** A symbol-font run's text as Unicode in a regular font, when every character has an equivalent. */
+function unsymbol(text: string, run: ResolvedRun): { text: string; run: ResolvedRun; dy?: number } | undefined {
+  const table = SYMBOL_CHARS[run.font.toLowerCase()];
+  if (!table) return undefined;
+  let out = "";
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    const u = table[cp >= 0xf000 ? cp - 0xf000 : cp];
+    if (!u) return undefined;
+    out += u;
+  }
+  // Word's Symbol bullet is about 0.42em across, Arial's 0.25em (measured in Word's PDF output):
+  // the bullet is drawn larger to match. Other characters come from Segoe UI Symbol.
+  // Enlarged, it would sit higher than Word's (its centre is 0.35em up): lowered back by `dy`.
+  if (out === "•") return { text: out, run: { ...run, font: "Arial", size: run.size * 1.7 }, dy: run.size * 0.35 * 0.7 };
+  return { text: out, run: { ...run, font: SYMBOL_FALLBACK } };
+}
 
 /** Segment styling taken from a run. */
 const look = (r: ResolvedRun): Partial<Segment> => {
@@ -320,10 +418,26 @@ export class LayoutEngine {
         let at = offset;
         for (const piece of i.text.split(/( +)/)) {
           if (!piece) continue;
+          const sym = unsymbol(piece, run);
+          if (sym) {
+            out.push({ kind: "word", text: sym.text, run: sym.run, offset: at });
+            at += piece.length;
+            continue;
+          }
           const text = run.caps ? piece.toUpperCase() : piece;
           const field = fieldKind();
-          out.push(piece.startsWith(" ") ? { kind: "space", text, run, offset: at }
-            : { kind: "word", text, run, offset: at, ...(field ? { field } : {}) });
+          if (piece.startsWith(" ")) {
+            out.push({ kind: "space", text, run, offset: at });
+            at += piece.length;
+            continue;
+          }
+          // Word breaks lines after a hyphen inside a word (e.g. in long addresses and compounds).
+          let from = 0;
+          for (const part of text.split(/(?<=[^\s-]-)(?=[^\s-])/)) {
+            const last = from + part.length === text.length;
+            out.push({ kind: "word", text: part, run, offset: at + from, ...(field ? { field } : {}), ...(last ? {} : { breakAfter: true }) });
+            from += part.length;
+          }
           at += piece.length;
         }
       }
@@ -340,18 +454,31 @@ export class LayoutEngine {
   /** Fonts that actually draw `text` in this run: the run's font plus any fallback fonts. */
   private faces(run: ResolvedRun, text?: string): Face[] {
     const fonts = text && this.m.faces ? this.m.faces(text, key(run)) : [key(run)];
-    return fonts.map((font) => ({ font, size: run.size }));
+    return fonts.map((font, i) => ({ font, size: run.size, ...(i > 0 ? { fallback: true } : {}) }));
   }
 
-  private lineMetrics(faces: Face[]): { height: number; ascent: number } {
+  private lineMetrics(faces: Face[]): { height: number; ascent: number; labelExtra: number } {
     let height = 0;
     let ascent = 0;
+    let descent = 0;
+    let labelAscent = 0;
     for (const f of faces) {
-      const fm = this.m.metrics(f.font);
+      const fm = this.m.metrics(f.font, f.fallback);
+      if (f.label) { labelAscent = Math.max(labelAscent, fm.ascent * f.size); continue; }
       height = Math.max(height, fm.lineHeight * f.size);
       ascent = Math.max(ascent, fm.ascent * f.size);
+      descent = Math.max(descent, (fm.lineHeight - fm.ascent) * f.size);
     }
-    return { height, ascent };
+    // A taller list label (e.g. a Symbol bullet) raises the line by its ascent only: with Times New
+    // Roman 12pt text, Word's line is 12.06 (Symbol's ascent) + 2.60 (Times' descent) = 14.66pt.
+    let labelExtra = 0;
+    if (labelAscent > ascent) {
+      const raised = Math.max(height, labelAscent + (descent || height - ascent));
+      labelExtra = raised - height;
+      height = raised;
+      ascent = labelAscent;
+    }
+    return { height, ascent, labelExtra };
   }
 
   private applyLineRule(natural: number, rp: ResolvedParagraph): number {
@@ -361,10 +488,16 @@ export class LayoutEngine {
   }
 
   /** Greedy line breaking at spaces, using real glyph advances. */
-  breakLines(p: Paragraph, rp: ResolvedParagraph, width: number): MLine[] {
+  breakLines(p: Paragraph, rp: ResolvedParagraph, width: number, slot?: Slot): MLine[] {
     const atoms = this.atoms(p, rp);
     const lines: MLine[] = [];
     let label = rp.listLabel;
+    // Wrapping around floating objects: the line's top so far, and space skipped to get below one.
+    let dy = 0;
+    let skip = 0;
+    let free: { left: number; right: number; leftUntil: number; rightUntil: number } | undefined;
+    let lastFree = "";
+    const lineGuess = slot ? this.applyLineRule(this.lineMetrics(this.faces(rp.mark)).height, rp) : 0;
 
     let segs: Segment[] = [];
     let images: MLine["images"] = [];
@@ -383,10 +516,13 @@ export class LayoutEngine {
       const first = lines.length === 0;
       startX = rp.left + (first ? rp.firstLine : 0);
       if (first && label !== undefined) {
-        const lr = rp.labelRun ?? rp.mark;
+        let lr = rp.labelRun ?? rp.mark;
+        // Line height still comes from the label's own font (as in Word), whatever font draws it.
+        runs.push(...this.faces(lr, label).map((f) => ({ ...f, label: true })));
+        const sym = unsymbol(label, lr);
+        if (sym) ({ text: label, run: lr } = sym);
         const lw = this.textWidth(label, lr);
-        segs.push({ x: startX, text: label, font: key(lr), size: lr.size, ...look(lr) });
-        runs.push(...this.faces(lr, label));
+        segs.push({ x: startX, text: label, font: key(lr), size: lr.size, ...look(lr), ...(sym?.dy ? { dy: sym.dy } : {}) });
         // The label sits in the hanging indent; text starts at the next tab stop (usually the left indent).
         const after = startX + lw;
         startX = rp.firstLine < 0 && after <= rp.left ? rp.left : (Math.floor(after / DEFAULT_TAB) + 1) * DEFAULT_TAB;
@@ -394,6 +530,18 @@ export class LayoutEngine {
       }
       avail = width - rp.right - startX;
       x = 0;
+      free = undefined;
+      if (slot) {
+        for (let guard = 0; guard < 20; guard++) {
+          const span = slot(dy + skip, lineGuess);
+          if ("skipTo" in span) { skip = Math.max(skip, span.skipTo - dy); continue; }
+          // Text starts at the indent or the object's edge, whichever is further in.
+          startX = Math.max(startX, span.left);
+          avail = Math.min(width - rp.right, span.right) - startX;
+          free = span;
+          break;
+        }
+      }
     };
     const finish = (pageBreakAfter = false, endsWithBreak = pageBreakAfter, nextStart = lineStart) => {
       const textMetrics = this.lineMetrics(runs.length ? runs : this.faces(rp.mark));
@@ -403,14 +551,35 @@ export class LayoutEngine {
       const metrics = { ascent: ascentAll, height: ascentAll + descentAll };
       // Line spacing does not scale pictures: Word sizes a picture line to the picture, plus the text
       // descent, plus the extra space the line rule adds to text (an "exact" rule still clips it).
-      const text = this.applyLineRule(metrics.height, rp);
+      // Line spacing scales the text's height; a taller list label adds its extra unscaled (Word: a
+      // Symbol bullet on 1.16-spaced Times New Roman lines adds 0.86pt, not 0.99pt).
+      const extra = textMetrics.labelExtra;
+      const text = rp.lineRule === "exact" ? rp.line / 20
+        : rp.lineRule === "atLeast" ? Math.max(metrics.height, rp.line / 20)
+        : this.applyLineRule(metrics.height - extra, rp) + extra;
       const picture = imageHeight && rp.lineRule !== "exact"
         ? imageHeight + (metrics.height - metrics.ascent) + Math.max(text - metrics.height, 0) : 0;
+      // Space skipped to get below a floating object belongs to the line (its text sits lower).
       lines.push({
-        width: x, height: Math.max(text, picture), ascent: Math.max(metrics.ascent, imageHeight),
-        fitHeight: picture > text ? Math.max(imageHeight, text) : Math.max(text, picture),
+        width: x, height: Math.max(text, picture) + skip, ascent: Math.max(metrics.ascent, imageHeight) + skip,
+        fitHeight: (picture > text ? Math.max(imageHeight, text) : Math.max(text, picture)) + skip,
         segments: segs, startX, pageBreakAfter, avail, endsWithBreak, images, rules, startOffset: lineStart,
       });
+      // Record where wrapping starts or changes, for the editor (heights from the line's top after the skip).
+      const narrowed = free && (free.left > 0.01 || free.right < width - 0.01);
+      const signature = narrowed ? `${free!.left}:${free!.right}` : "";
+      if (skip > 0 || signature !== lastFree) {
+        const top = dy + skip;
+        const line = lines[lines.length - 1];
+        line.wrap = {
+          skip,
+          ...(narrowed && free!.left > rp.left + 0.01 ? { left: { width: free!.left - rp.left, height: free!.leftUntil - top } } : {}),
+          ...(narrowed && free!.right < width - rp.right - 0.01 ? { right: { width: width - rp.right - free!.right, height: free!.rightUntil - top } } : {}),
+        };
+      }
+      lastFree = signature;
+      dy += lines[lines.length - 1].height;
+      skip = 0;
       lineStart = nextStart;
       segs = [];
       images = [];
@@ -443,7 +612,21 @@ export class LayoutEngine {
       }
       // A word may span several runs (e.g. "H₂O"): collect atoms until the next space or break.
       const word: Atom[] = [a];
-      while (["word", "image", "math"].includes(atoms[i + 1]?.kind)) word.push(atoms[++i]);
+      const ends = (w: Atom) => w.kind === "word" && w.breakAfter;
+      while (!ends(word[word.length - 1]) && ["word", "image", "math"].includes(atoms[i + 1]?.kind)) word.push(atoms[++i]);
+      // A word wider than a whole line is split where the line ends (Word does the same).
+      if (word.length === 1 && a.kind === "word" && a.text.length > 1) {
+        // Measured against the line's full width: such a word starts a new line, then breaks.
+        if (this.textWidth(a.text, a.run) > avail + 0.01) {
+          let n = 1;
+          while (n < a.text.length && this.textWidth(a.text.slice(0, n + 1), a.run) <= avail) n++;
+          atoms.splice(i, 1,
+            { ...a, text: a.text.slice(0, n), breakAfter: true },
+            { ...a, text: a.text.slice(n), offset: a.offset + n });
+          i--;
+          continue;
+        }
+      }
       const parts = word.map((w) => (w.kind === "word" ? this.textWidth(w.text, w.run)
         : w.kind === "image" ? w.width : w.kind === "math" ? w.box.width : 0));
       const ww = parts.reduce((s, v) => s + v, 0);
@@ -503,7 +686,7 @@ export class LayoutEngine {
 
   private measureParagraph(p: Paragraph, width: number, tableStyle?: string, path: number[] = []): ParaBox {
     const rp = this.resolver.paragraph(p, tableStyle);
-    return { kind: "para", path, rp, lines: this.breakLines(p, rp, width), anchor: paragraphText(p) };
+    return { kind: "para", path, rp, lines: this.breakLines(p, rp, width), anchor: paragraphText(p), para: p, floats: floatsIn(p.content) };
   }
 
   private stories = new Map<Story, StoryBox>();
@@ -551,7 +734,10 @@ export class LayoutEngine {
           dx: offset + grid(0, start) + CELL_MARGIN, width: grid(start, n), borders, vMerge: cell.props.vMerge,
           ...(fill && fill !== "AUTO" ? { fill } : {}),
         };
-        const box: CellBox = cell.props.vMerge === "continue"
+        // w:hideMark: an empty cell's paragraph mark does not count towards the row's height.
+        const hidden = cell.props.extra?.some((x) => x.name === "w:hideMark") &&
+          cell.blocks.every((b) => b.type === "paragraph" && b.content.length === 0);
+        const box: CellBox = cell.props.vMerge === "continue" || hidden
           ? { ...frame, height: 0, lines: [], markers: [] }
           : { ...frame, ...this.measureCell(cell.blocks, grid(start, n) - 2 * CELL_MARGIN, tableStyle) };
         return { start, vMerge: cell.props.vMerge, box };
@@ -599,6 +785,7 @@ export class LayoutEngine {
   private measureCell(blocks: Block[], width: number, tableStyle?: string): StoryBox {
     const lines: CellBox["lines"] = [];
     const markers: CellBox["markers"] = [];
+    const floats: NonNullable<CellBox["floats"]> = [];
     let y = 0;
     let prevAfter = 0;
     for (const box of this.measureBlocks(blocks, width, tableStyle)) {
@@ -610,13 +797,14 @@ export class LayoutEngine {
       y += Math.max(box.rp.spaceBefore - prevAfter, 0) + box.rp.borderTop;
       prevAfter = box.rp.spaceAfter;
       markers.push([box.anchor, y]);
+      box.floats.forEach((float, index) => floats.push({ float, dy: y, path: box.path, index }));
       for (const line of box.lines) {
         lines.push({ line, dy: y });
         y += line.height;
       }
       y += box.rp.spaceAfter + box.rp.borderBottom;
     }
-    return { height: y, lines, markers };
+    return { height: y, lines, markers, ...(floats.length ? { floats } : {}) };
   }
 
   /**
@@ -666,6 +854,10 @@ export class LayoutEngine {
     const markers: LayoutResult["markers"] = {};
     const paragraphs: LayoutResult["paragraphs"] = [];
     const pageStarts: PageStart[] = [];
+    const wraps: WrapPoint[] = [];
+    /** Room already reported for wrapping on this page, per side, and how far down it reaches. */
+    let reported: { left?: { width: number; until: number }; right?: { width: number; until: number } } = {};
+    const floats: PlacedFloat[] = [];
     // A new page is "open" until its first body content is placed (recorded as the page start).
     let pageOpen = false;
     let page!: Page;
@@ -677,6 +869,9 @@ export class LayoutEngine {
     // At the top of a page after a page break Word drops space-before; at the start of a new section
     // it keeps it, collapsed against the previous paragraph's space-after.
     let sectionTop = false;
+    /** Areas of the current page that text wraps around (floating objects), in page coordinates. */
+    type Exclusion = { x1: number; x2: number; y1: number; y2: number };
+    let exclusions: Exclusion[] = [];
 
     // Headers and footers are inherited from the previous section unless redefined.
     let headers: Section["headers"] = {};
@@ -703,6 +898,8 @@ export class LayoutEngine {
       for (const l of footer.lines) put(l.line, left, h - (mg.footer ?? 36) - footer.height + l.dy, { story: "footer" });
       y = top;
       prev = undefined;
+      exclusions = [];
+      reported = {};
     };
     const room = () => bottom - y;
     const atTop = () => y === top;
@@ -711,10 +908,28 @@ export class LayoutEngine {
       paragraphs.push({ text: anchor.slice(0, 80), ...pos });
       for (const n of anchor.match(MARKER) ?? []) markers[n] ??= pos;
     };
-    const put = (line: MLine, x: number, at: number, extra: { story?: "header" | "footer"; path?: number[] } = {}) => {
+    const put = (line: MLine, x: number, at: number, extra: { story?: PositionedLine["story"]; path?: number[] } = {}) => {
       if (extra.path && pageOpen) {
         pageStarts.push({ page: page.number, path: extra.path, offset: line.startOffset });
         pageOpen = false;
+      }
+      if (extra.path && line.wrap) {
+        // Report room on a side only where earlier reported room does not already cover it (the
+        // editor's boxes stay in effect below their line, like the objects they stand for).
+        const top = at + line.wrap.skip;
+        const side = (s: "left" | "right") => {
+          const w = line.wrap![s];
+          const r = reported[s];
+          if (!w || (r && Math.abs(r.width - w.width) < 0.5 && r.until >= top + w.height - 0.5)) return undefined;
+          reported[s] = { width: w.width, until: top + w.height };
+          return w;
+        };
+        const left = side("left");
+        const right = side("right");
+        if (line.wrap.skip > 0 || left || right) {
+          wraps.push({ page: page.number, path: extra.path, offset: line.startOffset, skip: line.wrap.skip,
+            ...(left ? { left } : {}), ...(right ? { right } : {}) });
+        }
       }
       const baseline = at + line.ascent;
       page.lines.push({
@@ -725,6 +940,59 @@ export class LayoutEngine {
         images: line.images.map((i) => ({ ...i, x: x + i.x, y: baseline - i.height })),
         rules: line.rules.map((r) => ({ ...r, x1: x + r.x1, x2: x + r.x2, y1: baseline + r.y1, y2: baseline + r.y2 })),
       });
+    };
+
+    /**
+     * Places a floating object anchored in a paragraph whose first line starts at `paraTop`: draws it
+     * (as "float" lines) and returns the area text must wrap around, if any.
+     */
+    const placeFloat = (f: FloatInfo, paraTop: number, path: number[], index: number,
+      column: [number, number] = [page.bodyLeft, page.bodyRight]): Exclusion | undefined => {
+      const h = f.x.from;
+      // In a table cell (Word's "layout in cell"), the column is the cell.
+      const hArea = h === "page" ? [0, page.width]
+        : h === "leftMargin" || h === "insideMargin" ? [0, page.bodyLeft]
+        : h === "rightMargin" || h === "outsideMargin" ? [page.bodyRight, page.width]
+        : column; // margin, column, character (approximated by the column)
+      const v = f.y.from;
+      const vArea = v === "page" ? [0, page.height] : v === "margin" ? [page.bodyTop, page.bodyBottom]
+        : v === "topMargin" ? [0, page.bodyTop] : v === "bottomMargin" ? [page.bodyBottom, page.height]
+        : [paraTop, paraTop]; // paragraph, line
+      const insets = f.insets ?? { left: 0, right: 0, top: 0, bottom: 0 };
+      const content = f.kind === "textbox" && f.blocks ? this.measureCell(f.blocks, f.width - insets.left - insets.right) : undefined;
+      const height = content && (f.autoHeight || f.height < 1) ? content.height + insets.top + insets.bottom : f.height;
+      const at = (pos: FloatInfo["x"], area: number[], size: number) =>
+        pos.offset !== undefined ? area[0] + pos.offset
+          : pos.align === "center" ? (area[0] + area[1] - size) / 2
+          : pos.align === "right" || pos.align === "bottom" || pos.align === "outside" ? area[1] - size : area[0];
+      const x = at(f.x, hArea, f.width);
+      const fy = at(f.y, vArea, height);
+      const from = page.lines.length;
+      if (f.kind === "picture" && f.imagePart) {
+        page.lines.push({ story: "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [],
+          images: [{ part: f.imagePart, x, y: fy, width: f.width, height }] });
+      }
+      if (content) for (const l of content.lines) put(l.line, x + insets.left, fy + insets.top + l.dy, { story: "float" });
+      if (f.kind === "ink" && f.ink) {
+        page.lines.push({ story: "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
+          strokes: f.ink.strokes.map((s) => ({ points: s.map((v, i) => (i % 2 ? fy + v * height : x + v * f.width)), width: f.ink!.width, color: f.ink!.color })) });
+      }
+      // The same, relative to the anchor paragraph and the object's box, for the editor.
+      const shift = (l: PositionedLine): PositionedLine => ({
+        ...l, x: l.x - x, y: l.y - fy, baseline: l.baseline - fy,
+        segments: l.segments.map((g) => ({ ...g, x: g.x - x })),
+        images: l.images.map((i) => ({ ...i, x: i.x - x, y: i.y - fy })),
+        rules: l.rules.map((r) => ({ ...r, x1: r.x1 - x, x2: r.x2 - x, y1: r.y1 - fy, y2: r.y2 - fy })),
+      });
+      floats.push({
+        page: page.number, path, index, x: x - column[0], y: fy - paraTop, width: f.width, height,
+        ...(f.kind === "picture" && f.imagePart ? { image: { part: f.imagePart } } : {}),
+        ...(f.kind === "ink" && f.ink ? { ink: f.ink } : {}),
+        lines: f.kind === "textbox" ? page.lines.slice(from).map(shift) : [],
+      });
+      if (f.wrap === "none") return undefined;
+      const span = f.wrap === "topAndBottom" ? { x1: -Infinity, x2: Infinity } : { x1: x - f.dist.left, x2: x + f.width + f.dist.right };
+      return { ...span, y1: fy - f.dist.top, y2: fy + height + f.dist.bottom };
     };
 
     let topIndex = 0;
@@ -816,7 +1084,50 @@ export class LayoutEngine {
         let remaining = box.lines;
         let first = true;
         let endedOnBreak = false;
+        // Floating objects anchored here, as placed on a page (moved if the paragraph moves on).
+        let anchored: { page: Page; from: number; to: number; exclusions: Exclusion[]; floatsFrom: number } | undefined;
         while (remaining.length) {
+          if (first && box.floats.length) {
+            if (anchored) {
+              anchored.page.lines.splice(anchored.from, anchored.to - anchored.from);
+              exclusions = exclusions.filter((e) => !anchored!.exclusions.includes(e));
+              floats.splice(anchored.floatsFrom);
+            }
+            const from = page.lines.length;
+            const floatsFrom = floats.length;
+            const placed = box.floats.map((f, i) => placeFloat(f, y, box.path, i)).filter((e): e is Exclusion => !!e);
+            exclusions.push(...placed);
+            anchored = { page, from, to: page.lines.length, exclusions: placed, floatsFrom };
+          }
+          if (first) {
+            // Wrap around floating objects on this page: lines beside one get the free part of the
+            // column; where too little is free, they move below it.
+            const paraTop = y;
+            const slot: Slot = (dy, height) => {
+              const at = paraTop + dy;
+              const over = exclusions.filter((e) => e.y1 < at + height && e.y2 > at);
+              if (!over.length) return { left: 0, right: width, leftUntil: 0, rightUntil: 0 };
+              let free = [[0, width]];
+              for (const e of over) {
+                const [a, b] = [e.x1 - left, e.x2 - left];
+                free = free.flatMap(([l, r]) => (b <= l || a >= r ? [[l, r]] : [[l, Math.max(l, a)], [Math.min(r, b), r]]).filter(([p, q]) => q - p > 0.01));
+              }
+              const best = free.sort((p, q) => (q[1] - q[0]) - (p[1] - p[0]))[0];
+              if (best && best[1] - best[0] >= MIN_WRAP) {
+                // How far down the objects on each side of the free span reach (relative to the paragraph).
+                const until = (side: Exclusion[]) => (side.length ? Math.max(...side.map((e) => e.y2)) - paraTop : 0);
+                return {
+                  left: best[0], right: best[1],
+                  leftUntil: until(over.filter((e) => e.x2 - left <= best[0] + 0.01)),
+                  rightUntil: until(over.filter((e) => e.x1 - left >= best[1] - 0.01)),
+                };
+              }
+              // No room beside: the line moves below all the objects beside it (as Word does: with a
+              // picture on each side, below the lower one). A paragraph pushed down keeps its space before.
+              return { skipTo: Math.max(...over.map((e) => e.y2)) - paraTop + (dy === 0 ? rp.spaceBefore : 0) };
+            };
+            remaining = exclusions.some((e) => e.y2 > y) ? this.breakLines(box.para, rp, width, slot) : box.lines;
+          }
           let fit = 0;
           let h = 0;
           while (fit < remaining.length && h + remaining[fit].fitHeight <= room() + 0.01) h += remaining[fit++].height;
@@ -869,7 +1180,7 @@ export class LayoutEngine {
           pageStarts.push({ page: page.number, path: tablePath, row: row.index });
           pageOpen = false;
         }
-        for (const c of row.cells) {
+        for (const [ci, c] of row.cells.entries()) {
           if (c.fill || c.borders) {
             page.rects.push({
               x: left + c.dx - CELL_MARGIN, y, width: c.width, height: row.height,
@@ -879,11 +1190,15 @@ export class LayoutEngine {
           }
           for (const [anchor, dy] of c.markers) mark(anchor, y + dy);
           for (const l of c.lines) put(l.line, left + c.dx, y + l.dy);
+          // Floating objects in the cell (signatures, logos): placed in the cell; text does not wrap.
+          for (const cf of c.floats ?? []) {
+            placeFloat(cf.float, y + cf.dy, [...tablePath, row.index, ci, ...cf.path], cf.index, [left + c.dx, left + c.dx + c.width - 2 * CELL_MARGIN]);
+          }
         }
         y += row.height;
       }
     });
-    return { pages, markers, paragraphs, pageStarts };
+    return { pages, markers, paragraphs, pageStarts, wraps, floats };
   }
 }
 

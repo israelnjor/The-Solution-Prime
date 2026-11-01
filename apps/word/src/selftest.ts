@@ -3,6 +3,7 @@
  * Results are logged as "[selftest] ..." lines for the test scripts to read.
  */
 import { fromProseMirror, timed } from "@prime/editor";
+import { layoutDocument, type Measurer } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 import { TextSelection } from "prosemirror-state";
 import * as pmView from "prosemirror-view";
@@ -65,7 +66,7 @@ export function copySelfTest(view: EditorView, base: () => PrimeDocument) {
 
 /** Types misspelled words, waits for the checker, then applies a suggestion the way the menu does. */
 export function spellSelfTest(view: EditorView) {
-  view.dispatch(view.state.tr.insertText(" The colour of teh centre is beautifull. ", 1));
+  view.dispatch(view.state.tr.insertText(" The colour of teh centre is beautifull, see https://github.com/Dept-of-Comp/seg26-edutrack or www.youtubee.com. ", 1));
   const marked = () => [...view.dom.querySelectorAll(".pw-misspelled")].map((e) => e.textContent);
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   void (async () => {
@@ -154,11 +155,220 @@ export function alignmentReport() {
     worst = Math.max(worst, error);
     if (error > 1) { off++; bad.push([Number(gap.dataset.page), Math.round(gap.getBoundingClientRect().bottom - (sheet.getBoundingClientRect().top + bodyOffset))]); }
   }
-  const corrections = performance.getEntriesByName("pw:correction").length;
+  const corrected = performance.getEntriesByType("measure").filter((e) => e.name.startsWith("pw:correction")).map((e) => e.name.slice(14));
+  const corrections = corrected.length;
+  console.log("[selftest] corrected", corrected.length, JSON.stringify(corrected.slice(-8)));
+  // How far each page's content ends from its body bottom (the top of the mask below it), in px:
+  // positive = the screen ran longer than the layout there.
+  const masks = Array.from(document.querySelectorAll(".pw-mask"));
+  const ends = Array.from(document.querySelectorAll<HTMLElement>(".pw-page-gap")).map((g) => {
+    const top = g.getBoundingClientRect().top;
+    const mask = masks.map((m) => m.getBoundingClientRect().top).filter((t) => t <= top + 200).pop();
+    return mask === undefined ? null : [Number(g.dataset.page) - 1, Math.round(top - mask)];
+  });
+  console.log("[selftest] page ends", JSON.stringify(ends));
   const rounds = performance.getEntriesByType("measure").filter((e) => e.name.startsWith("pw:round")).map((e) => Number(e.name.slice(9)));
   return { corrections, rounds, pages: sheets.length, checked, worstPx: Math.round(worst * 10) / 10, offByMoreThan1px: off, firstOff: bad.slice(0, 8), masked: Array.from(document.querySelectorAll('.pw-mask')).length, unmasked: sheets.length - 1 - document.querySelectorAll(".pw-mask").length };
 }
 
 export function alignSelfTest() {
   setTimeout(() => console.log("[selftest] align", JSON.stringify(alignmentReport())), 3000);
+}
+
+/** Scrolls page `n` (from ?page=n) to the top of the window, for screenshots. */
+export function scrollSelfTest() {
+  const n = Number(new URLSearchParams(location.search).get("page") ?? 1);
+  setTimeout(() => {
+    // ?at=<text>: the first paragraph containing it instead of a page (also in Web Layout).
+    const at = new URLSearchParams(location.search).get("at");
+    const target = at ? [...document.querySelectorAll(".ProseMirror p")].find((p) => p.textContent?.includes(at)) : undefined;
+    if (target) target.scrollIntoView({ block: "start" });
+    else document.querySelectorAll(".pw-sheet")[n - 1]?.scrollIntoView({ block: "start" });
+    // Debug aid: what sits around the page (spacers and wrap room), relative to the page's sheet.
+    const sheet = document.querySelectorAll(".pw-sheet")[n - 1]?.getBoundingClientRect();
+    if (sheet) {
+      const rel = (el: Element) => Math.round(el.getBoundingClientRect().top - sheet.top);
+      const near = (el: Element) => Math.abs(rel(el)) < 2400;
+      const items = [...document.querySelectorAll(".pw-page-gap, .pw-wrap")].filter(near).map((el) =>
+        el.classList.contains("pw-wrap")
+          ? `wrap@${rel(el)} in "${el.closest("p,h1,h2,h3,h4,div")?.textContent?.slice(0, 25)}" boxes=${[...el.children].map((c) => (c as HTMLElement).style.cssText).join(" | ")}`
+          : `gap p${(el as HTMLElement).dataset.page}@${rel(el)} h=${Math.round(el.getBoundingClientRect().height)}`);
+      console.log("[selftest] near", JSON.stringify(items));
+      const paras = [...document.querySelectorAll(".ProseMirror > *")].filter(near).filter((el) => rel(el) > 0 && rel(el) < 1500)
+        .map((el) => `${rel(el)}-${Math.round(el.getBoundingClientRect().bottom - sheet.top)}:${(el.textContent ?? "").slice(0, 14)}`);
+      console.log("[selftest] paras", JSON.stringify(paras));
+    }
+    console.log("[selftest] align", JSON.stringify({ scrolled: n }));
+  }, 2500);
+}
+
+/**
+ * Line counts per paragraph: the layout engine's (with the browser's measurer) against the lines the
+ * browser actually drew. Lists the first paragraphs where they differ.
+ */
+export function linesSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  setTimeout(() => {
+    const layout = layoutDocument(fromProseMirror(view.state.doc, base()), measurer);
+    // Lines the browser drew per paragraph (the engine's are counted per paragraph laid out alone).
+    const engine = new Map<number, number>();
+    const diffs: string[] = [];
+    view.state.doc.forEach((node, offset, index) => {
+      if (node.type.name !== "paragraph" || !node.textContent.trim()) return;
+      const dom = view.nodeDOM(offset) as HTMLElement | null;
+      if (!dom) return;
+      // Lines of text only (not list labels or other widgets): distinct baselines of text runs.
+      const ys = new Set<number>();
+      const walker = document.createTreeWalker(dom, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if ((t.parentElement as HTMLElement | null)?.closest("[contenteditable=false]")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(t);
+        for (const r of range.getClientRects()) if (r.width > 0) ys.add(Math.round(r.bottom / 4));
+      }
+      engine.set(index, ys.size);
+    });
+    const one = (index: number) => {
+      const node = view.state.doc.child(index);
+      const doc = { ...base(), sections: [{ ...base().sections[0], blocks: [fromProseMirror(view.state.doc.type.schema.node("doc", null, [node]), base()).sections[0].blocks[0]] }] };
+      const l = layoutDocument(doc, measurer);
+      return l.pages.reduce((n, p) => n + p.lines.filter((x) => !x.story).length, 0);
+    };
+    for (const [index, domLines] of engine) {
+      const ours = one(index);
+      if (ours !== domLines && diffs.length < 12) diffs.push(`#${index} engine ${ours} screen ${domLines}: ${view.state.doc.child(index).textContent.slice(0, 50)}`);
+    }
+    console.log("[selftest] lines", JSON.stringify(diffs));
+    // Table rows: heights on screen against the engine's (each table laid out alone), in pt.
+    const rows: string[] = [];
+    view.state.doc.forEach((node, offset, index) => {
+      if (node.type.name !== "table") return;
+      const dom = view.nodeDOM(offset) as HTMLElement | null;
+      const screen = dom ? [...dom.querySelectorAll("tr")].map((tr) => Math.round(tr.getBoundingClientRect().height * 0.75 * 10) / 10) : [];
+      const doc = { ...base(), sections: [{ ...base().sections[0], blocks: [fromProseMirror(view.state.doc.type.schema.node("doc", null, [node]), base()).sections[0].blocks[0]] }] };
+      const l = layoutDocument(doc, measurer);
+      const ys = [...new Set(l.pages.flatMap((p) => p.rects.filter((r) => r.sides).map((r) => `${p.number}:${Math.round(r.y * 10) / 10}:${Math.round(r.height * 10) / 10}`)))];
+      const engine = ys.map((k) => Number(k.split(":")[2]));
+      rows.push(`#${index} screen ${JSON.stringify(screen)} engine ${JSON.stringify(engine)}`);
+    });
+    console.log("[selftest] rows", JSON.stringify(rows));
+    // Every paragraph's height (first line top to last line bottom), screen against engine, in pt.
+    const heights: [number, string][] = [];
+    view.state.doc.forEach((node, offset, index) => {
+      if (node.type.name !== "paragraph") return;
+      const dom = view.nodeDOM(offset) as HTMLElement | null;
+      if (!dom) return;
+      const cs = getComputedStyle(dom);
+      const screen = (dom.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) * 0.75;
+      const doc = { ...base(), sections: [{ ...base().sections[0], blocks: [fromProseMirror(view.state.doc.type.schema.node("doc", null, [node]), base()).sections[0].blocks[0]] }] };
+      const lines = layoutDocument(doc, measurer).pages.flatMap((p) => p.lines.filter((x) => !x.story));
+      const engine = lines.length ? Math.max(...lines.map((l) => l.y + l.height)) - Math.min(...lines.map((l) => l.y)) : 0;
+      heights.push([Math.round((screen - engine) * 10) / 10, `#${index} screen ${screen.toFixed(1)} engine ${engine.toFixed(1)}: ${node.textContent.slice(0, 30)}`]);
+    });
+    heights.sort((a, b) => b[0] - a[0]);
+    console.log("[selftest] heights", JSON.stringify(heights.slice(0, 8).map((h) => h[1])));
+    // Paragraph tops on their page, screen against engine (pt from the page top), where they drift.
+    const sheets = [...document.querySelectorAll(".pw-sheet")].map((e) => e.getBoundingClientRect().top);
+    const drift: string[] = [];
+    let last = 0;
+    let n = 0;
+    view.state.doc.forEach((node, offset, index) => {
+      if (node.type.name !== "paragraph" || !node.textContent.trim()) return;
+      // The engine lists table-cell paragraphs too: find this one by its text, in order.
+      const key = node.textContent.slice(0, 20);
+      let j = n;
+      while (j < layout.paragraphs.length && layout.paragraphs[j].text.slice(0, 20) !== key) j++;
+      if (j >= layout.paragraphs.length) return;
+      const want = layout.paragraphs[j];
+      n = j + 1;
+      const dom = view.nodeDOM(offset) as HTMLElement | null;
+      if (!dom) return;
+      const top = dom.getBoundingClientRect().top;
+      const page = sheets.filter((t) => t <= top + 1).length;
+      const y = (top - sheets[page - 1]) * 0.75;
+      const d = page === want.page ? Math.round((y - want.y) * 10) / 10 : 999;
+      if (Math.abs(d - last) > 0.8 && drift.length < 14) drift.push(`#${index} p${want.page} ${want.y.toFixed(1)} -> p${page} ${y.toFixed(1)} (${d}) ${node.textContent.slice(0, 25)}`);
+      last = d;
+    });
+    console.log("[selftest] drift", JSON.stringify(drift));
+    console.log("[selftest] align", JSON.stringify({ done: true }));
+  }, 3000);
+}
+
+/** Drags the first floating picture 60px right and 30px down, then a corner 40px out; logs its box. */
+export function floatDragSelfTest() {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const box = (el: HTMLElement) => ["x", "y", "w", "h"].map((k) => Math.round(Number(el.dataset[k]))).join(",");
+  const mouse = (type: string, target: EventTarget, x: number, y: number) =>
+    target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+  void (async () => {
+    await wait(2500);
+    const first = () => document.querySelector<HTMLElement>('.pw-float[data-kind="picture"]');
+    let el = first();
+    if (!el) return console.log("[selftest] align", JSON.stringify({ error: "no floating picture" }));
+    el.scrollIntoView();
+    const before = box(el);
+    const r = el.getBoundingClientRect();
+    mouse("mousedown", el, r.left + 20, r.top + 20);
+    mouse("mousemove", window, r.left + 80, r.top + 50);
+    mouse("mouseup", window, r.left + 80, r.top + 50);
+    await wait(1500);
+    el = first()!;
+    const moved = box(el);
+    const r2 = el.getBoundingClientRect();
+    mouse("mousedown", el.querySelector(".pw-se")!, r2.right, r2.bottom);
+    mouse("mousemove", window, r2.right + 40, r2.bottom + 40);
+    mouse("mouseup", window, r2.right + 40, r2.bottom + 40);
+    await wait(1500);
+    console.log("[selftest] align", JSON.stringify({ before, moved, resized: box(first()!) }));
+  })();
+}
+
+/** Review UI: opens the Review tab and the comments pane, then adds a comment on the first words. */
+export function reviewSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)?.click();
+  void (async () => {
+    await wait(1500);
+    click("Review");
+    await wait(200);
+    click("Comments");
+    await wait(300);
+    let at = 0;
+    view.state.doc.descendants((n, pos) => { if (!at && n.isTextblock && n.textContent.length > 10) at = pos + 1; return !at; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at, at + 8)));
+    click("New Comment");
+    await wait(300);
+    const box = document.querySelector<HTMLTextAreaElement>(".comments-pane textarea");
+    if (box) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(box, "Added by the review self-test.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      await wait(100);
+      click("Post");
+    }
+    await wait(500);
+    const items = [...document.querySelectorAll(".comments-pane .comment:not(.new)")].map((c) => c.textContent?.slice(0, 60));
+    console.log("[selftest] align", JSON.stringify({ comments: items, highlighted: document.querySelectorAll(".pw-commented").length }));
+  })();
+}
+
+/** Keyboard: Alt+R opens Review with focus on its first control; F6 cycles ribbon → document → status bar. */
+export function keyboardSelfTest() {
+  const key = (k: string, opts: KeyboardEventInit = {}) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...opts }));
+  const where = () => {
+    const a = document.activeElement as HTMLElement | null;
+    return a?.closest(".toolbar") ? `ribbon:${a.textContent?.trim().slice(0, 14)}` : a?.closest(".status") ? "status" : a?.getAttribute("aria-label") ?? a?.tagName ?? "none";
+  };
+  setTimeout(async () => {
+    const steps: string[] = [];
+    key("r", { altKey: true });
+    await new Promise((r) => setTimeout(r, 50));
+    steps.push(`Alt+R tab=${document.querySelector('[role="tab"][aria-selected="true"]')?.textContent} focus=${where()}`);
+    for (let i = 0; i < 3; i++) { key("F6"); steps.push(`F6 -> ${where()}`); }
+    key("F6", { shiftKey: true });
+    steps.push(`Shift+F6 -> ${where()}`);
+    const unnamed = [...document.querySelectorAll("button")].filter((b) => !(b.getAttribute("aria-label") || b.textContent?.trim().length && b.textContent.trim().length > 1));
+    steps.push(`buttons without a readable name: ${unnamed.map((b) => b.outerHTML.slice(0, 60)).join(" | ") || "none"}`);
+    console.log("[selftest] align", JSON.stringify(steps));
+  }, 1500);
 }

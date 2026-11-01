@@ -2,7 +2,7 @@ import {
   addColumn, addRow, changeLevel, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
   setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
-  setLineSpacing,
+  setLineSpacing, acceptOrReject, gotoChange,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
@@ -22,7 +22,10 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "home" | "insert" | "layout" | "table";
+type Tab = "home" | "insert" | "layout" | "review" | "table";
+/** Word's keys for the tabs: Alt+H, Alt+N, Alt+P, Alt+R. */
+const TAB_KEYS: Record<string, string> = { home: "H", insert: "N", layout: "P", review: "R" };
+export type Markup = "all" | "none" | "original";
 
 const CM = 72 / 2.54;
 /** Word's margin presets (in cm). */
@@ -48,6 +51,11 @@ export interface RibbonProps {
   onParagraph(): void;
   mode: "print" | "web";
   onMode(mode: "print" | "web"): void;
+  markup: Markup;
+  onMarkup(markup: Markup): void;
+  onComments(): void;
+  onNewComment(): void;
+  onHome(): void;
 }
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
@@ -71,8 +79,21 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
+  // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const t = (Object.keys(TAB_KEYS) as Tab[]).find((k) => TAB_KEYS[k] === e.key.toUpperCase());
+      if (!t) return;
+      e.preventDefault();
+      setTab(t);
+      setTimeout(() => document.querySelector<HTMLElement>(".toolbar button:not(:disabled), .toolbar select")?.focus(), 0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [popover, setPopover] = useState<"link" | "table" | "margins" | null>(null);
   const [custom, setCustom] = useState({ top: 2.54, bottom: 2.54, left: 2.54, right: 2.54 });
   const [linkUrl, setLinkUrl] = useState("");
@@ -106,10 +127,11 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
 
   return (
     <header className="ribbon">
-      <nav className="tabs">
-        <span className="brand">Prime Word</span>
-        {([["home", "Home"], ["insert", "Insert"], ["layout", "Layout"]] as const).map(([t, label]) => (
-          <button key={t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}>{label}</button>
+      <nav className="tabs" role="tablist" aria-label="Ribbon tabs">
+        <button className="brand" onClick={onHome} title="Home: new, open, recent documents">Prime Word</button>
+        {([["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["review", "Review"]] as const).map(([t, label]) => (
+          <button key={t} role="tab" aria-selected={activeTab === t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}
+            title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
         {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table</button>}
         <span className="spacer" />
@@ -117,7 +139,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")} title="One continuous column">Web Layout</button>
       </nav>
 
-      <div className="toolbar">
+      <div className="toolbar" role="toolbar" aria-label="Ribbon">
         {activeTab === "home" && (
           <>
             <div className="group">
@@ -130,8 +152,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onPrint} title="Print (Ctrl+P)">Print</button>
             </div>
             <div className="group">
-              <button onClick={run(undo)} title="Undo (Ctrl+Z)">↶</button>
-              <button onClick={run(redo)} title="Redo (Ctrl+Y)">↷</button>
+              <button onClick={run(undo)} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
+              <button onClick={run(redo)} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
             </div>
             <div className="group">
               <select value={currentStyle} onChange={(e) => run(setParagraph("style", e.target.value))()} title="Paragraph style" className="style-select">
@@ -148,9 +170,10 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               </select>
               {([["bold", "B", "Bold (Ctrl+B)"], ["italic", "I", "Italic (Ctrl+I)"], ["underline", "U", "Underline (Ctrl+U)"], ["strike", "S", "Strikethrough"]] as const)
                 .map(([key, label, title]) => (
-                  <button key={key} className={`fmt-${key} ${state && isActive(state, key) ? "on" : ""}`} onClick={run(toggleRun(key))} title={title}>{label}</button>
+                  <button key={key} className={`fmt-${key} ${state && isActive(state, key) ? "on" : ""}`} onClick={run(toggleRun(key))} title={title}
+                    aria-label={title} aria-pressed={!!(state && isActive(state, key))}>{label}</button>
                 ))}
-              <label className="color" title="Font colour">
+              <label className="color" title="Font colour" aria-label="Font colour">
                 <span style={{ borderBottom: `3px solid #${effective?.color ?? "000000"}` }}>A</span>
                 <input type="color" value={`#${(effective?.color ?? "000000").toLowerCase()}`} onChange={(e) => run(setColor(e.target.value.slice(1)))()} />
               </label>
@@ -162,8 +185,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group">
               <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets">• List</button>
               <button className={list === "number" ? "on" : ""} onClick={run(toggleList(docRef, "number"))} title="Numbering">1. List</button>
-              <button onClick={run(changeLevel(-1))} title="Decrease indent (Shift+Tab)" disabled={!list}>⇤</button>
-              <button onClick={run(changeLevel(1))} title="Increase indent (Tab)" disabled={!list}>⇥</button>
+              <button onClick={run(changeLevel(-1))} title="Decrease indent (Shift+Tab)" aria-label="Decrease list level" disabled={!list}>⇤</button>
+              <button onClick={run(changeLevel(1))} title="Increase indent (Tab)" aria-label="Increase list level" disabled={!list}>⇥</button>
             </div>
             <div className="group">
               {([["left", "Left"], ["center", "Center"], ["right", "Right"], ["both", "Justify"]] as const).map(([value, label]) => (
@@ -188,7 +211,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <option value="top">Top border</option>
                 <option value="box">Box</option>
               </select>
-              <button onClick={onParagraph} title="Paragraph settings: indents and spacing">¶</button>
+              <button onClick={onParagraph} title="Paragraph settings: indents and spacing" aria-label="Paragraph settings">¶</button>
             </div>
             <div className="group">
               <button onClick={() => onFind(false)} title="Find (Ctrl+F)">Find</button>
@@ -293,6 +316,30 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </>
           );
         })()}
+
+        {activeTab === "review" && (
+          <>
+            <div className="group" aria-label="Comments">
+              <button onClick={onNewComment} title="Comment on the selected text">New Comment</button>
+              <button onClick={onComments} title="Show or hide the comments">Comments</button>
+            </div>
+            <div className="group" aria-label="Tracked changes">
+              <button onClick={run(gotoChange(-1))} title="Previous change">◀ Previous</button>
+              <button onClick={run(gotoChange(1))} title="Next change">Next ▶</button>
+              <button onClick={run(acceptOrReject(true))} title="Accept the change at the cursor">Accept</button>
+              <button onClick={run(acceptOrReject(false))} title="Reject the change at the cursor">Reject</button>
+              <button onClick={run(acceptOrReject(true, true))} title="Accept every change in the document">Accept All</button>
+              <button onClick={run(acceptOrReject(false, true))} title="Reject every change in the document">Reject All</button>
+            </div>
+            <div className="group">
+              <select value={markup} onChange={(e) => onMarkup(e.target.value as Markup)} title="How tracked changes are shown" aria-label="Markup">
+                <option value="all">All Markup</option>
+                <option value="none">No Markup (final)</option>
+                <option value="original">Original</option>
+              </select>
+            </div>
+          </>
+        )}
 
         {activeTab === "table" && (
           <>
