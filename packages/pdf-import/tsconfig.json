@@ -1,6 +1,28 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist", "lib": ["ES2022", "DOM"], "types": ["node"] },
-  "include": ["src"],
-  "references": [{ "path": "../pdm" }, { "path": "../docx" }]
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../pdm"
+    },
+    {
+      "path": "../docx"
+    },
+    {
+      "path": "../editor"
+    }
+  ]
 }

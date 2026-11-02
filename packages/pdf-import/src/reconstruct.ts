@@ -32,21 +32,35 @@ const top = (l: Line) => l.y - l.size * 0.8;
 const bottom = (l: Line) => l.y + l.size * 0.25;
 const lineText = (l: Line) => l.pieces.map((p) => p.text).join("");
 
+/** Left and right edges of what is visible: spaces before and after the text do not count. */
+function extent(pieces: TextPiece[]): { x0: number; x1: number } | undefined {
+  const ink = pieces.filter((p) => p.text.trim());
+  if (!ink.length) return undefined;
+  const first = ink[0];
+  const last = ink[ink.length - 1];
+  const lead = first.text.length - first.text.trimStart().length;
+  const trail = last.text.length - last.text.trimEnd().length;
+  return {
+    x0: Math.min(...ink.map((p) => p.x)) + (first.width * lead) / first.text.length,
+    x1: Math.max(...ink.map((p) => p.x + p.width)) - (last.width * trail) / last.text.length,
+  };
+}
+
 /** Pieces sharing a baseline (within a fraction of their size) form a line, left to right. */
 function buildLines(page: PageContent, pieces: TextPiece[]): Line[] {
-  const sorted = [...pieces].filter((p) => p.text.length).sort((a, b) => a.y - b.y || a.x - b.x);
+  // Full-size text first, so a line's baseline and size are its text's; smaller pieces (superscripts,
+  // subscripts) then join the line they sit on, slightly above or below its baseline.
+  const sorted = [...pieces].filter((p) => p.text.length).sort((a, b) => b.size - a.size || a.y - b.y || a.x - b.x);
   const lines: Line[] = [];
   for (const p of sorted) {
-    // Superscripts and subscripts sit off the baseline but belong to the line they overlap.
-    const line = lines.find((l) => Math.abs(l.y - p.y) < Math.max(l.size, p.size) * 0.45 && !(p.x > l.x1 + 200));
-    if (line) {
-      line.pieces.push(p);
-      if (p.size > line.size && Math.abs(p.y - line.y) < p.size * 0.2) { line.size = p.size; line.y = p.y; }
-      line.x0 = Math.min(line.x0, p.x);
-      line.x1 = Math.max(line.x1, p.x + p.width);
-    } else lines.push({ page: page.number, pieces: [p], y: p.y, x0: p.x, x1: p.x + p.width, size: p.size });
+    const line = lines.find((l) => Math.abs(l.y - p.y) < Math.max(l.size, p.size) * 0.45);
+    if (line) line.pieces.push(p);
+    else lines.push({ page: page.number, pieces: [p], y: p.y, x0: p.x, x1: p.x + p.width, size: p.size });
   }
-  for (const l of lines) l.pieces.sort((a, b) => a.x - b.x);
+  for (const l of lines) {
+    l.pieces.sort((a, b) => a.x - b.x);
+    Object.assign(l, extent(l.pieces) ?? {});
+  }
   // A line made only of spaces carries nothing.
   return lines.filter((l) => lineText(l).trim().length).sort((a, b) => a.y - b.y || a.x0 - b.x0);
 }
@@ -87,7 +101,8 @@ function findGrids(rules: Rule[], fills: Fill[]): Grid[] {
     if (gh.length < 2 || gv.length < 2) continue;
     const xs = cluster(gv.map((r) => r.x1), 2);
     const ys = cluster(gh.map((r) => r.y1), 2);
-    if (xs.length < 2 || ys.length < 2) continue;
+    // One box (two lines each way) is a bordered paragraph, not a table.
+    if (xs.length < 2 || ys.length < 2 || (xs.length === 2 && ys.length === 2)) continue;
     const near = (a: number, b: number) => Math.abs(a - b) <= 2;
     const covers = (r: Rule, from: number, to: number, horizontal: boolean) =>
       horizontal ? r.x1 <= from + 2 && r.x2 >= to - 2 : r.y1 <= from + 2 && r.y2 >= to - 2;
@@ -105,7 +120,7 @@ const inGrid = (g: Grid, x: number, y: number) => x >= g.xs[0] - 1 && x <= g.xs[
 
 type Item =
   | { kind: "lines"; lines: Line[]; y: number }
-  | { kind: "table"; grid: Grid; lines: Line[]; y: number; page: number }
+  | { kind: "table"; grid: Grid; lines: Line[]; pictures: Picture[]; y: number; page: number }
   | { kind: "picture"; picture: Picture; y: number; page: number };
 
 const BULLETS = /^[•●○◦▪▫■□–—‣⁃➢✓✔·o∙-]$/;
@@ -118,7 +133,8 @@ function listLabel(l: Line): { label: string; kind: "bullet" | "decimal" | "lowe
   const words = text.split(/\s+/);
   const label = words[0];
   if (!label) return undefined;
-  const after = words.length > 1 ? first.x + first.width * (text.indexOf(words[1]) / Math.max(text.length, 1)) : l.pieces[1]?.x;
+  // Where the text after the label starts: later in the same piece, or the next piece with text.
+  const after = words.length > 1 ? first.x + first.width * (text.indexOf(words[1]) / Math.max(text.length, 1)) : l.pieces.slice(1).find((p) => p.text.trim())?.x;
   if (after === undefined || after - first.x < first.size * 0.5) return undefined;
   if (BULLETS.test(label)) return { label, kind: "bullet", textX: after };
   if (!NUMBERED.test(label)) return undefined;
@@ -126,6 +142,22 @@ function listLabel(l: Line): { label: string; kind: "bullet" | "decimal" | "lowe
   const kind = /^\d+$/.test(core) ? "decimal" : /^[ivxlc]+$/.test(core) && core.length > 1 ? "lowerRoman" : /^[IVXLC]+$/.test(core) && core.length > 1 ? "upperRoman"
     : /^[a-z]$/.test(core) ? "lowerLetter" : "upperLetter";
   return { label, kind, textX: after };
+}
+
+/** Whether most of a line's characters are bold (a bold lead-in like "Key point:" does not count). */
+function mostlyBold(l: Line): boolean {
+  let bold = 0;
+  let all = 0;
+  for (const p of l.pieces) { const n = p.text.trim().length; all += n; if (p.font.bold) bold += n; }
+  return bold * 2 > all;
+}
+
+/** Width of a line's first word (estimated from its piece's width). */
+function firstWordWidth(l: Line): number {
+  const p = l.pieces.find((x) => x.text.trim()) ?? l.pieces[0];
+  const text = p.text.trimStart();
+  const word = text.split(/\s/)[0] ?? "";
+  return text.length ? (p.width * word.length) / text.length : 0;
 }
 
 const LINE_FACTOR: Record<string, number> = { calibri: 1.22, "calibri light": 1.22, cambria: 1.17, aptos: 1.2, "times new roman": 1.15, arial: 1.15, georgia: 1.14, verdana: 1.22, "segoe ui": 1.33 };
@@ -146,16 +178,16 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
 
   // --- headers and footers: lines repeated near the top or bottom of most pages --------------
   const pageLines = pages.map((p) => buildLines(p, p.texts));
-  const norm = (s: string) => s.replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
+  // The same text at the same height on most pages; only the page's own number may differ.
+  const keyOf = (l: Line) => `${Math.round(l.y)}|${lineText(l).replace(new RegExp(`(^|\\D)${l.page}(\\D|$)`), "$1#$2").replace(/\s+/g, " ").trim()}`;
   const repeated = (zone: (l: Line, p: PageContent) => boolean) => {
     const counts = new Map<string, number>();
-    pageLines.forEach((ls, i) => new Set(ls.filter((l) => zone(l, pages[i])).map((l) => `${Math.round(l.y)}|${norm(lineText(l))}`)).forEach((k) => counts.set(k, (counts.get(k) ?? 0) + 1)));
+    pageLines.forEach((ls, i) => new Set(ls.filter((l) => zone(l, pages[i])).map(keyOf)).forEach((k) => counts.set(k, (counts.get(k) ?? 0) + 1)));
     const need = Math.max(2, Math.ceil(pages.length * 0.6));
     return new Set([...counts.entries()].filter(([, n]) => n >= need).map(([k]) => k));
   };
   const headerKeys = pages.length > 1 ? repeated((l, p) => l.y < p.height * 0.12) : new Set<string>();
   const footerKeys = pages.length > 1 ? repeated((l, p) => l.y > p.height * 0.88) : new Set<string>();
-  const keyOf = (l: Line) => `${Math.round(l.y)}|${norm(lineText(l))}`;
   const storyFrom = (lines: Line[], page: PageContent): Block[] => lines.map((l) => {
     const text = lineText(l).trim();
     // The page's own number becomes a PAGE field.
@@ -207,6 +239,24 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   const firstWithFooter = pageLines.findIndex((ls) => ls.some((l) => footerKeys.has(keyOf(l))));
   if (firstWithFooter >= 0) section.footers.default = { blocks: storyFrom(pageLines[firstWithFooter].filter((l) => footerKeys.has(keyOf(l))), pages[firstWithFooter]) };
 
+  // Pictures at the same place near the top or bottom of most pages (a logo): the header's or footer's.
+  const picKey = (p: Picture) => [p.x, p.y, p.w, p.h].map((v) => Math.round(v)).join(",");
+  const picCounts = new Map<string, number>();
+  for (const pg of pages) new Set(pg.pictures.map(picKey)).forEach((k) => picCounts.set(k, (picCounts.get(k) ?? 0) + 1));
+  const chromePictures = new Set<string>();
+  if (pages.length > 1) {
+    for (const [k, n] of picCounts) {
+      if (n < Math.max(2, Math.ceil(pages.length * 0.6))) continue;
+      const pg = pages.find((x) => x.pictures.some((p) => picKey(p) === k))!;
+      const pic = pg.pictures.find((p) => picKey(p) === k)!;
+      const inTop = pic.y + pic.h < pg.height * 0.3;
+      if (!inTop && pic.y < pg.height * 0.7) continue;
+      const story = inTop ? (section.headers.default ??= { blocks: [] }) : (section.footers.default ??= { blocks: [] });
+      story.blocks.unshift(pictureParagraph(pic, left, right));
+      chromePictures.add(k);
+    }
+  }
+
   /** Run formatting that differs from a paragraph's style (base). */
   function runProps(p: TextPiece, base: { family: string; size: number; bold: boolean; italic: boolean; color: string } | undefined): RunProps | undefined {
     const b = base ?? { family: bodyFont, size: bodySize, bold: false, italic: false, color: "000000" };
@@ -216,6 +266,7 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     if (p.font.bold !== b.bold) out.bold = p.font.bold;
     if (p.font.italic !== b.italic) out.italic = p.font.italic;
     if (p.color !== b.color) out.color = p.color;
+    if (p.underline) out.underline = { val: "single" };
     return Object.keys(out).length ? out : undefined;
   }
 
@@ -235,10 +286,11 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     for (const g of grids) {
       const inside = lines.filter((l) => inGrid(g, (l.x0 + l.x1) / 2, l.y - l.size * 0.3));
       inside.forEach((l) => used.add(l));
-      items.push({ kind: "table", grid: g, lines: inside, y: g.ys[0], page: page.number });
+      const pics = page.pictures.filter((pic) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2));
+      items.push({ kind: "table", grid: g, lines: inside, pictures: pics, y: g.ys[0], page: page.number });
     }
     for (const pic of page.pictures) {
-      if (grids.some((g) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2))) continue;
+      if (chromePictures.has(picKey(pic)) || grids.some((g) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2))) continue;
       items.push({ kind: "picture", picture: pic, y: pic.y, page: page.number });
     }
     let run: Line[] = [];
@@ -251,7 +303,12 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       run.push(l);
     }
     flush();
-    if (!page.texts.length && page.pictures.length) warnings.push(`Page ${page.number} is a picture (scanned?): its text cannot be edited until text recognition is added.`);
+    // A scanned page: no text, one picture covering most of the page (a full-page screenshot in a typed
+    // document has a caption or margins around it).
+    const scan = page.pictures.some((pic) => pic.w > page.width * 0.85 && pic.h > page.height * 0.85);
+    if (!page.texts.some((t) => t.text.trim()) && scan) {
+      warnings.push(`Page ${page.number} is a scanned image: its text cannot be edited until text recognition is added.`);
+    }
   });
   items.sort((a, b) => pageOf(a) - pageOf(b) || a.y - b.y);
   function pageOf(x: Item) { return x.kind === "lines" ? x.lines[0].page : x.page; }
@@ -278,9 +335,16 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     const push = (text: string, p: TextPiece) => {
       if (!text) return;
       const props = runProps(p, look);
-      const last = content[content.length - 1];
+      // Text in a link area goes inside a link (consecutive pieces with the same address share one).
+      let into = content;
+      if (p.link) {
+        const lastLink = content[content.length - 1];
+        if (lastLink?.type === "link" && lastLink.href === p.link) into = lastLink.content;
+        else { const link: Inline = { type: "link", href: p.link, content: [] }; content.push(link); into = (link as { content: Inline[] }).content; }
+      }
+      const last = into[into.length - 1];
       if (last?.type === "text" && JSON.stringify(last.props ?? null) === JSON.stringify(props ?? null)) last.text += text;
-      else content.push({ type: "text", text, ...(props ? { props } : {}) });
+      else into.push({ type: "text", text, ...(props ? { props } : {}) });
     };
     lines.forEach((l, li) => {
       let pieces = l.pieces;
@@ -289,6 +353,8 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
         const [head, ...rest] = pieces;
         const remainder = head.text.trim().slice(label.label.length).replace(/^\s+/, "");
         pieces = remainder ? [{ ...head, text: remainder, x: label.textX }, ...rest] : rest;
+        while (pieces.length && !pieces[0].text.trim()) pieces = pieces.slice(1);
+        if (pieces.length) pieces = [{ ...pieces[0], text: pieces[0].text.replace(/^\s+/, "") }, ...pieces.slice(1)];
       }
       if (li > 0) {
         const prev = content[content.length - 1];
@@ -317,7 +383,9 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     if (styleId) props.style = styleId;
     const rest = lines.slice(1);
     const textLeft = label ? label.textX : rest.length ? Math.min(...rest.map((l) => l.x0)) : firstLine.x0;
-    const align = lines.length === 1 || !label ? alignOfParagraph(lines) : undefined;
+    // List items can be justified too (their label does not count as centred or right-aligned text).
+    const found = alignOfParagraph(lines);
+    const align = label && found !== "both" ? undefined : found;
     if (align) props.align = align;
     if (!align || align === "both" || align === "left") {
       const indentLeft = round(textLeft - left, 0.5);
@@ -397,13 +465,20 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     let label: ReturnType<typeof listLabel>;
     const close = () => { if (cur.length) pushParagraph(cur, label); cur = []; label = undefined; };
     for (const l of item.lines) {
-      const lab = listLabel(l);
+      // A heading that starts "1." is a numbered heading, not a list.
+      const lab = styleFor(round(l.size)) ? undefined : listLabel(l);
       const prev = cur[cur.length - 1];
       if (prev) {
         const pitch = l.y - prev.y;
         const expected = cur.length > 1 ? (prev.y - cur[0].y) / (cur.length - 1) : prev.size * 1.25;
-        const sameLook = Math.abs(l.size - prev.size) < 0.6 && l.pieces[0].font.bold === prev.pieces[0].font.bold;
-        const prevEndsShort = prev.x1 < right - prev.size * 4;
+        const sameLook = Math.abs(l.size - prev.size) < 0.6 && mostlyBold(l) === mostlyBold(prev);
+        // Word moves a word to the next line only when it does not fit: if the next line's first word
+        // would have fitted after the previous line (within this paragraph's right edge), that line
+        // ended its paragraph.
+        const edge = Math.max(...cur.map((c) => c.x1), l.x1);
+        // Also a short line (an address, a sign-off) whose next word would fit before the margin.
+        const fits = (limit: number) => prev.x1 + firstWordWidth(l) + l.size * 0.25 < limit - 1;
+        const prevEndsShort = fits(edge) || (prev.x1 - left < (right - left) * 0.6 && fits(right));
         const continues = sameLook && !lab && pitch < Math.max(expected * 1.25, prev.size * 1.5) && pitch > 0 &&
           (label ? Math.abs(l.x0 - label.textX) < 3 : !prevEndsShort || alignOfLine(prev, first) === "center");
         if (!continues) close();
@@ -465,15 +540,24 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       continue;
     }
     if (item.kind === "table") {
-      block = tableOf(item.grid, item.lines);
+      const table = tableOf(item.grid, item.lines, item.pictures);
       endY = item.grid.ys[item.grid.ys.length - 1];
+      // A table that runs on from the previous page (same columns, nothing between): one table again,
+      // without the header row Word repeats on each page.
+      const last = blocks[blocks.length - 1];
+      if (!previousBottom && !pendingBreak && last?.type === "table" && last.grid.length === table.grid.length &&
+          last.grid.every((w, k) => Math.abs(w - table.grid[k]) < 2)) {
+        const text = (r: Table["rows"][number]) => JSON.stringify(r.cells.map((c) => c.blocks));
+        const rows = table.rows.length > 1 && text(table.rows[0]) === text(last.rows[0]) ? table.rows.slice(1) : table.rows;
+        if (rows !== table.rows) last.rows[0].props = { ...last.rows[0].props, header: true };
+        last.rows.push(...rows);
+        previousBottom = { page, y: endY };
+        continue;
+      }
+      block = table;
     } else {
       const pic = item.picture;
-      const id = `media/import${Object.keys(doc.images).length + 1}.png`;
-      doc.images[id] = { contentType: "image/png", extension: "png", data: base64(pic.png) };
-      const center = pic.x + pic.w / 2;
-      const align = Math.abs(center - (left + right) / 2) < 12 && pic.x > left + 12 ? "center" : pic.x > left + 24 && Math.abs(pic.x + pic.w - right) < 6 ? "right" : undefined;
-      block = { type: "paragraph", props: align ? { align } : {}, content: [{ type: "image", imageId: id, width: round(pic.w, 0.1), height: round(pic.h, 0.1) }] };
+      block = pictureParagraph(pic, left, right);
       endY = pic.y + pic.h;
       y = pic.y;
     }
@@ -489,6 +573,15 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     previousBottom = { page, y: endY };
   }
 
+  /** A picture in a paragraph of its own, aligned as it sits between `from` and `to`. */
+  function pictureParagraph(pic: Picture, from: number, to: number): Paragraph {
+    const id = `media/import${Object.keys(doc.images).length + 1}.png`;
+    doc.images[id] = { contentType: "image/png", extension: "png", data: base64(pic.png) };
+    const center = pic.x + pic.w / 2;
+    const align = Math.abs(center - (from + to) / 2) < 12 && pic.x > from + 12 ? "center" : pic.x > from + 24 && Math.abs(pic.x + pic.w - to) < 6 ? "right" : undefined;
+    return { type: "paragraph", props: align ? { align } : {}, content: [{ type: "image", imageId: id, width: round(pic.w, 0.1), height: round(pic.h, 0.1) }] };
+  }
+
   /** Space before a paragraph: what the gap leaves beyond the line's own height. */
   function setSpaceBefore(p: Paragraph, gap: number, l: Line) {
     const natural = l.size * factor(l.pieces[0].font.family);
@@ -501,7 +594,7 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   section.blocks = blocks.length ? blocks : [{ type: "paragraph", props: {}, content: [] }];
 
   // --- tables ---------------------------------------------------------------------------------
-  function tableOf(g: Grid, lines: Line[]): Table {
+  function tableOf(g: Grid, lines: Line[], pictures: Picture[]): Table {
     const cols = g.xs.length - 1;
     const rows = g.ys.length - 1;
     const grid = g.xs.slice(1).map((x, c) => round(x - g.xs[c], 0.05));
@@ -519,8 +612,8 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
         const key = `${r}:${c}`;
         const list = owned.get(key) ?? [];
         const same = list.find((x) => x.y === l.y);
-        if (same) { same.pieces.push(p); same.x1 = Math.max(same.x1, p.x + p.width); }
-        else list.push({ ...l, pieces: [p], x0: p.x, x1: p.x + p.width });
+        if (same) { same.pieces.push(p); Object.assign(same, extent(same.pieces) ?? {}); }
+        else list.push({ ...l, pieces: [p], ...(extent([p]) ?? { x0: p.x, x1: p.x + p.width }) });
         owned.set(key, list);
       }
     }
@@ -533,15 +626,25 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     };
     // Merges: no line between two grid cells means one cell spans both.
     const spanRight = (r: number, c: number) => { let n = 1; while (c + n < cols && !g.v[r][c + n]) n++; return n; };
-    const mergedDown = (r: number, c: number) => r > 0 && !g.h[r][c];
+    // A cell merges into the one above only when no rule separates them and it has nothing of its own.
+    const hasText = (r: number, c: number) => (owned.get(`${r}:${c}`) ?? []).length > 0;
+    const mergedDown = (r: number, c: number) => r > 0 && !g.h[r][c] && !hasText(r, c);
     for (let r = 0; r < rows; r++) {
       const cells: TableCell[] = [];
       for (let c = 0; c < cols;) {
         const span = spanRight(r, c);
         const cellLines = Array.from({ length: span }, (_, k) => owned.get(`${r}:${c + k}`) ?? []).flat().sort((a, b) => a.y - b.y || a.x0 - b.x0);
         const fill = fillAt(r, c);
-        const vMerge = mergedDown(r, c) ? "continue" : r + 1 < rows && !g.h[r + 1][c] ? "restart" : undefined;
-        const blocksIn: Block[] = cellLines.length ? cellParagraphs(cellLines) : [{ type: "paragraph", props: {}, content: [] }];
+        const vMerge = mergedDown(r, c) ? "continue" : r + 1 < rows && mergedDown(r + 1, c) ? "restart" : undefined;
+        const blocksIn: Block[] = cellLines.length ? cellParagraphs(cellLines, g.xs[c], g.xs[c + span]) : [];
+        // Pictures in the cell, in order with its text.
+        for (const pic of pictures) {
+          const [pr, pc] = cellOf(pic.x + pic.w / 2, pic.y + pic.h / 2);
+          if (pr !== r || pc < c || pc >= c + span) continue;
+          const at = cellLines.filter((l) => l.y < pic.y + pic.h / 2).length;
+          blocksIn.splice(Math.min(at, blocksIn.length), 0, pictureParagraph(pic, g.xs[c] + 5.4, g.xs[c + span] - 5.4));
+        }
+        if (!blocksIn.length) blocksIn.push({ type: "paragraph", props: {}, content: [] });
         cells.push({
           props: {
             width: { w: String(Math.round(grid.slice(c, c + span).reduce((a, b) => a + b, 0) * 20)), type: "dxa" },
@@ -557,15 +660,20 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     return out;
   }
 
-  function cellParagraphs(lines: Line[]): Block[] {
+  function cellParagraphs(lines: Line[], cellLeft: number, cellRight: number): Block[] {
     const out: Block[] = [];
     let cur: Line[] = [];
+    // Word's cell margins: 5.4pt each side.
+    const [cl, cr] = [cellLeft + 5.4, cellRight - 5.4];
     const flush = () => {
       if (!cur.length) return;
       const p = paragraphOf(cur);
       // Alignment within a cell is relative to the cell, not the page.
       delete p.props.align;
       delete p.props.indent;
+      const room = cr - cl;
+      if (cur.every((l) => l.x0 > cl + 6 && Math.abs((l.x0 + l.x1) / 2 - (cl + cr) / 2) < Math.max(3, room * 0.03))) p.props.align = "center";
+      else if (cur.every((l) => l.x0 > cl + 6 && Math.abs(l.x1 - cr) < 3)) p.props.align = "right";
       out.push(p);
       cur = [];
     };

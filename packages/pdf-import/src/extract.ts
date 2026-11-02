@@ -19,6 +19,10 @@ export interface TextPiece {
   font: { family: string; bold: boolean; italic: boolean };
   /** RRGGBB. */
   color: string;
+  /** A rule drawn under it (underlining). */
+  underline?: boolean;
+  /** The web address of a link area it lies in. */
+  link?: string;
 }
 
 export interface Rule {
@@ -65,6 +69,9 @@ const mul = (m: Matrix, n: Matrix): Matrix => [
   m[2] * n[0] + m[3] * n[2], m[2] * n[1] + m[3] * n[3],
   m[4] * n[0] + m[5] * n[2] + n[4], m[4] * n[1] + m[5] * n[3] + n[5],
 ];
+/** A matrix argument: six numbers, or (newer pdf.js) one array of six. */
+const matrix = (args: unknown[]): Matrix =>
+  (args.length === 1 && typeof args[0] === "object" && args[0] ? Array.from(args[0] as ArrayLike<number>) : args) as Matrix;
 const apply = (m: Matrix, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 
 /** "#rrggbb", [r, g, b] (0–255) or a gray level, as RRGGBB. */
@@ -80,11 +87,13 @@ function hex(args: unknown[]): string {
 export function fontOf(name: string | undefined, flags: { bold?: boolean; italic?: boolean } = {}): TextPiece["font"] {
   const raw = (name ?? "").replace(/^[A-Z]{6}\+/, "");
   const [base, style = ""] = raw.split(/[-,]/, 2);
-  const family = (base || "Calibri")
+  // Weights and widths Word lists as fonts of their own: "Calibri Light", "Segoe UI Semibold".
+  const variant = /Semilight|SemiLight|Semibold|SemiBold|Light|Condensed|Narrow|Black/.exec(style)?.[0];
+  const family = ((base || "Calibri")
     .replace(/(PS)?MT$|PSMT$|PS$/, "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim() + (variant ? ` ${variant.replace(/^Semi(.)/, (_, c: string) => `Semi${c.toLowerCase()}`)}` : ""));
   const s = `${style} ${raw}`.toLowerCase();
   return {
     family,
@@ -93,14 +102,32 @@ export function fontOf(name: string | undefined, flags: { bold?: boolean; italic
   };
 }
 
+/** Where pdf.js finds its support files (shipped with the app, for offline use). */
+export interface PdfJsFiles {
+  cMapUrl?: string;
+  standardFontDataUrl?: string;
+  wasmUrl?: string;
+  iccUrl?: string;
+}
+
 /** Page content of every page. */
-export async function extractPages(data: Uint8Array, pdfjs: PdfJs): Promise<PageContent[]> {
+export async function extractPages(data: Uint8Array, pdfjs: PdfJs, files: PdfJsFiles = {},
+  onPage?: (done: number, total: number) => void): Promise<PageContent[]> {
   // fontExtraProperties: keeps font names (bold and italic come from them).
-  const task = pdfjs.getDocument({ data, verbosity: 0, fontExtraProperties: true, disableFontFace: true });
+  const task = pdfjs.getDocument({
+    data, verbosity: 0, fontExtraProperties: true, disableFontFace: true,
+    ...(files.cMapUrl ? { cMapUrl: files.cMapUrl, cMapPacked: true } : {}),
+    ...(files.standardFontDataUrl ? { standardFontDataUrl: files.standardFontDataUrl } : {}),
+    ...(files.wasmUrl ? { wasmUrl: files.wasmUrl } : {}),
+    ...(files.iccUrl ? { iccUrl: files.iccUrl } : {}),
+  } as Parameters<PdfJs["getDocument"]>[0]);
   const doc = await task.promise;
   const pages: PageContent[] = [];
   try {
-    for (let n = 1; n <= doc.numPages; n++) pages.push(await extractPage(await doc.getPage(n), n, pdfjs));
+    for (let n = 1; n <= doc.numPages; n++) {
+      pages.push(await extractPage(await doc.getPage(n), n, pdfjs));
+      onPage?.(n, doc.numPages);
+    }
   } finally {
     await task.destroy();
   }
@@ -177,12 +204,12 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
     switch (fn) {
       case OPS.save: stack.push({ ...st }); break;
       case OPS.restore: st = stack.pop() ?? st; break;
-      case OPS.transform: st.ctm = mul(args as Matrix, st.ctm); break;
+      case OPS.transform: st.ctm = mul(matrix(args), st.ctm); break;
       case OPS.setFillRGBColor: case OPS.setFillGray: case OPS.setFillColor: st.fill = hex(args); break;
       case OPS.setStrokeRGBColor: case OPS.setStrokeGray: case OPS.setStrokeColor: st.stroke = hex(args); break;
       case OPS.setLineWidth: st.lineWidth = Number(args[0]) || 0.75; break;
       case OPS.beginText: tm = IDENTITY; lineStart = IDENTITY; break;
-      case OPS.setTextMatrix: tm = args as Matrix; lineStart = tm; break;
+      case OPS.setTextMatrix: tm = matrix(args); lineStart = tm; break;
       case OPS.moveText: case OPS.setLeadingMoveText:
         lineStart = mul([1, 0, 0, 1, Number(args[0]), Number(args[1])], lineStart); tm = lineStart; break;
       case OPS.showText: case OPS.showSpacedText: {
@@ -230,7 +257,47 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
       color: textColor.get(`${Math.round(x)},${Math.round(y)}`) ?? "000000",
     });
   }
-  return { number, width: vp.width, height: H, texts, rules, fills, pictures };
+  // Underlining: a thin horizontal rule just below a piece's baseline, under its text. Such rules are
+  // part of the text, not table borders.
+  // Lines drawn in pieces (Word draws an underline word by word): touching pieces on one line become one.
+  const merged: Rule[] = [];
+  for (const r of [...rules].sort((a, b) => a.y1 - b.y1 || a.x1 - b.x1)) {
+    const last = merged[merged.length - 1];
+    // Real horizontal lines only (not the tiny ticks Word draws at table corners).
+    const horizontal = (x: Rule) => Math.abs(x.y2 - x.y1) < 0.5 && x.x2 - x.x1 > 1;
+    if (last && horizontal(r) && horizontal(last) && Math.abs(last.y1 - r.y1) < 0.3 &&
+        Math.abs(last.width - r.width) < 0.2 && last.color === r.color && r.x1 <= last.x2 + 1.5) {
+      last.x2 = Math.max(last.x2, r.x2);
+    } else merged.push({ ...r });
+  }
+  rules.length = 0;
+  rules.push(...merged);
+  const underlines = new Set<Rule>();
+  const verticals = rules.filter((v) => Math.abs(v.x2 - v.x1) < 1);
+  const joined = (u: Rule) => verticals.some((v) => (Math.abs(v.x1 - u.x1) < 2 || Math.abs(v.x1 - u.x2) < 2) && v.y1 <= u.y1 + 2 && v.y2 >= u.y1 - 2);
+  for (const t of texts) {
+    if (!t.text.trim()) continue;
+    // Under the text (it may run on under the next words), and not part of a ruled grid: no vertical
+    // rule meets its ends, as one would at a table border.
+    const r = rules.find((u) => Math.abs(u.y1 - u.y2) < 0.5 && u.width <= Math.max(1.5, t.size * 0.12) &&
+      u.y1 > t.y && u.y1 - t.y < t.size * 0.3 &&
+      Math.min(u.x2, t.x + t.width) - Math.max(u.x1, t.x) >= t.width * 0.6 && !joined(u));
+    if (r) { t.underline = true; underlines.add(r); }
+  }
+  // Links: the page's link areas (web addresses only; links within the document are not kept).
+  for (const a of await page.getAnnotations({ intent: "display" })) {
+    const url = (a as { subtype?: string; url?: string; unsafeUrl?: string }).url ?? (a as { unsafeUrl?: string }).unsafeUrl;
+    if ((a as { subtype?: string }).subtype !== "Link" || !url) continue;
+    const [x1, y1, x2, y2] = (a as { rect: number[] }).rect;
+    const [ax, ay] = apply(toPage, x1, y1);
+    const [bx, by] = apply(toPage, x2, y2);
+    const box = { x0: Math.min(ax, bx), x1: Math.max(ax, bx), y0: Math.min(ay, by), y1: Math.max(ay, by) };
+    for (const t of texts) {
+      const cx = t.x + t.width / 2;
+      if (cx >= box.x0 && cx <= box.x1 && t.y >= box.y0 - 1 && t.y - t.size * 0.3 <= box.y1 + 1) t.link = url;
+    }
+  }
+  return { number, width: vp.width, height: H, texts, rules: rules.filter((r) => !underlines.has(r)), fills, pictures };
 }
 
 interface ImageLike {

@@ -30,6 +30,8 @@ import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot
 import { LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
 import { CommentsPane } from "./CommentsPane";
 import { Home } from "./Home";
+import type { ConversionResult } from "@prime/pdf-import";
+import { PdfConverter } from "./PdfConverter";
 
 /** Raised by Ctrl+P in the editor. */
 const PRINT_EVENT = "prime-word:print";
@@ -80,6 +82,9 @@ export function App() {
   const [editingHeaderFooter, setEditingHeaderFooter] = useState(false);
   const [editingParagraph, setEditingParagraph] = useState(false);
   const [pickingTemplate, setPickingTemplate] = useState(false);
+  // PDF → Word: the PDF being converted, then what the converted document came from.
+  const [converter, setConverter] = useState<{ initial?: { bytes: Uint8Array; name: string } }>();
+  const [conversion, setConversion] = useState<{ from: string; warnings: string[] }>();
   // The home screen: at start (unless a document was given, or a dev test runs), and from the Prime Word button.
   const [home, setHome] = useState(() => !/[?&](selftest|file)=/.test(location.search));
   const [hasDocument, setHasDocument] = useState(false);
@@ -237,6 +242,7 @@ export function App() {
       setFile({ base: doc, name, location, warnings, fonts: 0 });
       setDirty(false);
       leaveHome();
+      setConversion(undefined);
     } catch (e) {
       alert(`Prime Word could not open ${name}:\n${(e as Error).message}`);
     }
@@ -253,6 +259,37 @@ export function App() {
   const open = async () => {
     const opened = await openDocument();
     if (opened && (await discardCurrent())) load(opened.bytes, opened.name, opened.location);
+  };
+
+  /** A converted PDF opens as a new, unsaved Word document (the PDF itself is not changed). */
+  const openConverted = async (result: ConversionResult, pdfName: string) => {
+    if (!(await discardCurrent())) return;
+    const { doc, warnings } = result;
+    setFile({ base: doc, name: pdfName.replace(/\.pdf$/i, ".docx"), warnings: [], fonts: 0 });
+    setDirty(true);
+    dirtyRef.current = true;
+    setConversion({ from: pdfName, warnings });
+    setConverter(undefined);
+    leaveHome();
+    if (SELFTEST) {
+      // Dev self-test: what the editor shows once the converted document is laid out.
+      setTimeout(() => console.info(`[selftest] align ${JSON.stringify({
+        converted: pdfName, blocks: doc.sections[0].blocks.length, warnings,
+        sheets: document.querySelectorAll(".pw-sheet").length,
+        tables: document.querySelectorAll(".ProseMirror table").length,
+        text: document.querySelector(".ProseMirror")?.textContent?.slice(0, 160),
+      })}`), 3000);
+    }
+  };
+
+  /** Saves a converted PDF straight to a .docx, without opening it. */
+  const saveConverted = async (result: ConversionResult, pdfName: string) => {
+    try {
+      const saved = await saveDocument(writeDocx(result.doc), pdfName.replace(/\.pdf$/i, ".docx"));
+      if (saved) flash(`Saved ${saved.name}`);
+    } catch (e) {
+      alert(`Prime Word could not save the converted document:\n${(e as Error).message}`);
+    }
   };
 
   const openRecent = async (path: string) => {
@@ -273,6 +310,7 @@ export function App() {
     setFile({ base, name, warnings: [], fonts: 0 });
     setDirty(false);
     leaveHome();
+    setConversion(undefined);
   };
 
   /** Restores unsaved work from an earlier session (kept as unsaved: nothing is overwritten). */
@@ -397,7 +435,11 @@ export function App() {
     const path = new URLSearchParams(location.search).get("file");
     if (path && !isDesktop) {
       void fetch(`/@fs/${path.replace(/\\/g, "/")}`).then(async (r) => {
-        if (r.ok) load(new Uint8Array(await r.arrayBuffer()), path.split(/[\\/]/).pop()!);
+        if (!r.ok) return;
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        const name = path.split(/[\\/]/).pop()!;
+        if (/\.pdf$/i.test(name)) setConverter({ initial: { bytes, name } });
+        else load(bytes, name);
       });
     }
   }, []);
@@ -454,7 +496,7 @@ export function App() {
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
         onMode={(m) => { setMode(m); if (m === "web") setLayout(undefined); }}
-        markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)}
+        markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)} onConvertPdf={() => setConverter({})}
         onComments={() => setComments((c) => (c === "closed" ? "open" : "closed"))}
         onNewComment={() => {
           if (!v || v.state.selection.empty) { flash("Select the text you want to comment on."); return; }
@@ -473,6 +515,15 @@ export function App() {
       }} onKeyDown={(e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") { e.preventDefault(); void open(); }
       }}>
+        {conversion && (
+          <div className="conversion" role="status">
+            <strong>Converted from {conversion.from}.</strong>{" "}
+            Check the layout against the PDF; the PDF itself is unchanged. Save to keep this as a Word document.
+            {conversion.warnings.length > 0 && <ul>{conversion.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+            <button className="primary" onClick={() => void save(true)}>Save as Word document…</button>
+            <button className="link" onClick={() => setConversion(undefined)}>Dismiss</button>
+          </div>
+        )}
         {recovery.length > 0 && (
           <div className="recovery">
             <strong>Prime Word recovered unsaved work.</strong>
@@ -533,10 +584,15 @@ export function App() {
         <SpellMenu view={v} speller={speller.current} issue={spellMenu.issue} x={spellMenu.x} y={spellMenu.y}
           ignored={ignoredWords.current} onClose={() => setSpellMenu(undefined)} />
       )}
+      {converter && (
+        <PdfConverter measurer={() => measurerRef.current ?? new CanvasMeasurer()} initial={converter.initial}
+          onOpenInEditor={(r, n) => void openConverted(r, n)} onSave={(r, n) => void saveConverted(r, n)}
+          onClose={() => setConverter(undefined)} />
+      )}
       {home && (
         <Home recovery={recovery} onPick={(t) => void newDocument(t)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)}
           onRestore={(s) => void restore(s)} onDiscard={(s) => void discardRecovery(s)}
-          {...(hasDocument ? { onClose: () => setHome(false) } : {})} />
+          {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})} />
       )}
       {pickingTemplate && (
         <TemplatePicker onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />

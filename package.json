@@ -6,7 +6,7 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/pdm packages/docx packages/layout packages/pdf packages/editor",
+    "build": "tsc -b packages/pdm packages/docx packages/layout packages/pdf packages/editor packages/pdf-import",
     "clean": "tsc -b --clean packages/pdm packages/docx packages/layout packages/pdf packages/editor",
     "dev": "npm run build && npm run dev -w @prime/word"
   },

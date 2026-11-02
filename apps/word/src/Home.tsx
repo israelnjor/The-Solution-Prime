@@ -13,7 +13,7 @@ const greeting = () => {
  * The home screen: shown when Prime Word starts without a document, and from the Prime Word button.
  * New (templates), Open, recent documents, and unsaved work to recover.
  */
-export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose }: {
+export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf }: {
   recovery: Snapshot[];
   onPick(t: Template): void;
   onOpen(): void;
@@ -22,6 +22,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
   onDiscard(s: Snapshot): void;
   /** Back to the open document (absent when there is none to go back to). */
   onClose?(): void;
+  onConvertPdf(): void;
 }) {
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => { first.current?.focus(); }, []);
@@ -36,6 +37,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         <button className="on">Home</button>
         <button onClick={() => onPick(TEMPLATES[0])}>New blank document</button>
         <button onClick={onOpen}>Open… <kbd>Ctrl+O</kbd></button>
+        <button onClick={onConvertPdf}>Convert PDF to Word…</button>
         <div className="home-rail-foot">Prime Productivity</div>
       </nav>
       <main className="home-main">
@@ -65,6 +67,14 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
               </button>
             ))}
           </div>
+        </section>
+
+        <section aria-label="Convert PDF" className="home-convert">
+          <div>
+            <h2>Convert a PDF</h2>
+            <p>Turn a PDF into an editable Word document: compare it page by page with the original, then edit or save it.</p>
+          </div>
+          <button className="primary" onClick={onConvertPdf}>Convert PDF to Word…</button>
         </section>
 
         <section aria-label="Recent">

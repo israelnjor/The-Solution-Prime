@@ -50,6 +50,7 @@ Editing (ribbon tabs Home / Insert / Layout / Table):
 | Spelling | Offline, British English by default (US English for documents marked en-US), from the SCOWL Hunspell dictionaries (MIT/BSD). Red wavy underline; right-click for suggestions, Ignore All, Add to Dictionary. Skips acronyms, links, web and e-mail addresses, and words in other scripts. Toggle in the status bar |
 | Clipboard | Copy/paste within Prime Word is lossless (model properties travel in `data-pw-*` attributes). From Word and the web: headings, alignment, bold/italic/underline/strike, font, size, colour, highlight, super/subscript, links, bulleted/numbered and nested lists (incl. Word's own list markup), tables (borders, shading, merged columns) and embedded pictures |
 | View | Print Layout / Web Layout, zoom 25–200% |
+| PDF → Word | Its own workspace (Home → Convert PDF to Word, or Home tab → Convert PDF): choose or drop a PDF, see it convert page by page, compare original and converted pages side by side with a list of what to check, then open the result in the editor or save it as .docx. Offline; the PDF is never changed. Open (Ctrl+O) opens Word documents only. Scanned pages are reported (text recognition comes next) |
 | Output | Export PDF (fonts embedded from the installed fonts), Print (Ctrl+P: opens the PDF in the default viewer) |
 | Safety | Autosave for recovery 3 s after typing stops; after a crash, the next start offers Restore / Discard. Saves are atomic (temp file → flush → rename), so a crash mid-save cannot corrupt the document. Closing with unsaved changes asks first. |
 | Files | Recent documents (Home → Recent ▾, and in New); missing files are greyed out and can be removed from the list. If another program changed the file since you opened it, Save asks before overwriting (or saves your version as a new file) |
@@ -76,6 +77,8 @@ see `apps/word/src-tauri/capabilities/default.json`.
 | [packages/pdf/](packages/pdf/) | `@prime/pdf` — PDF export from the layout engine: `node packages/pdf/dist/cli.js in.docx out.pdf` (ADR-008) |
 | [experiments/e1-docx-roundtrip/](experiments/e1-docx-roundtrip/) | Experiment 1: DOCX round-trip fidelity harness, fixtures and candidates |
 | [experiments/e2-layout/](experiments/e2-layout/) | Experiment 2: layout engine vs Word, marker by marker |
+| [packages/pdf-import/](packages/pdf-import/) | `@prime/pdf-import` — PDF → Word (ADR-009): `node packages/pdf-import/dist/cli.js in.pdf out.docx` |
+| [experiments/e4-pdf-import/](experiments/e4-pdf-import/) | Experiment 4: PDF → Word scored against the original documents |
 | [experiments/e5-performance/](experiments/e5-performance/) | Experiment 5: typing speed and page alignment in a ~145-page document |
 | [scripts/try-docx.ps1](scripts/try-docx.ps1) | Test your own `.docx` files: `.\scripts\try-docx.ps1 <file-or-folder> [-OpenInWord]` |
 

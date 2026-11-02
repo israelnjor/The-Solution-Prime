@@ -294,3 +294,28 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, [role="tab"]:focus-visible {
   outline: 2px solid #2b579a; outline-offset: 1px;
 }
+.conversion { margin: 8px auto; max-width: 820px; padding: 10px 14px; background: #eaf2fb; border: 1px solid #b7cde6; border-radius: 6px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.conversion ul { flex-basis: 100%; margin: 2px 0 0 18px; padding: 0; }
+/* PDF → Word converter (its own workspace). */
+.pdfconv { position: fixed; inset: 0; z-index: 80; display: grid; grid-template-rows: auto 1fr; background: #e8eaee; }
+.pdfconv-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--accent); color: #fff; }
+.pdfconv-bar button { font: inherit; }
+.pdfconv-bar .link { color: #fff; font-size: 20px; }
+.pdfconv-bar .spacer { flex: 1; }
+.pdfconv-name { opacity: 0.85; }
+.pdfconv-drop { align-self: center; justify-self: center; max-width: 560px; text-align: center; background: #fff; border: 2px dashed #b7cde6; border-radius: 12px; padding: 36px 40px; display: grid; gap: 12px; justify-items: center; }
+.pdfconv-drop.over { border-color: var(--accent); background: #f2f7fd; }
+.pdfconv-drop progress { width: 320px; }
+.pdfconv-drop .hint, .pdfconv .hint { color: var(--muted); }
+.pdfconv-review { display: grid; grid-template-columns: 240px 1fr 1fr; gap: 16px; padding: 16px; overflow: auto; align-items: start; }
+.pdfconv-review figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
+.pdfconv-review figcaption { font-weight: 600; color: #333; }
+.pdfconv-review canvas { max-width: 100%; height: auto; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); }
+.pdfconv-side { background: #fff; border-radius: 8px; padding: 12px 14px; position: sticky; top: 0; }
+.pdfconv-side h3 { margin: 4px 0 8px; font-size: 14px; }
+.pdfconv-stats { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 4px; }
+.pdfconv-stats li { display: flex; justify-content: space-between; }
+.pdfconv-warnings { margin: 0; padding-left: 18px; color: #7a4f00; display: grid; gap: 6px; }
+.pdfconv-side .ok { color: var(--muted); margin: 0; }
+.home-convert { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 760px; padding: 14px 16px; border: 1px solid var(--chrome-border); border-radius: 8px; }
+.home-convert p { margin: 0; color: var(--muted); }

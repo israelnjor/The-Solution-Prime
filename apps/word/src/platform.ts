@@ -40,6 +40,8 @@ const browser = window as PickerWindow;
 const MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PICKER_TYPES = [{ description: "Word document", accept: { [MIME]: [".docx"] } }];
 const FILTERS = [{ name: "Word document", extensions: ["docx"] }];
+// PDFs are not opened: they are converted, in the PDF converter (choosePdf).
+const PDF_FILTERS = [{ name: "PDF", extensions: ["pdf"] }];
 
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
@@ -63,6 +65,25 @@ export async function recentDocuments(): Promise<RecentDocument[]> {
 
 export async function forgetRecent(path: string): Promise<void> {
   if (isDesktop) await invoke("forget_recent", { path });
+}
+
+/** Asks for a PDF to convert. Undefined when the user cancels. */
+export async function choosePdf(): Promise<{ bytes: Uint8Array; name: string } | undefined> {
+  if (isDesktop) {
+    const path = await openDialog({ multiple: false, directory: false, filters: PDF_FILTERS });
+    if (typeof path !== "string") return undefined;
+    return { bytes: new Uint8Array(await invoke<ArrayBuffer>("read_document", { path })), name: baseName(path) };
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,application/pdf";
+    input.onchange = async () => {
+      const f = input.files?.[0];
+      resolve(f ? { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name } : undefined);
+    };
+    input.click();
+  });
 }
 
 /** Asks the user for a document. Undefined when they cancel. */

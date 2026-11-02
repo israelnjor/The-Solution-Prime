@@ -56,6 +56,7 @@ export interface RibbonProps {
   onComments(): void;
   onNewComment(): void;
   onHome(): void;
+  onConvertPdf(): void;
 }
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
@@ -79,7 +80,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -146,6 +147,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onNew} title="New document">New</button>
               <button onClick={onOpen} title="Open a .docx (Ctrl+O)">Open</button>
               <RecentMenu onOpen={onOpenRecent} />
+              <button onClick={onConvertPdf} title="Turn a PDF into an editable Word document">Convert PDF</button>
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
               <button onClick={() => onSave(true)} title="Save as a new file">Save As</button>
               <button onClick={onExportPdf} title="Export as PDF">Export PDF</button>
