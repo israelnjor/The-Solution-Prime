@@ -62,6 +62,7 @@ export interface RibbonProps {
   onSaveTemplate(): void;
   onSignature(): void;
   onBlocks(): void;
+  onAutoCorrect(): void;
 }
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
@@ -85,7 +86,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -340,6 +341,9 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group" aria-label="Comments">
               <button onClick={onNewComment} title="Comment on the selected text">New Comment</button>
               <button onClick={onComments} title="Show or hide the comments">Comments</button>
+            </div>
+            <div className="group" aria-label="Proofing">
+              <button onClick={onAutoCorrect} title="Choose what is corrected as you type, and add your own replacements">AutoCorrect…</button>
             </div>
             <div className="group" aria-label="Tracked changes">
               <button onClick={run(gotoChange(-1))} title="Previous change">◀ Previous</button>

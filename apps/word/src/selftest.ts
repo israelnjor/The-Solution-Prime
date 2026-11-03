@@ -121,6 +121,8 @@ export function perfSelfTest(view: EditorView, count = 40) {
       s[0] += Math.round(e.duration); s[1]++;
     }
     console.log("[selftest] steps (ms, count)", JSON.stringify(steps));
+    const fits = performance.getEntriesByName("pw:fit").filter((e) => e.startTime >= typingStart).map((e) => e.duration).sort((a, b) => a - b);
+    console.log("[selftest] fit ms (median, max)", JSON.stringify([Math.round(fits[fits.length >> 1] ?? 0), Math.round(fits.at(-1) ?? 0)]));
     console.log("[selftest] perf", JSON.stringify({
       blocks: view.state.doc.childCount,
       keyMedianMs: Math.round(sorted[Math.floor(sorted.length / 2)]),
@@ -594,5 +596,46 @@ export function blocksSelfTest(view: { state: { doc: { attrs: Record<string, unk
     const header = h?.map((b) => `${b.props.align}:${b.content.map((i) => (i.float ? "float" : i.type)).join(",")}`);
     for (const e of await listEntries("blocks")) if (e.name.startsWith("Selftest")) await deleteEntry("blocks", e.id);
     console.log("[selftest] align", JSON.stringify({ listed, centred, header }));
+  })();
+}
+
+/**
+ * AutoCorrect as you type, in the editor: typing goes through the editor's own text-input path, keys
+ * are real key events. Checks corrections, Backspace straight after a change, Enter, and lists.
+ */
+export function autoCorrectSelfTest(view: import("prosemirror-view").EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const type = (s: string) => {
+    for (const ch of s) {
+      const { from, to } = view.state.selection;
+      if (!view.someProp("handleTextInput", (f) => f(view, from, to, ch))) view.dispatch(view.state.tr.insertText(ch, from, to));
+    }
+  };
+  const key = (k: string, mods: KeyboardEventInit = {}) => view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...mods }));
+  const para = () => view.state.selection.$from.parent;
+  void (async () => {
+    await wait(1200);
+    view.focus();
+    const { TextSelection } = await import("prosemirror-state");
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+    key("Enter");
+    type("teh report is \"done\" -- (c) 2026 ");
+    const typed = para().textContent;
+    type("adn ");
+    key("Backspace"); // straight after a correction: takes it back
+    const backspaced = para().textContent;
+    type("more teh");
+    key("Enter"); // Enter ends the word: corrected
+    const entered = view.state.doc.resolve(view.state.selection.from - 2).parent.textContent;
+    type("1. first");
+    const list = !!para().attrs.props.list;
+    const listText = para().textContent;
+    key("z", { ctrlKey: true });
+    await wait(50);
+    const undone = { list: !!para().attrs.props.list, text: para().textContent };
+    key("z", { ctrlKey: true }); // the second undo takes back the list itself
+    await wait(50);
+    const undone2 = { list: !!para().attrs.props.list, text: para().textContent };
+    console.log("[selftest] align", JSON.stringify({ typed, backspaced, entered, list, listText, undone, undone2 }));
   })();
 }

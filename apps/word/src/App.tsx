@@ -2,7 +2,7 @@ import { readDocx, writeDocx } from "@prime/docx";
 import {
   blankDocument, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
-  wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap,
+  wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
 } from "@prime/editor";
 import type { LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
@@ -36,6 +36,7 @@ import { PictureEditor } from "./PictureEditor";
 import { LetterheadDesigner } from "./LetterheadDesigner";
 import { type SavedSignature, SignatureDialog } from "./SignatureDialog";
 import { BlocksDialog } from "./BlocksDialog";
+import { AutoCorrectDialog, loadAutoCorrect } from "./AutoCorrectDialog";
 import { saveTemplate } from "./MyTemplates";
 
 /** Raised by Ctrl+P in the editor. */
@@ -91,6 +92,8 @@ export function App() {
   const [designingLetterhead, setDesigningLetterhead] = useState(false);
   const [signing, setSigning] = useState(false);
   const [choosingBlock, setChoosingBlock] = useState(false);
+  const [autoCorrecting, setAutoCorrecting] = useState(false);
+  const autoCorrect = useRef(loadAutoCorrect());
   // Bumped when a template is saved, so the template lists reload.
   const [templatesVersion, setTemplatesVersion] = useState(0);
   // PDF → Word: the PDF being converted, then what the converted document came from.
@@ -178,6 +181,8 @@ export function App() {
       doc: toProseMirror(file.base, schema),
       plugins: [
         history(),
+        // Before the keymaps: it handles Enter (to correct the last word) and Backspace after a change.
+        autoFormat(() => autoCorrect.current, () => fileRef.current.base),
         keymap({
           "Mod-z": undo, "Mod-y": redo, "Mod-Shift-z": redo,
           "Mod-b": toggleRun("bold"), "Mod-i": toggleRun("italic"), "Mod-u": toggleRun("underline"),
@@ -446,7 +451,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -464,6 +469,7 @@ export function App() {
       if (test === "letterhead") letterheadSelfTest();
       if (test === "signature") signatureSelfTest(v);
       if (test === "blocks") blocksSelfTest(v);
+      if (test === "autocorrect") autoCorrectSelfTest(v);
       if (test === "lines" && measurerRef.current) linesSelfTest(v, () => fileRef.current.base, measurerRef.current);
     });
   }, [layout, layoutOf, file.base]);
@@ -538,6 +544,7 @@ export function App() {
         onLetterhead={() => setDesigningLetterhead(true)}
         onSignature={() => setSigning(true)}
         onBlocks={() => setChoosingBlock(true)}
+        onAutoCorrect={() => setAutoCorrecting(true)}
         onSaveTemplate={() => {
           if (!v) return;
           const name = window.prompt("Save as a template named:", fileRef.current.name.replace(/\.docx$/i, ""));
@@ -634,6 +641,7 @@ export function App() {
           ignored={ignoredWords.current} onClose={() => setSpellMenu(undefined)} />
       )}
       {editingPicture && v && <PictureEditor view={v} base={baseOf} onClose={() => setEditingPicture(false)} />}
+      {autoCorrecting && <AutoCorrectDialog onChange={(o) => { autoCorrect.current = o; }} onClose={() => { setAutoCorrecting(false); view.current?.focus(); }} />}
       {choosingBlock && view.current && <BlocksDialog view={view.current} base={() => fileRef.current.base} onClose={() => setChoosingBlock(false)} />}
       {signing && <SignatureDialog onClose={() => setSigning(false)} onInsert={(s) => { setSigning(false); insertSignature(s); }} />}
       {designingLetterhead && (

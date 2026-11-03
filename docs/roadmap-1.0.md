@@ -52,7 +52,8 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 
 - **PDF → Word built in**, offline, free — Word needs Acrobat or online services for good results.
 - **Offline and private**: nothing leaves the computer; no account, no subscription.
-- **Fast on long documents** (145 pages: 28 ms per keystroke) and a small install (~3 MB).
+- **Fast on long documents** (145 pages: ~45 ms per keystroke until painted, no freezes while typing)
+  and a small installer (5.6 MB, PDF converter included).
 - **Faithful to Word's layout**: same pages, same line positions (measured against Word itself).
 - **Make it yours**: design a letterhead in a minute; turn a phone photo of a signature into a clean
   e-signature; keep signature blocks, addresses and company stamps and insert them left, centre or

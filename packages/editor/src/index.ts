@@ -28,3 +28,4 @@ export {
 export { blockHandle, moveBlock } from "./blocks.js";
 export { letterheadDocument, letterheadStories, type LetterheadSpec } from "./letterhead.js";
 export { addressBlock, insertPart, type Part, type PartAlign, type PartPlace, partFromSelection, picturePart, signatureBlock, type SignatureBlockSpec } from "./parts.js";
+export { AUTOFORMAT_DEFAULTS, autoFormat, autoFormatAfter, type AutoFormatOptions, CORRECTIONS } from "./autoformat.js";

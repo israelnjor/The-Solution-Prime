@@ -45,3 +45,31 @@ Causes fixed:
   corrections for 145 pages), against 0–1 per fixture on its own: on screen, page breaks come earlier
   than in the PDF. To investigate next — the fixtures' content in another document's styles is
   probably hitting a difference between the browser's line breaking and the engine's.
+
+## Regression found and fixed (2026-11-03)
+
+Typing had slowed to a median of ~70 ms per keystroke (from 28 ms). Switching plugins off one at a
+time pointed at the paragraph-formatting plugin, and inside it at two loops in ProseMirror that are
+cheap only when there are few decorations at the top level of the document. It had one on every
+paragraph (1,476 here):
+
+1. Mapping a decoration set re-checks each node decoration with `content.findIndex`, a walk from the
+   first child: ~1,500 × 1,500 steps per keystroke (4.7 ms in Node, ~13 ms in the browser).
+2. Updating the view looks up each top-level node's decorations by scanning all top-level ones.
+
+Paragraphs now show their own formatting (a node view); the plugin only keeps list labels and floats
+as decorations (378 in all, none at the top level), and restyles paragraphs after a rebuild.
+List-label widgets were also keyed by position, so every label after the cursor was redrawn on each
+keystroke; they are keyed by their content now.
+
+| 145 pages | Before | After |
+|---|---|---|
+| Applying a keystroke (`dispatch`) | ~31 ms | **~3.6 ms** |
+| Fitting the pages, per keystroke (median) | — | 2 ms |
+| Keystroke until painted, median | 63–75 ms | **43–45 ms** |
+| Page alignment | within 1 px | within 1 px |
+
+The rest of each keystroke is the browser laying out and painting a 145-page editable page (our
+code now accounts for ~11 ms of the 44). Timings on this computer vary by ±20% between runs (and a
+run is spoiled when a re-layout lands during typing), so compare three runs. Further gains would need
+pages kept out of the browser's layout while off screen, a larger change.

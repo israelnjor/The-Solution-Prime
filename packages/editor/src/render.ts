@@ -8,12 +8,13 @@
  */
 import { MathTypesetter, type Measurer, type ResolvedRun, Resolver } from "@prime/layout";
 import { type FloatInfo, type Paragraph, type PrimeDocument, paragraphText, type TextInline } from "@prime/pdm";
-import type { Node } from "prosemirror-model";
-import { Plugin, type Transaction } from "prosemirror-state";
+import { DOMSerializer, type Node } from "prosemirror-model";
+import { Plugin, PluginKey, type Transaction } from "prosemirror-state";
 import { AddMarkStep, RemoveMarkStep, ReplaceStep } from "prosemirror-transform";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { inkSvg } from "./ink.js";
 import type { Render } from "./schema.js";
+import { timed } from "./paged.js";
 
 const pt = (v: number) => `${Math.round(v * 100) / 100}pt`;
 const json = (v: unknown) => JSON.stringify(v);
@@ -248,8 +249,60 @@ function floatCanvas(floats: FloatInfo[], doc: PrimeDocument, resolver: Resolver
   return canvas;
 }
 
+/** The property names in a CSS declaration list (as ProseMirror itself reads decoration styles). */
+const CSS_PROPERTY = /\s*([\w\-\xa1-￿]+)\s*:(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\(.*?\)|[^;])*/g;
+
+/** A paragraph's look: its CSS, its style's id (data-style) and classes. */
+interface Look { style: string; styleId: string; className: string }
+
+/**
+ * A paragraph that shows its look itself. (Decorations on every paragraph would make each keystroke
+ * cost time in proportion to the square of the document's length: ProseMirror scans all top-level
+ * decorations for every top-level node.) The plugin restyles it when its look changes.
+ */
+class ParagraphView {
+  dom: HTMLElement;
+  contentDOM: HTMLElement;
+  private look?: Look;
+  constructor(node: Node, look: Look | undefined, private views: Set<ParagraphView>) {
+    const spec = DOMSerializer.renderSpec(document, node.type.spec.toDOM!(node));
+    this.dom = spec.dom as HTMLElement;
+    this.contentDOM = (spec.contentDOM ?? spec.dom) as HTMLElement;
+    this.node = node;
+    this.show(look);
+    views.add(this);
+  }
+  node: Node;
+  show(look: Look | undefined) {
+    if (look === this.look || (look && this.look && look.style === this.look.style && look.styleId === this.look.styleId && look.className === this.look.className)) {
+      this.look = look;
+      return;
+    }
+    // Only our own properties and classes change: decorations (e.g. position:relative) keep theirs.
+    const old = this.look;
+    this.look = look;
+    if (old?.style) for (const [, prop] of old.style.matchAll(CSS_PROPERTY)) this.dom.style.removeProperty(prop);
+    if (look?.style) this.dom.style.cssText += `;${look.style}`;
+    if (look?.styleId) this.dom.setAttribute("data-style", look.styleId);
+    else this.dom.removeAttribute("data-style");
+    for (const c of old?.className.split(" ") ?? []) if (c) this.dom.classList.remove(c);
+    for (const c of look?.className.split(" ") ?? []) if (c) this.dom.classList.add(c);
+  }
+  update(node: Node, looks: WeakMap<Node, Look>): boolean {
+    if (node.type !== this.node.type || JSON.stringify(node.attrs) !== JSON.stringify(this.node.attrs)) return false;
+    this.node = node;
+    this.show(looks.get(node));
+    return true;
+  }
+  ignoreMutation(m: { type: string; target: globalThis.Node }) {
+    return m.type === "attributes" && m.target === this.dom; // our own restyling
+  }
+  destroy() { this.views.delete(this); }
+}
+
 export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin {
-  const build = (pm: Node): DecorationSet => {
+  const build = (pm: Node): StylesState => {
+    const looks = new WeakMap<Node, Look>();
     const resolver = new Resolver(doc);
     // A second resolver to look at the next paragraph (the first counts list numbers in order).
     const peek = new Resolver(doc);
@@ -293,9 +346,7 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
           child.forEach((n) => { if (n.type.name === "tab") tabs++; });
           const rightStop = tabs === 1 ? rp.tabs.find((t) => t.align === "right") : undefined;
           const classes = rightStop ? `pw-righttab${rightStop.leader ? ` pw-leader-${rightStop.leader}` : ""}` : "";
-          decorations.push(Decoration.node(at, at + child.nodeSize, {
-            style: css + (rp.shading ? `;background:#${rp.shading}` : ""), "data-style": rp.styleId, ...(classes ? { class: classes } : {}),
-          }));
+          looks.set(child, { style: css + (rp.shading ? `;background:#${rp.shading}` : ""), styleId: rp.styleId, className: classes });
           const floats: FloatInfo[] = [];
           child.forEach((n) => {
             if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float);
@@ -318,7 +369,7 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
               span.style.cssText = `${runCss(lr)};display:inline-block;min-width:${pt(width)};text-indent:0;line-height:0`;
               span.textContent = label;
               return span;
-            }, { side: -1, key: `label-${at}-${label}` }));
+            }, { side: -1, key: `label-${label}-${width}-${runCss(lr)}` })); // no position: typing must not redraw every label after it
           }
         } else if (child.type.name === "table") {
           visit(child, at + 1, resolver.tableStyle(child.attrs.props.style));
@@ -328,13 +379,52 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
       });
     };
     visit(pm, 0);
-    return DecorationSet.create(pm, decorations);
+    return { looks, decorations: DecorationSet.create(pm, decorations) };
   };
-  return new Plugin({
+  /** Typing changes no looks: each edited paragraph keeps the look it had. */
+  const carry = (tr: Transaction, old: StylesState): StylesState => {
+    tr.steps.forEach((step, i) => {
+      const before = tr.docs[i];
+      const after = i + 1 < tr.docs.length ? tr.docs[i + 1] : tr.doc;
+      const { from, to } = step as ReplaceStep | AddMarkStep | RemoveMarkStep;
+      // Every paragraph the step touches (one for typing; several for bold across paragraphs).
+      before.nodesBetween(from, to, (node, pos) => {
+        if (!node.isTextblock) return true;
+        const look = old.looks.get(node);
+        const now = after.nodeAt(step.getMap().map(pos, -1));
+        if (look && now && now !== node) old.looks.set(now, look);
+        return false;
+      });
+    });
+    return { looks: old.looks, decorations: old.decorations.map(tr.mapping, tr.doc) };
+  };
+  const views = new Set<ParagraphView>();
+  const key = new PluginKey<StylesState>("paragraphStyles");
+  return new Plugin<StylesState>({
+    key,
     state: {
       init: (_, state) => build(state.doc),
-      apply: (tr, old) => (!tr.docChanged ? old : textOnly(tr) ? old.map(tr.mapping, tr.doc) : build(tr.doc)),
+      apply: (tr, old) => (!tr.docChanged ? old : textOnly(tr) ? timed("styles.map", () => carry(tr, old)) : timed("styles.build", () => build(tr.doc))),
     },
-    props: { decorations(state) { return this.getState(state); } },
+    props: {
+      decorations: (state) => key.getState(state)?.decorations,
+      nodeViews: {
+        paragraph: (node, view) => {
+          const p = new ParagraphView(node, key.getState(view.state)?.looks.get(node), views);
+          return { dom: p.dom, contentDOM: p.contentDOM, update: (n) => p.update(n, key.getState(view.state)!.looks), ignoreMutation: (m) => p.ignoreMutation(m), destroy: () => p.destroy() };
+        },
+      },
+    },
+    // After a rebuild, paragraphs that were not redrawn may have a new look (spacing next to a new
+    // paragraph of the same style, a changed style): restyle them.
+    view: () => ({
+      update(view, prev) {
+        const looks = key.getState(view.state)!.looks;
+        if (looks === key.getState(prev)?.looks) return;
+        timed("styles.restyle", () => { for (const p of views) p.show(looks.get(p.node)); });
+      },
+    }),
   });
 }
+
+interface StylesState { looks: WeakMap<Node, Look>; decorations: DecorationSet }
