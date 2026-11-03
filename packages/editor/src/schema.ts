@@ -40,8 +40,9 @@ export function createSchema(render?: Render): Schema {
     nodes: {
       doc: {
         content: "block+",
-        // The last section's properties, headers and footers (earlier sections end in section_break nodes).
-        attrs: { section: { default: null } },
+        // The last section's properties, headers and footers (earlier sections end in section_break nodes);
+        // the footnotes' and endnotes' text (PrimeDocument.notes), so editing a note can be undone.
+        attrs: { section: { default: null }, notes: { default: null } },
       },
       paragraph: {
         group: "block",
@@ -152,6 +153,18 @@ export function createSchema(render?: Render): Schema {
             },
           },
         ],
+      },
+      // A footnote or endnote reference: its number comes from CSS counters (references in order).
+      note_ref: {
+        group: "inline", inline: true, atom: true, attrs: { ...props, kind: { default: "footnote" }, id: { default: "" } },
+        toDOM: (n) => ["sup", { class: `pw-noteref pw-${n.attrs.kind}`, contenteditable: "false", "data-pw-noteref": json(n.attrs) }],
+        parseDOM: [{ tag: "sup[data-pw-noteref]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-noteref") }],
+      },
+      // The note's own number at the start of its text (in the Notes pane, shown by the pane).
+      note_mark: {
+        group: "inline", inline: true, atom: true, attrs: { ...props, kind: { default: "footnote" } },
+        toDOM: (n) => ["span", { class: "pw-notemark", contenteditable: "false", "data-pw-notemark": json(n.attrs) }],
+        parseDOM: [{ tag: "span[data-pw-notemark]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-notemark") }],
       },
       field_char: {
         group: "inline", inline: true, atom: true, attrs: { ...props, kind: {} },

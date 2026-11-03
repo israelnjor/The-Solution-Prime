@@ -90,7 +90,7 @@ function applyTabs(stops: TabStop[], xml: string | undefined): TabStop[] {
 
 const ROMAN: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
 
-function roman(n: number): string {
+export function roman(n: number): string {
   let out = "";
   for (const [v, s] of ROMAN) while (n >= v) { out += s; n -= v; }
   return out;

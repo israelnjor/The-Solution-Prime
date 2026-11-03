@@ -483,3 +483,55 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .para-tabs .tab-list li { display: flex; gap: 8px; align-items: center; }
 .para-tabs .tab-list li button { margin-left: auto; }
 .home-hint { color: var(--muted); max-width: 760px; margin: 0 0 14px; }
+/* References. */
+.toolbar .toc-select { width: 150px; }
+.hf-dialog.caption-dialog { width: min(460px, 96vw); }
+.caption-dialog label, .crossref-dialog label { display: grid; gap: 3px; font-size: 12px; }
+.caption-dialog input, .caption-dialog select, .crossref-dialog select { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.caption-dialog .row, .crossref-dialog .row { display: flex; gap: 12px; margin: 8px 0; }
+.caption-preview { padding: 10px; margin-bottom: 8px; border: 1px solid var(--chrome-border); border-radius: 6px; font-style: italic; color: #44546a; background: #fff; }
+.caption-dialog .hint, .crossref-dialog .hint { color: var(--muted); font-size: 12px; margin: 6px 0; }
+.hf-dialog.crossref-dialog { width: min(520px, 96vw); }
+.crossref-list { display: grid; max-height: 260px; overflow: auto; border: 1px solid var(--chrome-border); border-radius: 6px; }
+.crossref-list button { text-align: left; padding: 5px 10px; border: none; background: none; font: inherit; cursor: pointer; }
+.crossref-list button.on { background: var(--accent, #2b579a); color: #fff; }
+
+/* Footnotes and endnotes: reference numbers in reading order (CSS counters), the pane, the page area. */
+.pw-editor .ProseMirror { counter-reset: pw-footnote pw-endnote; }
+.pw-noteref { cursor: pointer; font-size: 65%; vertical-align: super; line-height: 0; }
+.pw-noteref.pw-footnote::after { counter-increment: pw-footnote; content: counter(pw-footnote); }
+.pw-noteref.pw-endnote::after { counter-increment: pw-endnote; content: counter(pw-endnote, lower-roman); }
+.pw-noteref.ProseMirror-selectednode { outline: 2px solid var(--accent, #2b579a); }
+.pw-notemark { display: none; }
+.pw-chrome-note { cursor: pointer; }
+.pw-chrome-rule { position: absolute; border-top: 0.5pt solid #000; pointer-events: none; }
+.notes-pane h4 { margin: 10px 0 4px; font-size: 13px; }
+.notes-pane .note { background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; padding: 6px 8px; display: grid; gap: 4px; margin-bottom: 6px; }
+.notes-pane .note-head { display: flex; gap: 10px; align-items: center; font-size: 12px; }
+.notes-pane .note-head strong { margin-right: auto; }
+.notes-pane .note-editor .ProseMirror { outline: none; min-height: 1.4em; font-size: 10pt; }
+.notes-pane .hint { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+
+/* Citations. */
+.toolbar .cite-select { width: 140px; }
+.hf-dialog.sources-dialog { width: min(640px, 96vw); }
+.source-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.source-form label { display: grid; gap: 3px; font-size: 12px; }
+.source-form .wide { grid-column: 1 / -1; }
+.source-form input, .source-form select, .source-form textarea { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.source-list { display: grid; gap: 6px; max-height: 320px; overflow: auto; margin: 8px 0; }
+.source { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--chrome-border); border-radius: 6px; background: #fff; }
+.source > div { display: grid; margin-right: auto; min-width: 0; }
+.source span { color: var(--muted); font-size: 12px; }
+.sources-dialog .hint { color: var(--muted); font-size: 12px; margin: 0; }
+
+/* Equations. */
+.hf-dialog.equation-dialog { width: min(640px, 96vw); }
+.eq-palette { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
+.eq-palette button { min-width: 34px; height: 30px; font: 15px "Cambria Math", "Segoe UI Symbol", serif; border: 1px solid var(--chrome-border); background: #fff; border-radius: 4px; cursor: pointer; }
+.eq-palette button:hover { background: #e8eef8; }
+.equation-dialog textarea { width: 100%; box-sizing: border-box; font: 14px Consolas, monospace; padding: 6px 8px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.eq-preview { min-height: 64px; margin: 8px 0; padding: 12px; display: flex; align-items: center; border: 1px solid var(--chrome-border); border-radius: 6px; background: #fff; color: #000; font-size: 16pt; overflow-x: auto; }
+.eq-preview.display { justify-content: center; }
+.eq-error { color: #a33; font-size: 12px; margin: 4px 0; }
+.equation-dialog .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }

@@ -3,7 +3,7 @@ import {
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
   setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
   setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
-  changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign,
+  changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign, type CitationStyle, insertCitation, readSources,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
@@ -23,9 +23,9 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "file" | "home" | "insert" | "layout" | "review" | "view" | "table" | "picture";
-/** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+R, Alt+W. */
-const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", layout: "P", review: "R", view: "W" };
+type Tab = "file" | "home" | "insert" | "layout" | "references" | "review" | "view" | "table" | "picture";
+/** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+S, Alt+R, Alt+W. */
+const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", layout: "P", references: "S", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
 
 const CM = 72 / 2.54;
@@ -69,11 +69,24 @@ export interface RibbonProps {
   onPainter(sticky: boolean): void;
   onFontDialog(): void;
   onSymbol(): void;
+  onEquation(): void;
   onDateTime(): void;
   showMarks: boolean;
   onShowMarks(): void;
   ruler: boolean;
   onRuler(): void;
+  /** References: a table of contents (levels), updating fields, captions, a table of figures, cross-references. */
+  onToc(levels: number): void;
+  onUpdateFields(): void;
+  onCaption(): void;
+  onTableOfFigures(): void;
+  onCrossRef(): void;
+  onNote(kind: "footnote" | "endnote"): void;
+  onShowNotes(): void;
+  /** Citations: the style (all citations follow it), the sources dialog, the reference list. */
+  onCitationStyle(style: CitationStyle): void;
+  onSources(startNew: boolean): void;
+  onBibliography(): void;
 }
 
 const CASES: [CaseMode, string][] = [["sentence", "Sentence case."], ["lower", "lowercase"], ["upper", "UPPERCASE"], ["title", "Capitalize Each Word"], ["toggle", "tOGGLE cASE"]];
@@ -99,7 +112,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onDateTime, showMarks, onShowMarks, ruler, onRuler }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -155,7 +168,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     <header className="ribbon">
       <nav className="tabs" role="tablist" aria-label="Ribbon tabs">
         <button className="brand" onClick={onHome} title="Home: new, open, recent documents">Prime Word</button>
-        {([["file", "File"], ["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
+        {([["file", "File"], ["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["references", "References"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
           <button key={t} role="tab" aria-selected={activeTab === t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}
             title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
@@ -303,6 +316,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onBlocks} title="Signature blocks, addresses, stamps and saved text: insert left, centre or right">Blocks…</button>
             </div>
             <div className="group">
+              <button onClick={onEquation} title="Insert an equation (Alt+=): fractions, roots, sums, Greek…">Equation…</button>
               <button onClick={onSymbol} title="Insert a symbol: ©, €, ₵, ½, →, Greek letters…">Symbol…</button>
               <button onClick={onDateTime} title="Insert today's date or the time">Date &amp; Time…</button>
             </div>
@@ -375,6 +389,46 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </>
           );
         })()}
+
+        {activeTab === "references" && (
+          <>
+            <div className="group" aria-label="Table of Contents">
+              <select value="" onChange={(e) => { if (e.target.value) onToc(Number(e.target.value)); }} title="Insert a table of contents from the headings" aria-label="Table of Contents" className="toc-select">
+                <option value="">Table of Contents</option>
+                <option value="3">Contents: Headings 1–3</option>
+                <option value="2">Contents: Headings 1–2</option>
+                <option value="1">Contents: Heading 1 only</option>
+              </select>
+              <button onClick={onUpdateFields} title="Update the contents, captions, cross-references and page numbers (F9)">Update Table</button>
+            </div>
+            <div className="group" aria-label="Footnotes">
+              <button onClick={() => onNote("footnote")} title="Insert Footnote (Alt+Ctrl+F): a numbered note at the foot of the page">Insert Footnote</button>
+              <button onClick={() => onNote("endnote")} title="Insert Endnote (Alt+Ctrl+D): a note at the end of the document">Insert Endnote</button>
+              <button onClick={onShowNotes} title="Show and edit all footnotes and endnotes">Show Notes</button>
+            </div>
+            <div className="group" aria-label="Citations and Bibliography">
+              <select value="" onChange={(e) => {
+                const v = e.target.value;
+                if (v === "new") onSources(true);
+                else if (v) run(insertCitation(docRef, v))();
+              }} title="Insert a citation of one of your sources" aria-label="Insert Citation" className="cite-select">
+                <option value="">Insert Citation</option>
+                {readSources(doc).sources.map((s) => <option key={s.tag} value={s.tag}>{s.authors[0]?.last ? `${s.authors[0].last} (${s.year ?? "n.d."}): ` : ""}{s.title.slice(0, 50)}</option>)}
+                <option value="new">Add New Source…</option>
+              </select>
+              <button onClick={() => onSources(false)} title="Add, edit and cite the sources of this document">Manage Sources…</button>
+              <label className="choice" title="Citation style">Style <select value={readSources(doc).style} onChange={(e) => onCitationStyle(e.target.value as CitationStyle)} aria-label="Citation style">
+                <option value="APA">APA</option><option value="Harvard">Harvard</option><option value="IEEE">IEEE</option>
+              </select></label>
+              <button onClick={onBibliography} title="Insert the reference list of the sources cited">Bibliography</button>
+            </div>
+            <div className="group" aria-label="Captions">
+              <button onClick={onCaption} title="Number a picture or table: Figure 1, Table 1…">Insert Caption…</button>
+              <button onClick={onTableOfFigures} title="A list of the figures (or tables) with their pages">Insert Table of Figures</button>
+              <button onClick={onCrossRef} title="Refer to a heading or caption: its text, number or page, kept up to date">Cross-reference…</button>
+            </div>
+          </>
+        )}
 
         {activeTab === "view" && (
           <>

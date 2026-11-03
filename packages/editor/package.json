@@ -13,6 +13,7 @@
     "@prime/docx": "0.1.0",
     "@prime/layout": "0.1.0",
     "@prime/pdm": "0.1.0",
+    "@xmldom/xmldom": "0.8.10",
     "prosemirror-commands": "1.6.2",
     "prosemirror-history": "1.4.1",
     "prosemirror-keymap": "1.2.2",

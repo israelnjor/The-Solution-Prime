@@ -6,7 +6,7 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-03, after Waves 0 and 1): about 50%
+## Where we are (2026-11-03, after Waves 0–2): about 55%
 
 | Area | Feature | Status |
 |---|---|---|
@@ -29,15 +29,16 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | **Home: editing** | Find / Replace | ✅ |
 | | Find options (formatting, wildcards), Go To, navigation pane | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
-| | Text boxes, equations (shown, moved; not editable) | 🟡 |
+| | Equations: insert and edit (LaTeX notation, live preview, saved as Word equations) | ✅ |
+| | Text boxes (shown, moved; not editable) | 🟡 |
 | | Symbol (with ₵ and ₦), date & time (as text or a DATE field) | ✅ |
 | | Section/column breaks, shapes, charts, SmartArt, WordArt, drop cap, bookmarks, cross-references | ❌ |
 | **Design** | Themes, style sets, watermark, page colour, page borders | ❌ |
 | **Layout** | Margins, orientation, size, indents/spacing | ✅ |
 | | Floating objects: move/resize | ✅ |
 | | Columns, line numbers, hyphenation, wrap-text options, arrange | ❌ |
-| **References** | Table of contents (shown, laid out, page numbers updated) | 🟡 |
-| | Insert/update TOC, footnotes/endnotes (kept, not editable), captions, table of figures, citations & bibliography, cross-references, index | ❌ |
+| **References** | Insert/update table of contents, footnotes and endnotes (laid out at the foot of the page / after the text, editable), captions, table of figures, cross-references, citations & bibliography (APA, Harvard, IEEE; Word's own sources), Update Field (F9) | ✅ |
+| | Index, table of authorities, footnote options (numbering format, restart per page) | ❌ |
 | **Review** | Spelling, word count, comments, show/accept/reject tracked changes | ✅ |
 | | Record tracked changes, grammar, thesaurus, compare, read aloud, protect | ❌ |
 | **View** | Print / Web layout, zoom, ruler, formatting marks | ✅ |
@@ -73,7 +74,7 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    font; superscript/subscript; paste options; show ¶ marks; ruler (indents, tab stops); AutoCorrect,
    smart quotes, automatic lists; symbol; date & time; "Page X of Y" in the status bar; font and
    paragraph dialogs complete.
-2. **References** (the student/academic market) — insert and update table of contents; footnotes and
+2. **References** ✅ (2026-11-03) (the student/academic market) — insert and update table of contents; footnotes and
    endnotes; captions and table of figures; cross-references; citations and bibliography (APA,
    Harvard, IEEE); equation editor.
 3. **Tables complete** — merge/split, borders and shading, table styles, cell alignment, column

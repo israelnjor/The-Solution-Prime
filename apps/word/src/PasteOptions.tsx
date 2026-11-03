@@ -31,7 +31,7 @@ export function PasteOptions({ view }: { view: EditorView }) {
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); };
   });
 
-  if (!paste) return null;
+  if (!paste || view.isDestroyed) return null;
   let at: { left: number; bottom: number };
   try { at = view.coordsAtPos(Math.min(paste.to, view.state.doc.content.size)); } catch { return null; }
   return (

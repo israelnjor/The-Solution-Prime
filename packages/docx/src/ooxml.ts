@@ -10,10 +10,12 @@ export const RelType = {
   footer: `${REL}/footer`,
   image: `${REL}/image`,
   hyperlink: `${REL}/hyperlink`,
+  footnotes: `${REL}/footnotes`,
+  endnotes: `${REL}/endnotes`,
 } as const;
 
 /** Relationship types whose targets the reader turns into model content (the writer regenerates them). */
-export const MODELED_REL_TYPES = new Set<string>([RelType.styles, RelType.numbering, RelType.header, RelType.footer]);
+export const MODELED_REL_TYPES = new Set<string>([RelType.styles, RelType.numbering, RelType.header, RelType.footer, RelType.footnotes, RelType.endnotes]);
 
 export const ContentType = {
   document: "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
@@ -21,6 +23,8 @@ export const ContentType = {
   numbering: "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml",
   header: "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
   footer: "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml",
+  footnotes: "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
+  endnotes: "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml",
   rels: "application/vnd.openxmlformats-package.relationships+xml",
   xml: "application/xml",
 } as const;

@@ -1,7 +1,7 @@
 /** DOCX -> Prime Document Model. */
 import { unzipSync } from "fflate";
 import {
-  type Block, type FloatInfo, type FloatPosition, type HeaderFooterKind, type ImageInline, type Inline, type Paragraph, type PrimeDocument,
+  type Block, type FloatInfo, type FloatPosition, type HeaderFooterKind, type ImageInline, type Inline, type Notes, type Paragraph, type PrimeDocument,
   type Relationship, SCHEMA_VERSION, type Section, type Story, type Table, type TableRow,
 } from "@prime/pdm";
 import { readInk } from "./inkml.js";
@@ -147,6 +147,13 @@ class Reader {
       package: { mainPart: main, parts: [], preservedRels: [], contentTypes: this.contentTypes, rootAttrs },
     };
     for (const e of elements(root)) if (qname(e) !== "w:body") this.warn(`Document-level ${qname(e)} is not supported and was dropped.`);
+    const footnotes = relOf(RelType.footnotes);
+    const endnotes = relOf(RelType.endnotes);
+    if (footnotes || endnotes) {
+      doc.notes = {};
+      if (footnotes) doc.notes.footnote = this.readNotes(footnotes, "w:footnote");
+      if (endnotes) doc.notes.endnote = this.readNotes(endnotes, "w:endnote");
+    }
 
     doc.package.preservedRels = ctx.preservedRels();
     for (const r of doc.package.preservedRels) if (!r.external) this.mediaUsedByPreserved.add(r.target);
@@ -203,6 +210,27 @@ class Reader {
     const preservedRels = ctx.preservedRels();
     for (const r of preservedRels) if (!r.external) this.mediaUsedByPreserved.add(r.target);
     return preservedRels.length ? { blocks, preservedRels } : { blocks };
+  }
+
+  /** A footnotes or endnotes part: each note's text; separator notes kept as they are. */
+  readNotes(part: string, tag: "w:footnote" | "w:endnote"): Notes | undefined {
+    const root = this.xml(part);
+    if (!root) return undefined;
+    const ctx = new StoryContext(part, this.rels(part));
+    this.modeledParts.add(part).add(relsPath(part));
+    const out: Notes = { items: [], special: [], part };
+    const rootAttrs: Record<string, string> = {};
+    for (let i = 0; i < root.attributes.length; i++) rootAttrs[root.attributes[i].name] = root.attributes[i].value;
+    out.rootAttrs = rootAttrs;
+    for (const e of elements(root)) {
+      if (qname(e) !== tag) continue;
+      if (attr(e, "type") && attr(e, "type") !== "normal") out.special.push(ctx.keep(e));
+      else out.items.push({ id: attr(e, "id") ?? "", blocks: this.readBlocks(elements(e), ctx) });
+    }
+    const preservedRels = ctx.preservedRels();
+    for (const r of preservedRels) if (!r.external) this.mediaUsedByPreserved.add(r.target);
+    if (preservedRels.length) out.preservedRels = preservedRels;
+    return out;
   }
 
   readBlocks(nodes: Element[], ctx: StoryContext): Block[] {
@@ -300,6 +328,11 @@ class Reader {
       } else if (n === "w:fldChar" && !elements(c).length && Object.keys(attrs(c)).every((k) => k === "fldCharType")) {
         add({ type: "fieldChar", kind: attr(c, "fldCharType") as "begin" | "separate" | "end" });
       } else if (n === "w:instrText" || n === "w:delInstrText") add({ type: "instr", text: textContent(c) });
+      else if ((n === "w:footnoteReference" || n === "w:endnoteReference") && Object.keys(attrs(c)).every((k) => k === "id")) {
+        add({ type: "noteRef", kind: n === "w:footnoteReference" ? "footnote" : "endnote", id: attr(c, "id") ?? "" });
+      } else if ((n === "w:footnoteRef" || n === "w:endnoteRef") && !c.attributes.length) {
+        add({ type: "noteMark", kind: n === "w:footnoteRef" ? "footnote" : "endnote" });
+      }
       else if (n === "w:drawing") {
         add(this.readDrawing(c, ctx) ?? this.floating(c, c, ctx) ?? this.runPreserved(c, ctx, child(c, "wp:inline") ? "w:drawing/inline" : n));
       } else if (n === "mc:AlternateContent") {

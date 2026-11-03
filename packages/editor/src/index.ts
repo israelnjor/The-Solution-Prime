@@ -33,3 +33,7 @@ export { changeCase, type CaseMode, clearCharFormatting, clearFormatting, clearP
 export { pasteAs, type PasteMode, pasteOptions, pasteOptionsKey, type PasteState } from "./pasteoptions.js";
 export { setShowMarks, showMarks, showMarksKey } from "./marks.js";
 export { setTabStops, tabStops } from "./tabs.js";
+export { captions, fields, type FieldAt, gotoBookmark, headings, insertCaption, insertCrossReference, insertToc, type Pages, referenceAt, type RefShow, refreshPageRefs, type Target, type TocOptions, updateFields } from "./references.js";
+export { deleteNote, gotoNoteRef, insertNote, type NoteEntry, noteAt, noteList, setNoteText } from "./notes.js";
+export { bibliographyBlocks, citationText, type CitationStyle, citedTags, insertBibliography, insertCitation, newTag, type Person, readSources, referenceInlines, type Source, type SourceType, writeSources } from "./citations.js";
+export { insertEquation, latexToOmml, ommlToLatex } from "./equations.js";

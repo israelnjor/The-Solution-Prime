@@ -2,6 +2,9 @@ import type { LayoutResult, Page, PlacedImage } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 import { memo, type ReactNode } from "react";
 
+/** Clicking a footnote or endnote on the page opens the Notes pane. */
+export const NOTES_EVENT = "prime-word:notes";
+
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp" };
 
 function imageUrl(doc: PrimeDocument, img: PlacedImage): string | undefined {
@@ -19,14 +22,20 @@ function imageUrl(doc: PrimeDocument, img: PlacedImage): string | undefined {
 function Chrome({ page, total, doc, top }: { page: Page; total: number; doc: PrimeDocument; top: number }) {
   return (
     <>
-      {page.lines.filter((l) => l.story === "header" || l.story === "footer").map((line, i) => (
-        <div key={i}>
+      {/* The short rule above footnotes and endnotes. */}
+      {page.rects.filter((r) => r.story).map((r, i) => (
+        <div key={`r${i}`} className="pw-chrome-rule" style={{ left: `${r.x}pt`, top: `${top + r.y}pt`, width: `${r.width}pt` }} />
+      ))}
+      {page.lines.filter((l) => l.story === "header" || l.story === "footer" || l.story === "footnote" || l.story === "endnote").map((line, i) => (
+        <div key={i} className={line.story === "footnote" || line.story === "endnote" ? "pw-chrome-note" : undefined}
+          onClick={line.story === "footnote" || line.story === "endnote" ? () => window.dispatchEvent(new Event(NOTES_EVENT)) : undefined}>
           {line.segments.map((s, j) => (
             <span key={j} className="pw-chrome-text" style={{
               left: `${s.x}pt`, top: `${top + line.y}pt`, lineHeight: `${line.height}pt`,
               fontFamily: `"${s.font.family}"`, fontSize: `${s.size}pt`,
               fontWeight: s.font.bold ? 700 : 400, fontStyle: s.font.italic ? "italic" : "normal",
               color: s.color ? `#${s.color}` : undefined, textDecoration: s.underline ? "underline" : undefined,
+              ...(s.vertAlign ? { fontSize: `${s.size * 0.65}pt`, verticalAlign: s.vertAlign === "superscript" ? "super" : "sub" } : {}),
             }}>
               {s.field === "PAGE" ? page.number : s.field === "NUMPAGES" ? total : s.text}
             </span>

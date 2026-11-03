@@ -795,3 +795,213 @@ export function fileTabSelfTest() {
     console.log("[selftest] align", JSON.stringify({ file, homeToolbarPx: Math.round(homeHeight), templatesPage: heading, back: document.querySelector(".home-main h1")?.textContent }));
   })();
 }
+
+/**
+ * References through the UI: a table of contents at the top (page numbers filled in after layout),
+ * a caption under the first picture, a cross-reference to a heading, F9, and Ctrl+Click on an entry.
+ */
+export function referencesSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent?.trim() ?? "").startsWith(label))?.click();
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    await wait(1500);
+    const entries = () => {
+      const list: string[] = [];
+      view.state.doc.descendants((n) => { if (/^TOC\d/.test(n.attrs.props?.style ?? "")) list.push(n.textContent); return n.type.name !== "paragraph"; });
+      return list;
+    };
+    // Contents at the very start.
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+    click("References", document.querySelector("nav")!); await wait(150);
+    choose(document.querySelector<HTMLSelectElement>(".toc-select"), "2");
+    await wait(2500); // the layout runs, then the page numbers are filled in
+    out.toc = entries().slice(0, 6);
+    out.tocCount = entries().length;
+
+    // A caption under the first picture.
+    let pic = -1;
+    view.state.doc.descendants((n, pos) => { if (pic < 0 && n.type.name === "image") pic = pos; return pic < 0; });
+    if (pic >= 0) {
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pic)));
+      click("Insert Caption"); await wait(200);
+      const input = document.querySelector<HTMLInputElement>(".caption-dialog input");
+      if (input) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Quarterly chart"); input.dispatchEvent(new Event("input", { bubbles: true })); }
+      await wait(50);
+      out.captionPreview = document.querySelector(".caption-preview")?.textContent;
+      click("OK", document.querySelector(".caption-dialog")!); await wait(200);
+      let caption = "";
+      view.state.doc.descendants((n) => { if (n.attrs.props?.style === "Caption" && !caption) caption = n.textContent; return n.type.name !== "paragraph"; });
+      out.caption = caption;
+    }
+
+    // A cross-reference to the second heading, at the end of the document.
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+    click("Cross-reference"); await wait(200);
+    const options = [...document.querySelectorAll<HTMLButtonElement>(".crossref-list button")];
+    options[1]?.click(); await wait(50);
+    out.refTarget = options[1]?.textContent;
+    click("Insert", document.querySelector(".crossref-dialog")!); await wait(200);
+    out.refText = view.state.doc.lastChild?.textContent.slice(-40);
+
+    // F9, then Ctrl+Click the third contents entry: the cursor goes to that heading.
+    view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "F9", bubbles: true, cancelable: true }));
+    await wait(300);
+    let third = -1;
+    let k = 0;
+    view.state.doc.descendants((n, pos) => { if (/^TOC\d/.test(n.attrs.props?.style ?? "") && k++ === 2) third = pos; return third < 0 && n.type.name !== "paragraph"; });
+    const el = third >= 0 ? (view.nodeDOM(third) as HTMLElement) : null;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, ctrlKey: true, button: 0, clientX: r.left + 20, clientY: r.top + r.height / 2 }));
+      await wait(200);
+      out.jumpedTo = view.state.selection.$from.parent.textContent.slice(0, 40);
+      out.entryClicked = el.textContent?.slice(0, 40);
+    }
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/**
+ * Footnotes through the UI: Insert Footnote, type its text in the Notes pane, see the number in the text
+ * and the note at the foot of the page; a second one earlier in the text renumbers the first.
+ */
+export function notesSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent?.trim() ?? "").startsWith(label))?.click();
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    await wait(1500);
+    const numbers = () => [...view.dom.querySelectorAll(".pw-noteref")].map((el) => getComputedStyle(el, "::after").content.replace(/"/g, ""));
+    // At the end of the third paragraph.
+    let at = -1;
+    let k = 0;
+    view.state.doc.forEach((n, pos) => { if (n.type.name === "paragraph" && n.textContent.length > 20 && k++ === 2) at = pos + n.nodeSize - 1; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+    view.focus();
+    click("References", document.querySelector("nav")!); await wait(150);
+    click("Insert Footnote"); await wait(400);
+    out.paneOpen = !!document.querySelector(".notes-pane");
+    out.focusedInNote = !!document.activeElement?.closest(".note-editor");
+    document.execCommand("insertText", false, "Source: Ghana Statistical Service, 2024.");
+    await wait(2500); // the layout runs
+    out.numbersAfterFirst = numbers();
+    out.footAreaText = [...document.querySelectorAll(".pw-chrome-note")].map((e) => e.textContent).join(" | ");
+    out.rule = document.querySelectorAll(".pw-chrome-rule").length;
+    // A second footnote earlier in the text: it becomes 1, the first becomes 2.
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)));
+    view.focus();
+    click("Insert Footnote"); await wait(400);
+    document.execCommand("insertText", false, "An earlier note.");
+    await wait(2500);
+    out.numbersAfterSecond = numbers();
+    out.paneNumbers = [...document.querySelectorAll(".notes-pane .note-head strong")].map((e) => e.textContent);
+    out.footArea = [...document.querySelectorAll(".pw-chrome-note")].map((e) => e.textContent);
+    // Undo in the document takes the second note away again.
+    view.focus();
+    view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+    await wait(200);
+    out.afterUndo = { refs: view.dom.querySelectorAll(".pw-noteref").length, pane: [...document.querySelectorAll(".notes-pane .note-editor")].map((e) => e.textContent), foot: [...document.querySelectorAll(".pw-chrome-note")].map((e) => e.textContent) };
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Citations through the UI: a new source, cited with a page; the reference list; then IEEE style. */
+export function citationsSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent?.trim() ?? "").startsWith(label))?.click();
+  const setValue = (el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    await wait(1500);
+    let at = -1;
+    view.state.doc.forEach((n, pos) => { if (at < 0 && n.type.name === "paragraph" && n.textContent.length > 40) at = pos + n.nodeSize - 1; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+    click("References", document.querySelector("nav")!); await wait(150);
+    setValue(document.querySelector<HTMLSelectElement>(".cite-select"), "new"); await wait(300);
+    const dialog = () => document.querySelector(".sources-dialog")!;
+    setValue(dialog().querySelector("textarea"), "Mensah, Ama\nOwusu, Kwame");
+    const inputs = () => [...dialog().querySelectorAll<HTMLInputElement>("input")];
+    setValue(inputs()[0], "Climate and Farming in Ghana");
+    setValue(inputs()[1], "2024");
+    setValue(inputs()[2], "Sub-Saharan Publishers");
+    await wait(100);
+    click("Save source", dialog()); await wait(200);
+    out.listed = [...dialog().querySelectorAll(".source strong")].map((e) => e.textContent);
+    setValue(dialog().querySelector<HTMLInputElement>(".sig-name input"), "12");
+    await wait(50);
+    click("Cite", dialog()); await wait(200);
+    const para = () => view.state.doc.resolve(at).parent.textContent;
+    out.citedApa = para().slice(-32);
+    // The reference list at the end, then IEEE.
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+    click("Bibliography"); await wait(200);
+    const last = () => { const out: string[] = []; view.state.doc.forEach((n) => out.push(n.textContent)); return out.slice(-2); };
+    out.bibliographyApa = last();
+    setValue(document.querySelector<HTMLSelectElement>('select[aria-label="Citation style"]'), "IEEE"); await wait(300);
+    out.citedIeee = para().slice(-12);
+    out.bibliographyIeee = last();
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Equations through the UI: type one with a live preview, insert it, double-click it, change it. */
+export function equationSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent?.trim() ?? "").startsWith(label))?.click();
+  const type = (el: HTMLTextAreaElement | null, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const equations = () => {
+    const out: string[] = [];
+    view.state.doc.descendants((n) => { if (n.type.name === "inline_preserved" && /^m:oMath/.test(n.attrs.preserved?.name ?? "")) out.push(n.attrs.preserved.xml); return true; });
+    return out;
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    await wait(1500);
+    const before = equations().length;
+    let at = -1;
+    view.state.doc.forEach((n, pos) => { if (at < 0 && n.type.name === "paragraph" && n.textContent.length > 40) at = pos + n.nodeSize - 1; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+    click("Insert", document.querySelector("nav")!); await wait(150);
+    click("Equation"); await wait(300);
+    type(document.querySelector(".equation-dialog textarea"), String.raw`x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`);
+    await wait(300);
+    out.preview = !!document.querySelector(".eq-preview svg");
+    type(document.querySelector(".equation-dialog textarea"), String.raw`x = \frac{1}{`);
+    await wait(200);
+    out.error = document.querySelector(".eq-error")?.textContent;
+    type(document.querySelector(".equation-dialog textarea"), String.raw`x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`);
+    await wait(200);
+    click("Insert", document.querySelector(".equation-dialog")!); await wait(400);
+    out.inserted = equations().length - before;
+    out.onScreen = view.dom.querySelectorAll(".pw-math").length;
+    // Double-click it: the dialog shows its LaTeX; change and update.
+    const math = [...view.dom.querySelectorAll<HTMLElement>(".pw-math")].pop();
+    math?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+    await wait(300);
+    out.reopened = document.querySelector<HTMLTextAreaElement>(".equation-dialog textarea")?.value;
+    type(document.querySelector(".equation-dialog textarea"), String.raw`E = mc^2`);
+    await wait(200);
+    click("Update", document.querySelector(".equation-dialog")!); await wait(400);
+    out.after = equations().length - before;
+    out.updated = equations().some((x) => x.includes("<m:t>E=mc</m:t>") || (x.includes(">E=") && x.includes("m:sSup")));
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}

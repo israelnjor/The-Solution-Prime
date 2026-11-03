@@ -198,6 +198,39 @@ export interface FloatInfo {
 }
 
 /** Unsupported paragraph-level content (e.g. bookmarks), kept verbatim. */
+export type NoteKind = "footnote" | "endnote";
+
+/** A footnote or endnote reference in the text (w:footnoteReference / w:endnoteReference); shown as its number. */
+export interface NoteRefInline {
+  type: "noteRef";
+  kind: NoteKind;
+  id: string;
+  props?: RunProps;
+}
+
+/** The note's own number at the start of its text (w:footnoteRef / w:endnoteRef). */
+export interface NoteMarkInline {
+  type: "noteMark";
+  kind: NoteKind;
+  props?: RunProps;
+}
+
+/** A footnote's or endnote's text. */
+export interface Note {
+  id: string;
+  blocks: Block[];
+}
+
+/** The footnotes (or endnotes) part: the notes, plus Word's separator notes kept verbatim. */
+export interface Notes {
+  items: Note[];
+  /** w:footnote elements with a w:type (separator, continuation separator…), as they were. */
+  special: Preserved[];
+  part?: string;
+  rootAttrs?: Record<string, string>;
+  preservedRels?: Relationship[];
+}
+
 export interface PreservedInline {
   type: "preserved";
   preserved: Preserved;
@@ -226,6 +259,8 @@ export interface RevisionInline {
 }
 
 export type Inline =
+  | NoteRefInline
+  | NoteMarkInline
   | TextInline
   | TabInline
   | BreakInline
@@ -426,6 +461,8 @@ export interface PrimeDocument {
   lists: Lists;
   sections: Section[];
   images: Record<string, ImageResource>;
+  /** Footnotes and endnotes (absent: none). */
+  notes?: { footnote?: Notes; endnote?: Notes };
   package: PackageInfo;
 }
 

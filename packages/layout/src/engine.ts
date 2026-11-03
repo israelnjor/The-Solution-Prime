@@ -14,7 +14,7 @@ import {
 } from "@prime/pdm";
 import { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 import type { FontKey, Measurer } from "./measure.js";
-import { type ResolvedParagraph, type ResolvedRun, Resolver } from "./resolve.js";
+import { type ResolvedParagraph, type ResolvedRun, Resolver, roman } from "./resolve.js";
 
 const MARKER = /\[[A-Z]-\d{3}\]/g;
 const DEFAULT_TAB = 36;
@@ -73,6 +73,8 @@ export interface Rect {
   sides?: { top: boolean; bottom: boolean; left: boolean; right: boolean };
   /** Border colour and width (defaults: black, 0.5pt). */
   stroke?: { color?: string; width: number };
+  /** Part of the notes area (the separator line above footnotes or endnotes), not the body. */
+  story?: "footnote" | "endnote";
 }
 
 export interface PositionedLine {
@@ -85,7 +87,7 @@ export interface PositionedLine {
   images: PlacedImage[];
   rules: Rule[];
   /** Set for header and footer lines, and for floating pictures and text boxes. */
-  story?: "header" | "footer" | "float";
+  story?: "header" | "footer" | "float" | "footnote" | "endnote";
   /** Pen strokes (ink): x, y pairs on the page, pen width in pt, colour. */
   strokes?: { points: number[]; width: number; color: string }[];
 }
@@ -119,6 +121,8 @@ export interface LayoutResult {
   wraps: WrapPoint[];
   /** Floating objects relative to their anchor paragraph — so the editor can draw them with its text. */
   floats: PlacedFloat[];
+  /** The page each bookmark is on (where it first appears): for PAGEREF, contents tables, cross-references. */
+  bookmarks: Record<string, number>;
 }
 
 /**
@@ -191,6 +195,8 @@ interface MLine {
   wrap?: Omit<WrapPoint, "page" | "path" | "offset">;
   /** Bookmarks that start on this line (for PAGEREF fields). */
   bookmarks?: string[];
+  /** Footnotes referenced on this line (their ids): they go at the foot of the same page. */
+  notes?: string[];
 }
 
 interface ParaBox {
@@ -267,6 +273,7 @@ type Atom = { offset: number } & (
   // `breakAfter`: the line may break after this piece although no space follows (after a hyphen).
   | { kind: "word"; text: string; run: ResolvedRun; field?: Segment["field"]; ref?: string; breakAfter?: boolean }
   | { kind: "bookmark"; name: string }
+  | { kind: "note"; id: string }
   | { kind: "space"; text: string; run: ResolvedRun }
   | { kind: "tab"; run: ResolvedRun }
   | { kind: "br" }
@@ -337,7 +344,29 @@ export class LayoutEngine {
   /** Word compatibility mode of the document (12 = 2007, 14 = 2010, 15 = 2013 and later). */
   private compat: number;
 
+  /** The number shown for each note ("footnote:3" → "2"), in reference order. */
+  private noteNumbers = new Map<string, string>();
+  /** While a note's text is measured: its number, shown by its own mark (w:footnoteRef). */
+  private noteMark = "";
+
   constructor(private doc: PrimeDocument, private m: Measurer) {
+    const count = { footnote: 0, endnote: 0 };
+    const visitNotes = (items: Inline[]) => {
+      for (const i of items) {
+        if (i.type === "noteRef" && !this.noteNumbers.has(`${i.kind}:${i.id}`)) {
+          const n = ++count[i.kind];
+          this.noteNumbers.set(`${i.kind}:${i.id}`, i.kind === "footnote" ? String(n) : roman(n));
+        } else if ("content" in i && Array.isArray(i.content)) visitNotes(i.content as Inline[]);
+      }
+    };
+    const visitBlocks = (blocks: Block[]) => {
+      for (const b of blocks) {
+        if (b.type === "paragraph") visitNotes(b.content);
+        else if (b.type === "table") for (const r of b.rows) for (const c of r.cells) visitBlocks(c.blocks);
+        else if (b.type === "contentControl") visitBlocks(b.blocks);
+      }
+    };
+    for (const sec of doc.sections) visitBlocks(sec.blocks);
     this.resolver = new Resolver(doc);
     this.math = new MathTypesetter(m);
     this.rels = doc.package.preservedRels;
@@ -429,6 +458,13 @@ export class LayoutEngine {
               offset,
             });
           }
+          continue;
+        }
+        if (i.type === "noteRef" || i.type === "noteMark") {
+          const num = i.type === "noteRef" ? this.noteNumbers.get(`${i.kind}:${i.id}`) : this.noteMark;
+          if (i.type === "noteRef" && i.kind === "footnote") out.push({ kind: "note", id: i.id, offset });
+          const base = this.resolver.run(rp.styleId, i.props, rp.tableStyle);
+          if (num && !base.hidden) out.push({ kind: "word", text: num, run: { ...base, vertAlign: base.vertAlign ?? "superscript" }, offset });
           continue;
         }
         if (i.type !== "text" && i.type !== "tab") continue;
@@ -534,6 +570,7 @@ export class LayoutEngine {
     let x = 0;
     let pendingSpace: { text: string; run: ResolvedRun; w: number } | undefined;
     let lineBookmarks: string[] | undefined;
+    let lineNotes: string[] | undefined;
     let lineStart = 0;
     let startX = 0;
     let avail = 0;
@@ -591,6 +628,7 @@ export class LayoutEngine {
         fitHeight: (picture > text ? Math.max(imageHeight, text) : Math.max(text, picture)) + skip,
         segments: segs, startX, pageBreakAfter, avail, endsWithBreak, images, rules, startOffset: lineStart,
         ...(lineBookmarks ? { bookmarks: lineBookmarks } : {}),
+        ...(lineNotes ? { notes: lineNotes } : {}),
       });
       // Record where wrapping starts or changes, for the editor (heights from the line's top after the skip).
       const narrowed = free && (free.left > 0.01 || free.right < width - 0.01);
@@ -609,6 +647,7 @@ export class LayoutEngine {
       skip = 0;
       lineStart = nextStart;
       lineBookmarks = undefined;
+      lineNotes = undefined;
       segs = [];
       images = [];
       rules = [];
@@ -629,6 +668,7 @@ export class LayoutEngine {
         continue;
       }
       if (a.kind === "bookmark") { (lineBookmarks ??= []).push(a.name); continue; }
+      if (a.kind === "note") { (lineNotes ??= []).push(a.id); continue; }
       if (a.kind === "br") { finish(false, true, a.offset + 1); continue; }
       if (a.kind === "page") { finish(true, true, a.offset + 1); continue; }
       if (a.kind === "tab") {
@@ -973,7 +1013,50 @@ export class LayoutEngine {
     let footers: Section["footers"] = {};
     let sectionPages = 0;
 
+    // Footnotes: those referenced on the current page, the room they take at its foot, and the
+    // column they are measured in.
+    const footnoteText = new Map((this.doc.notes?.footnote?.items ?? []).map((n) => [n.id, n] as const));
+    let pageNotes: string[] = [];
+    let noteColumn = 468;
+    const noteBoxes = new Map<string, StoryBox>();
+    const noteBox = (kind: "footnote" | "endnote", id: string, blocks: Block[]) => {
+      const key = `${kind}:${id}:${noteColumn}`;
+      let box = noteBoxes.get(key);
+      if (!box) {
+        this.noteMark = this.noteNumbers.get(`${kind}:${id}`) ?? "";
+        box = this.story({ blocks }, noteColumn);
+        this.noteMark = "";
+        noteBoxes.set(key, box);
+      }
+      return box;
+    };
+    const footnoteHeight = (id: string) => { const n = footnoteText.get(id); return n ? noteBox("footnote", id, n.blocks).height : 0; };
+    /** The separator above the notes: one line of the document's default text, with a short rule in it. */
+    let separator: number | undefined;
+    const separatorHeight = () => (separator ??= this.story({ blocks: [{ type: "paragraph", props: { spacing: { before: 0, after: 0, line: 240, lineRule: "auto" } }, content: [] }] }, noteColumn).height);
+    /** Extra room a line needs for its footnotes not yet on this page (`onPage` also counts lines already fitted). */
+    const notesNeed = (line: MLine, onPage: Set<string>) => {
+      let h = 0;
+      for (const id of line.notes ?? []) if (!onPage.has(id) && footnoteText.has(id)) h += footnoteHeight(id);
+      return h && !onPage.size ? h + separatorHeight() : h;
+    };
+    /** Draws the page's footnotes in the room kept for them at its foot, under a short rule. */
+    const drawFootnotes = () => {
+      if (!pageNotes.length) return;
+      let at = bottom;
+      page.rects.push({ x: left, y: at + separatorHeight() / 2, width: Math.min(144, noteColumn / 3), height: 0, sides: { top: true, bottom: false, left: false, right: false }, stroke: { width: 0.5 }, story: "footnote" });
+      at += separatorHeight();
+      for (const id of pageNotes) {
+        const box = noteBox("footnote", id, footnoteText.get(id)!.blocks);
+        for (const r of box.rects ?? []) page.rects.push({ ...r, x: left + r.x, y: at + r.y, story: "footnote" });
+        for (const l of box.lines) put(l.line, left + (l.dx ?? 0), at + l.dy, { story: "footnote" });
+        at += box.height;
+      }
+      pageNotes = [];
+    };
+
     const newPage = (section: Section, index: number) => {
+      if (page) drawFootnotes();
       const w = section.props.pageWidth ?? 612;
       const h = section.props.pageHeight ?? 792;
       const mg = section.props.margins ?? {};
@@ -986,6 +1069,7 @@ export class LayoutEngine {
       top = Math.max(mg.top ?? 72, (mg.header ?? 36) + header.height);
       bottom = Math.min(h - (mg.bottom ?? 72), h - (mg.footer ?? 36) - footer.height);
       left = mg.left ?? 72;
+      noteColumn = width;
       page = { number: pages.length + 1, section: index, width: w, height: h, lines: [], rects: [], bodyTop: top, bodyBottom: bottom, bodyLeft: left, bodyRight: w - (mg.right ?? 72) };
       pages.push(page);
       pageOpen = pages.length > 1;
@@ -1013,6 +1097,11 @@ export class LayoutEngine {
     const bookmarkPages = new Map<string, number>();
     const put = (line: MLine, x: number, at: number, extra: { story?: PositionedLine["story"]; path?: number[] } = {}) => {
       for (const b of line.bookmarks ?? []) if (!extra.story && !bookmarkPages.has(b)) bookmarkPages.set(b, page.number);
+      if (!extra.story && line.notes) {
+        const need = notesNeed(line, new Set(pageNotes));
+        for (const id of line.notes) if (!pageNotes.includes(id) && footnoteText.has(id)) pageNotes.push(id);
+        bottom -= need;
+      }
       if (extra.path && pageOpen) {
         pageStarts.push({ page: page.number, path: extra.path, offset: line.startOffset });
         pageOpen = false;
@@ -1243,7 +1332,15 @@ export class LayoutEngine {
           }
           let fit = 0;
           let h = 0;
-          while (fit < remaining.length && h + remaining[fit].fitHeight <= room() + 0.01) h += remaining[fit++].height;
+          let notesH = 0;
+          const onPage = new Set(pageNotes);
+          while (fit < remaining.length) {
+            const add = notesNeed(remaining[fit], onPage);
+            if (h + remaining[fit].fitHeight + notesH + add > room() + 0.01) break;
+            for (const id of remaining[fit].notes ?? []) onPage.add(id);
+            notesH += add;
+            h += remaining[fit++].height;
+          }
           // Widow/orphan control works within the lines between manual page breaks, not across them.
           const breakAt = remaining.findIndex((l) => l.pageBreakAfter);
           const segment = breakAt < 0 ? remaining.length : breakAt + 1;
@@ -1312,12 +1409,37 @@ export class LayoutEngine {
         y += row.height;
       }
     });
+    drawFootnotes();
+    const endnoteText = new Map((this.doc.notes?.endnote?.items ?? []).map((n) => [n.id, n] as const));
+    const endnotes = [...this.noteNumbers.keys()].filter((k) => k.startsWith("endnote:")).map((k) => k.slice(8)).filter((id) => endnoteText.has(id));
+    if (endnotes.length && pages.length) {
+      const lastIndex = this.doc.sections.length - 1;
+      const last = this.doc.sections[lastIndex];
+      if (y + separatorHeight() > bottom) newPage(last, lastIndex);
+      page.rects.push({ x: left, y: y + separatorHeight() / 2, width: Math.min(144, noteColumn / 3), height: 0, sides: { top: true, bottom: false, left: false, right: false }, stroke: { width: 0.5 }, story: "endnote" });
+      y += separatorHeight();
+      for (const id of endnotes) {
+        const box = noteBox("endnote", id, endnoteText.get(id)!.blocks);
+        let top = y;
+        let shift = 0;
+        for (const r of box.rects ?? []) page.rects.push({ ...r, x: left + r.x, y: top + r.y, story: "endnote" });
+        for (const l of box.lines) {
+          if (top + l.dy - shift + l.line.height > bottom + 0.01 && top + l.dy - shift > page.bodyTop + 0.01) {
+            newPage(last, lastIndex);
+            shift = l.dy;
+            top = y;
+          }
+          put(l.line, left + (l.dx ?? 0), top + l.dy - shift, { story: "endnote" });
+        }
+        y = top + box.height - shift;
+      }
+    }
     // PAGEREF (e.g. a table of contents' page numbers): the page where its bookmark ended up.
     for (const p of pages) for (const l of p.lines) for (const s of l.segments) {
       const n = s.field === "PAGEREF" && s.ref ? bookmarkPages.get(s.ref) : undefined;
       if (n !== undefined) s.text = String(n);
     }
-    return { pages, markers, paragraphs, pageStarts, wraps, floats };
+    return { pages, markers, paragraphs, pageStarts, wraps, floats, bookmarks: Object.fromEntries(bookmarkPages) };
   }
 }
 

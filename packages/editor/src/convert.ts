@@ -16,7 +16,7 @@ export function toProseMirror(doc: PrimeDocument, schema: Schema): Node {
   });
   if (!blocks.length) blocks.push(schema.nodes.paragraph.create());
   const last = doc.sections[doc.sections.length - 1];
-  return schema.nodes.doc.create({ section: last ? sectionAttrs(last) : null }, blocks);
+  return schema.nodes.doc.create({ section: last ? sectionAttrs(last) : null, notes: doc.notes ?? null }, blocks);
 }
 
 const sectionAttrs = (s: Section) => ({ props: s.props, headers: s.headers, footers: s.footers });
@@ -65,6 +65,8 @@ function inlines(items: Inline[], schema: Schema, marks: readonly Mark[]): Node[
         }, null, marks));
         break;
       case "fieldChar": out.push(n.field_char.create({ props: i.props ?? {}, kind: i.kind }, null, marks)); break;
+      case "noteRef": out.push(n.note_ref.create({ props: i.props ?? {}, kind: i.kind, id: i.id }, null, marks)); break;
+      case "noteMark": out.push(n.note_mark.create({ props: i.props ?? {}, kind: i.kind }, null, marks)); break;
       case "instr": out.push(n.instr.create({ props: i.props ?? {}, text: i.text }, null, marks)); break;
       case "runPreserved": out.push(n.run_preserved.create({ props: i.props ?? {}, preserved: i.preserved, float: i.float ?? null }, null, marks)); break;
       case "preserved": out.push(n.inline_preserved.create({ preserved: i.preserved }, null, marks)); break;
@@ -100,7 +102,8 @@ export function fromProseMirror(pm: Node, base: PrimeDocument): PrimeDocument {
   });
   const last = pm.attrs.section ?? { props: {}, headers: {}, footers: {} };
   sections.push({ props: last.props, headers: last.headers, footers: last.footers, blocks });
-  return { ...base, sections };
+  const notes = pm.attrs.notes as PrimeDocument["notes"] | null;
+  return { ...base, sections, ...(notes ? { notes } : {}) };
 }
 
 function toBlocks(node: Node): Block[] {
@@ -188,6 +191,8 @@ function leaf(node: Node): Inline {
         ...props(a.props),
       };
     case "field_char": return { type: "fieldChar", kind: a.kind, ...props(a.props) };
+    case "note_ref": return { type: "noteRef", kind: a.kind, id: a.id, ...props(a.props) };
+    case "note_mark": return { type: "noteMark", kind: a.kind, ...props(a.props) };
     case "instr": return { type: "instr", text: a.text, ...props(a.props) };
     case "run_preserved": return { type: "runPreserved", preserved: a.preserved, ...(a.float ? { float: a.float } : {}), ...props(a.props) };
     default: return { type: "preserved", preserved: a.preserved };

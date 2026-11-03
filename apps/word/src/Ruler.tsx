@@ -37,6 +37,8 @@ export function Ruler({ view, doc, pageWidth, margins }: { view: EditorView; doc
     return () => { window.removeEventListener("resize", redraw); window.removeEventListener("scroll", redraw, true); };
   }, []);
 
+  // The editor is rebuilt when fonts arrive: a scroll in between must not ask the old one.
+  if (view.isDestroyed) return null;
   const para = view.state.selection.$from.parent;
   const props = para.type.name === "paragraph" ? para.attrs.props : {};
   const rp = new Resolver(doc).paragraph({ type: "paragraph", props, content: [] } as Paragraph, undefined, false);

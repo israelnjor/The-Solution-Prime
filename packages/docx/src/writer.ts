@@ -90,6 +90,8 @@ class Writer {
     const rootAttrs = { ...ROOT_NAMESPACES, ...pkg.rootAttrs };
     this.put(main, encoder.encode(`${XML_DECL}<w:document${attrString(rootAttrs, "")}><w:body>${body}</w:body></w:document>`),
       pkg.contentTypes.overrides[main] ?? ContentType.document);
+    this.notes("footnote", body, rels);
+    this.notes("endnote", body, rels);
     this.put(relsPath(main), encoder.encode(rels.xml()));
     this.pruneComments(body);
     if (!this.files["_rels/.rels"]) {
@@ -100,6 +102,31 @@ class Writer {
     }
     this.put("[Content_Types].xml", encoder.encode(this.contentTypes()));
     return zipSync(this.files, { level: 6 });
+  }
+
+  /**
+   * The footnotes or endnotes part: Word's separator notes (as read, or Word's standard ones), then
+   * every note still referenced from the text (a deleted reference takes its note with it).
+   * Called before the main part's relationships are written.
+   */
+  private notes(kind: "footnote" | "endnote", body: string, rels: Rels) {
+    const n = this.doc.notes?.[kind];
+    const used = new Set([...body.matchAll(new RegExp(`<w:${kind}Reference\\b[^>]*w:id="([^"]*)"`, "g"))].map((m) => m[1]));
+    const items = (n?.items ?? []).filter((x) => used.has(x.id));
+    if (!n || (!items.length && !n.special.length)) return;
+    const part = n.part ?? `word/${kind}s.xml`;
+    const partRels = new Rels(part, n.preservedRels);
+    const tag = `w:${kind}`;
+    const sep = (type: string, id: string, mark: string) =>
+      `<${tag} w:type="${type}" w:id="${id}"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><${mark}/></w:r></w:p></${tag}>`;
+    const special = n.special.length ? n.special.map((p) => p.xml).join("")
+      : sep("separator", "-1", "w:separator") + sep("continuationSeparator", "0", "w:continuationSeparator");
+    const notes = items.map((x) => `<${tag} w:id="${x.id}">${this.blocks(x.blocks, partRels) || "<w:p/>"}</${tag}>`).join("");
+    const root = `w:${kind}s`;
+    this.put(part, encoder.encode(`${XML_DECL}<${root}${attrString({ ...ROOT_NAMESPACES, ...(n.rootAttrs ?? {}) }, "")}>${special}${notes}</${root}>`),
+      kind === "footnote" ? ContentType.footnotes : ContentType.endnotes);
+    if (partRels.size) this.put(relsPath(part), encoder.encode(partRels.xml()));
+    rels.add(kind === "footnote" ? RelType.footnotes : RelType.endnotes, part);
   }
 
   /**
@@ -226,6 +253,10 @@ class Writer {
       }
       case "fieldChar":
         return run(el("w:fldChar", { fldCharType: i.kind }));
+      case "noteRef":
+        return run(el(i.kind === "footnote" ? "w:footnoteReference" : "w:endnoteReference", { id: i.id }));
+      case "noteMark":
+        return run(i.kind === "footnote" ? "<w:footnoteRef/>" : "<w:endnoteRef/>");
       case "instr":
         return run(deleted
           ? `<w:delInstrText xml:space="preserve">${escText(i.text)}</w:delInstrText>`

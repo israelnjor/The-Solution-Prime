@@ -4,9 +4,9 @@ import {
   insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
-  pageAt, setAltText, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
+  pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
 } from "@prime/editor";
-import type { LayoutResult } from "@prime/layout";
+import { layoutDocument, type LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
 import type { PrimeDocument } from "@prime/pdm";
 import type { Template } from "@prime/editor";
@@ -25,7 +25,10 @@ import { TemplatePicker } from "./TemplatePicker";
 import { SpellMenu } from "./SpellMenu";
 import { documentLanguage, loadSpeller, type Misspelling, misspellingAt, recheck, type Speller, spellKey, spellPlugin } from "./spelling";
 import { loadCloudFonts } from "./fonts";
-import { PageSheets } from "./PageSheets";
+import { NOTES_EVENT, PageSheets } from "./PageSheets";
+import { NotesPane } from "./NotesPane";
+import { SourcesDialog } from "./SourcesDialog";
+import { EquationDialog } from "./EquationDialog";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
@@ -36,6 +39,7 @@ import { FontDialog } from "./FontDialog";
 import { PasteOptions } from "./PasteOptions";
 import { Ruler } from "./Ruler";
 import { SymbolDialog } from "./SymbolDialog";
+import { CaptionDialog, CrossRefDialog } from "./ReferencesDialogs";
 import { CommentsPane } from "./CommentsPane";
 import { Home } from "./Home";
 import type { ConversionResult } from "@prime/pdf-import";
@@ -59,6 +63,13 @@ interface Loaded {
   warnings: string[];
   /** Bumped when fonts finish loading, so text is re-measured. */
   fonts: number;
+}
+
+/** Whether the document has PAGEREF fields (a contents table, page cross-references). */
+function hasPageRefs(doc: import("prosemirror-model").Node): boolean {
+  let found = false;
+  doc.descendants((n) => { if (!found && n.type.name === "instr" && /PAGEREF/.test(n.attrs.text)) found = true; return !found; });
+  return found;
 }
 
 /** Text in which the document's font family names appear (styles, theme, runs). */
@@ -104,7 +115,13 @@ export function App() {
   const [choosingBlock, setChoosingBlock] = useState(false);
   const [autoCorrecting, setAutoCorrecting] = useState(false);
   const autoCorrect = useRef(loadAutoCorrect());
-  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock">();
+  /** The Notes pane, and the note to open for typing. */
+  const [notesPane, setNotesPane] = useState<{ focus?: { kind: "footnote" | "endnote"; id: string } }>();
+  const newNote = (kind: "footnote" | "endnote"): Command => (state, dispatch) =>
+    insertNote(() => fileRef.current.base, kind, (id) => setNotesPane({ focus: { kind, id } }))(state, dispatch);
+  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock" | "caption" | "crossref" | "sources" | "newSource" | "equation">();
+  /** Pages of the bookmarks in the last layout (contents, cross-references). */
+  const pagesRef = useRef<Record<string, number>>({});
   const [menu, setMenu] = useState<{ x: number; y: number }>();
   /** The format painter: the formatting it carries, and whether it stays on after one use. */
   const [painter, setPainter] = useState<{ format: CopiedFormat; sticky: boolean }>();
@@ -168,7 +185,10 @@ export function App() {
     if (!v) return;
     const { base, location, name } = fileRef.current;
     try {
-      const bytes = writeDocx(fromProseMirror(v.state.doc, base));
+      const model = fromProseMirror(v.state.doc, base);
+      // Page numbers in contents and cross-references as laid out now, so other programs show them right.
+      if (hasPageRefs(v.state.doc) && measurerRef.current) refreshPageRefs(model, layoutDocument(model, measurerRef.current).bookmarks);
+      const bytes = writeDocx(model);
       let saved;
       try {
         saved = await saveDocument(bytes, name, saveAs ? undefined : location);
@@ -234,6 +254,9 @@ export function App() {
           "Mod-Alt-1": setParagraph("style", "Heading1"), "Mod-Alt-2": setParagraph("style", "Heading2"), "Mod-Alt-3": setParagraph("style", "Heading3"),
           "Mod-Shift-n": setParagraph("style", undefined),
           "Mod-d": command(() => setDialog("font")),
+          "Mod-Alt-f": newNote("footnote"), "Mod-Alt-d": newNote("endnote"),
+          "Alt-=": command(() => setDialog("equation")),
+          F9: (state, dispatch) => updateFields(() => fileRef.current.base, pagesRef.current)(state, dispatch),
           "Mod-Shift-8": command(() => window.dispatchEvent(new Event(MARKS_EVENT))), "Mod-*": command(() => window.dispatchEvent(new Event(MARKS_EVENT))),
           "Mod-Shift-c": (state) => { copied.current = copyFormat(state); flash("Formatting copied: select text and press Ctrl+Shift+V to apply it"); return true; },
           "Mod-Shift-v": (state, dispatch) => (copied.current ? pasteFormat(copied.current)(state, dispatch) : false),
@@ -274,6 +297,60 @@ export function App() {
     refresh();
     return () => v.destroy();
   }, [file.base, file.fonts, save, mode, snapshot, spelling]);
+
+  useEffect(() => { if (layout) pagesRef.current = layout.bookmarks ?? {}; }, [layout]);
+  /** A new contents table's page numbers come from the next layout: update the fields once it is ready. */
+  const pendingUpdate = useRef(false);
+  const afterLayout = () => { pendingUpdate.current = true; };
+  useEffect(() => {
+    const v2 = view.current;
+    if (!layout || !pendingUpdate.current || !v2) return;
+    pendingUpdate.current = false;
+    // Without adding an undo step of its own: the numbers belong to the insertion.
+    updateFields(baseOf, layout.bookmarks ?? {})(v2.state, (tr) => v2.dispatch(tr.setMeta("addToHistory", false)));
+  }, [layout, baseOf]);
+  // Double-clicking an equation selects it and opens it for editing.
+  useEffect(() => {
+    const v2 = view.current;
+    if (!v2) return;
+    const dbl = (e: MouseEvent) => {
+      const math = (e.target as Element).closest?.(".pw-math");
+      if (!math) return;
+      e.preventDefault();
+      v2.dispatch(v2.state.tr.setSelection(NodeSelection.create(v2.state.doc, v2.posAtDOM(math, 0))));
+      setDialog("equation");
+    };
+    v2.dom.addEventListener("dblclick", dbl);
+    return () => v2.dom.removeEventListener("dblclick", dbl);
+  }, [file.base, file.fonts, mode, spelling]);
+
+  // Clicking a footnote on the page opens the Notes pane.
+  useEffect(() => {
+    const open = () => setNotesPane((p) => p ?? {});
+    window.addEventListener(NOTES_EVENT, open);
+    return () => window.removeEventListener(NOTES_EVENT, open);
+  }, []);
+  // Ctrl+Click on a contents entry or cross-reference goes to what it refers to; clicking a note's
+  // reference number opens the note.
+  useEffect(() => {
+    const v2 = view.current;
+    if (!v2) return;
+    const down = (e: MouseEvent) => {
+      const ref = (e.target as HTMLElement).closest?.(".pw-noteref");
+      if (ref && !e.ctrlKey) {
+        const note = noteAt(v2.state.doc, v2.posAtDOM(ref, 0));
+        if (note) { e.preventDefault(); setNotesPane({ focus: note }); return; }
+      }
+      if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+      const pos = v2.posAtCoords({ left: e.clientX, top: e.clientY })?.pos;
+      const name = pos === undefined ? undefined : referenceAt(v2.state, pos);
+      if (!name) return;
+      e.preventDefault();
+      if (gotoBookmark(name)(v2.state, v2.dispatch)) v2.focus();
+    };
+    v2.dom.addEventListener("mousedown", down, true);
+    return () => v2.dom.removeEventListener("mousedown", down, true);
+  }, [file.base, file.fonts, mode, spelling]);
 
   // Formatting marks: the setting (remembered on this computer) applied to the editor, also after it is recreated.
   useEffect(() => {
@@ -523,7 +600,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -544,6 +621,10 @@ export function App() {
       if (test === "autocorrect") autoCorrectSelfTest(v);
       if (test === "wave1") wave1SelfTest(v);
       if (test === "filetab") fileTabSelfTest();
+      if (test === "references") referencesSelfTest(v);
+      if (test === "notes") notesSelfTest(v);
+      if (test === "citations") citationsSelfTest(v);
+      if (test === "equation") equationSelfTest(v);
       if (test === "lines" && measurerRef.current) linesSelfTest(v, () => fileRef.current.base, measurerRef.current);
     });
   }, [layout, layoutOf, file.base]);
@@ -623,9 +704,26 @@ export function App() {
           if (painter && !sticky) { setPainter(undefined); return; }
           if (v) setPainter({ format: copyFormat(v.state), sticky });
         }}
-        onFontDialog={() => setDialog("font")} onSymbol={() => setDialog("symbol")} onDateTime={() => setDialog("datetime")}
+        onFontDialog={() => setDialog("font")} onSymbol={() => setDialog("symbol")} onEquation={() => setDialog("equation")} onDateTime={() => setDialog("datetime")}
         showMarks={marksOn} onShowMarks={toggleMarks}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
+        onToc={(levels) => { if (v) { insertToc(baseOf, { levels }, pagesRef.current)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
+        onTableOfFigures={() => { if (v) { insertToc(baseOf, { caption: "Figure" }, pagesRef.current, false)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
+        onUpdateFields={() => { if (v) { updateFields(baseOf, pagesRef.current)(v.state, v.dispatch); v.focus(); flash("Contents, captions and references updated"); } }}
+        onCaption={() => setDialog("caption")} onCrossRef={() => setDialog("crossref")}
+        onNote={(kind) => { if (v) { newNote(kind)(v.state, v.dispatch); } }}
+        onShowNotes={() => setNotesPane((p) => (p ? undefined : {}))}
+        onSources={(startNew) => setDialog(startNew ? "newSource" : "sources")}
+        onBibliography={() => { if (v) { insertBibliography(baseOf)(v.state, v.dispatch); v.focus(); } }}
+        onCitationStyle={(style) => {
+          if (!v) return;
+          writeSources(baseOf(), style, readSources(baseOf()).sources);
+          // Every citation and reference list in the new style.
+          updateFields(baseOf, pagesRef.current)(v.state, v.dispatch);
+          setDirty(true);
+          dirtyRef.current = true;
+          flash(`Citations now in ${style} style`);
+        }}
         onSaveTemplate={() => {
           if (!v) return;
           const name = window.prompt("Save as a template named:", fileRef.current.name.replace(/\.docx$/i, ""));
@@ -699,6 +797,10 @@ export function App() {
           )}
         </div>
       </main>
+      {notesPane && v && measurerRef.current && (
+        <NotesPane key={notesPane.focus ? `${notesPane.focus.kind}-${notesPane.focus.id}` : "all"} view={v} base={baseOf} measurer={measurerRef.current}
+          focus={notesPane.focus} onClose={() => { setNotesPane(undefined); v.focus(); }} />
+      )}
       {comments !== "closed" && v && (
         <CommentsPane view={v} base={baseOf} writing={comments === "writing"}
           onWritten={() => setComments("open")} onClose={() => setComments("closed")} />
@@ -757,6 +859,13 @@ export function App() {
       {dialog === "font" && v && <FontDialog view={v} doc={file.base} fonts={FONTS} onClose={() => setDialog(undefined)} />}
       {dialog === "symbol" && v && <SymbolDialog view={v} onClose={() => setDialog(undefined)} />}
       {dialog === "datetime" && v && <DateTimeDialog view={v} onClose={() => setDialog(undefined)} />}
+      {dialog === "caption" && v && <CaptionDialog view={v} doc={baseOf} onClose={() => setDialog(undefined)} />}
+      {dialog === "crossref" && v && <CrossRefDialog view={v} doc={baseOf} pages={pagesRef.current} onClose={() => setDialog(undefined)} />}
+      {dialog === "equation" && v && measurerRef.current && <EquationDialog view={v} doc={file.base} measurer={measurerRef.current} onClose={() => setDialog(undefined)} />}
+      {(dialog === "sources" || dialog === "newSource") && v && (
+        <SourcesDialog view={v} doc={baseOf} startNew={dialog === "newSource"} onClose={() => setDialog(undefined)}
+          onChanged={() => { setDirty(true); dirtyRef.current = true; }} />
+      )}
       {dialog === "saveBlock" && v && <BlocksDialog view={v} base={baseOf} initial="selection" onClose={() => setDialog(undefined)} />}
       {v && <PasteOptions view={v} />}
       {menu && v && (
