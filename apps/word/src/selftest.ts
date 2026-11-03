@@ -776,3 +776,22 @@ export function wave1SelfTest(view: EditorView) {
     console.log("[selftest] align", JSON.stringify(out));
   })();
 }
+
+/** File tab and My templates: the File tab's buttons, the Home tab on one row, then the rail's My templates page. */
+export function fileTabSelfTest() {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim().startsWith(label))?.click();
+  void (async () => {
+    await wait(1500);
+    const toolbar = () => document.querySelector<HTMLElement>(".toolbar")!;
+    const homeHeight = toolbar().getBoundingClientRect().height;
+    click("File", document.querySelector("nav")!); await wait(200);
+    const file = [...toolbar().querySelectorAll("button")].map((b) => b.textContent?.trim());
+    click("Home screen", toolbar()); await wait(400);
+    click("My templates", document.querySelector(".home-rail")!); await wait(400);
+    const heading = document.querySelector(".home-main h1")?.textContent;
+    const shot = new URLSearchParams(location.search).get("shot");
+    if (shot !== "templates") { click("Home", document.querySelector(".home-rail")!); await wait(300); }
+    console.log("[selftest] align", JSON.stringify({ file, homeToolbarPx: Math.round(homeHeight), templatesPage: heading, back: document.querySelector(".home-main h1")?.textContent }));
+  })();
+}

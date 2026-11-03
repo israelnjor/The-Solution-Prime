@@ -1,5 +1,5 @@
 import { type Template, TEMPLATES } from "@prime/editor";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isDesktop } from "./platform";
 import { RecentList } from "./RecentList";
 import { MyTemplates } from "./MyTemplates";
@@ -28,7 +28,9 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
   templatesVersion: number;
 }) {
   const first = useRef<HTMLButtonElement>(null);
-  useEffect(() => { first.current?.focus(); }, []);
+  /** The rail's pages: everything at a glance, or the person's own templates. */
+  const [page, setPage] = useState<"home" | "templates">("home");
+  useEffect(() => { first.current?.focus(); }, [page]);
   return (
     <div className="home" role="dialog" aria-label="Prime Word home" onKeyDown={(e) => {
       if (e.key === "Escape" && onClose) onClose();
@@ -37,12 +39,24 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
       <nav className="home-rail" aria-label="Home">
         <div className="home-logo">Prime Word</div>
         {onClose && <button onClick={onClose}>← Back to document</button>}
-        <button className="on">Home</button>
+        <button className={page === "home" ? "on" : ""} aria-current={page === "home" ? "page" : undefined} onClick={() => setPage("home")}>Home</button>
+        <button className={page === "templates" ? "on" : ""} aria-current={page === "templates" ? "page" : undefined} onClick={() => setPage("templates")}>My templates</button>
         <button onClick={() => onPick(TEMPLATES[0])}>New blank document</button>
         <button onClick={onOpen}>Open… <kbd>Ctrl+O</kbd></button>
         <button onClick={onConvertPdf}>Convert PDF to Word…</button>
         <div className="home-rail-foot">Prime Productivity</div>
       </nav>
+      {page === "templates" ? (
+        <main className="home-main">
+          <div className="home-row">
+            <h1>My templates</h1>
+            <button ref={first} className="primary" onClick={onLetterhead}>Design a letterhead…</button>
+          </div>
+          <p className="home-hint">Templates and letterheads you save are kept on this computer. To save one, open a document and choose
+            File → Save as Template; every new document made from it starts as a copy.</p>
+          <MyTemplates onPick={onPick} refresh={templatesVersion} />
+        </main>
+      ) : (
       <main className="home-main">
         <h1>{greeting()}</h1>
 
@@ -97,6 +111,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
             : <p className="recent-empty">Recent documents are listed in the desktop app. Use Open to choose a .docx file.</p>}
         </section>
       </main>
+      )}
     </div>
   );
 }

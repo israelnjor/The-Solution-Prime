@@ -482,3 +482,4 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .para-tabs .tab-list { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 2px; max-height: 120px; overflow: auto; }
 .para-tabs .tab-list li { display: flex; gap: 8px; align-items: center; }
 .para-tabs .tab-list li button { margin-left: auto; }
+.home-hint { color: var(--muted); max-width: 760px; margin: 0 0 14px; }

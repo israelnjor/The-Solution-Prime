@@ -23,9 +23,9 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "home" | "insert" | "layout" | "review" | "view" | "table" | "picture";
-/** Word's keys for the tabs: Alt+H, Alt+N, Alt+P, Alt+R, Alt+W. */
-const TAB_KEYS: Record<string, string> = { home: "H", insert: "N", layout: "P", review: "R", view: "W" };
+type Tab = "file" | "home" | "insert" | "layout" | "review" | "view" | "table" | "picture";
+/** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+R, Alt+W. */
+const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", layout: "P", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
 
 const CM = 72 / 2.54;
@@ -155,7 +155,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     <header className="ribbon">
       <nav className="tabs" role="tablist" aria-label="Ribbon tabs">
         <button className="brand" onClick={onHome} title="Home: new, open, recent documents">Prime Word</button>
-        {([["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
+        {([["file", "File"], ["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
           <button key={t} role="tab" aria-selected={activeTab === t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}
             title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
@@ -167,19 +167,29 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
       </nav>
 
       <div className="toolbar" role="toolbar" aria-label="Ribbon">
-        {activeTab === "home" && (
+        {activeTab === "file" && (
           <>
-            <div className="group">
-              <button onClick={onNew} title="New document">New</button>
+            <div className="group" aria-label="Document">
+              <button onClick={onHome} title="The home screen: templates, recent documents, My templates">Home screen</button>
+              <button onClick={onNew} title="New document (from a template)">New</button>
               <button onClick={onOpen} title="Open a .docx (Ctrl+O)">Open</button>
               <RecentMenu onOpen={onOpenRecent} />
               <button onClick={onConvertPdf} title="Turn a PDF into an editable Word document">Convert PDF</button>
+            </div>
+            <div className="group" aria-label="Save">
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
               <button onClick={() => onSave(true)} title="Save as a new file">Save As</button>
               <button onClick={onSaveTemplate} title="Save this document as a template, to start new documents from">Save as Template</button>
+            </div>
+            <div className="group" aria-label="Share">
               <button onClick={onExportPdf} title="Export as PDF">Export PDF</button>
               <button onClick={onPrint} title="Print (Ctrl+P)">Print</button>
             </div>
+          </>
+        )}
+
+        {activeTab === "home" && (
+          <>
             <div className="group">
               <button onClick={run(undo)} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
               <button onClick={run(redo)} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
