@@ -198,7 +198,9 @@ export function scrollSelfTest() {
         .map((el) => `${rel(el)}-${Math.round(el.getBoundingClientRect().bottom - sheet.top)}:${(el.textContent ?? "").slice(0, 14)}`);
       console.log("[selftest] paras", JSON.stringify(paras));
     }
-    console.log("[selftest] align", JSON.stringify({ scrolled: n }));
+    const toc = document.querySelector(".ProseMirror p[data-style^=TOC]");
+    console.log("[selftest] align", JSON.stringify({ scrolled: n, righttab: document.querySelectorAll("p.pw-righttab").length,
+      toc: toc?.outerHTML.slice(0, 300), display: toc ? getComputedStyle(toc).display : null }));
   }, 2500);
 }
 

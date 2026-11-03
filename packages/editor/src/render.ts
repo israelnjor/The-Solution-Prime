@@ -283,7 +283,16 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
               return b ? `border-${k}:${pt(b.width)} solid #${b.color ?? "000000"};padding-${k}:${pt(b.space)}` : "";
             }),
           ].filter(Boolean).join(";");
-          decorations.push(Decoration.node(at, at + child.nodeSize, { style: css, "data-style": rp.styleId }));
+          // A line with one tab to a right-aligned stop (a contents entry: "Heading ....... 4"): the text after
+          // the tab sits at the right edge, the leader (dots) fills the gap. Browsers have no tab stops, so
+          // the line becomes a flexible row in which the tab stretches.
+          let tabs = 0;
+          child.forEach((n) => { if (n.type.name === "tab") tabs++; });
+          const rightStop = tabs === 1 ? rp.tabs.find((t) => t.align === "right") : undefined;
+          const classes = rightStop ? `pw-righttab${rightStop.leader ? ` pw-leader-${rightStop.leader}` : ""}` : "";
+          decorations.push(Decoration.node(at, at + child.nodeSize, {
+            style: css + (rp.shading ? `;background:#${rp.shading}` : ""), "data-style": rp.styleId, ...(classes ? { class: classes } : {}),
+          }));
           const floats: FloatInfo[] = [];
           child.forEach((n) => { if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float); });
           if (floats.length) {

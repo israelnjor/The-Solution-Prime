@@ -319,3 +319,15 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .pdfconv-side .ok { color: var(--muted); margin: 0; }
 .home-convert { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 760px; padding: 14px 16px; border: 1px solid var(--chrome-border); border-radius: 8px; }
 .home-convert p { margin: 0; color: var(--muted); }
+/* A contents entry (one tab to a right-aligned stop): the tab stretches; the leader is drawn in it. */
+.pw-editor p.pw-righttab { display: flex; align-items: baseline; }
+/* Links and formatting around the text and tab take part in the row (the entry is usually one link). */
+.pw-editor p.pw-righttab :is(a, span:not(.pw-tab):not(.pw-list-label):not(.pw-chip)) { display: contents; }
+.pw-editor p.pw-righttab .pw-tab { flex: 1; min-width: 1em; align-self: stretch; margin: 0 2pt; }
+/* Contents entries are links, shown in the entry's own style (as in Word). */
+.pw-editor p[data-style^="TOC"] a, .pw-editor p[data-style^="TOC"] a * { color: inherit !important; text-decoration: none !important; }
+.pw-editor p.pw-leader-dot .pw-tab, .pw-editor p.pw-leader-middleDot .pw-tab {
+  background: radial-gradient(circle, currentColor 0.6px, transparent 0.9px) left calc(100% - 0.28em) / 4px 4px repeat-x;
+}
+.pw-editor p.pw-leader-hyphen .pw-tab { background: linear-gradient(90deg, currentColor 50%, transparent 50%) left calc(100% - 0.35em) / 5px 1px repeat-x; }
+.pw-editor p.pw-leader-underscore .pw-tab, .pw-editor p.pw-leader-heavy .pw-tab { border-bottom: 1px solid currentColor; }

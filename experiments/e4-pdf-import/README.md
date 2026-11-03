@@ -36,8 +36,26 @@ headings; bullet and numbered lists; Title and Heading 1–3 by size; ruled tabl
 cell alignment, pictures in cells, tables that continue across pages, repeated header rows); headers
 and footers (page numbers become PAGE fields; repeated logos); pictures; page size and margins.
 
+## Added 2026-11-02 (real PDFs: a letter, a LaTeX slide deck, a Word report with contents)
+
+- **Line breaks**: a line that ends early at normal line spacing becomes a line break (Shift+Enter) in
+  the same paragraph — also for centred and right-aligned text.
+- **Tables of contents**: three or more lines ending in a dot leader (or gap) and a page number become
+  Word contents entries (TOC 1–3 by indent, right tab with dots) inside a TOC field; lists of figures
+  become a table of figures (TOC \c "Figure"). Word recognises both and can update them.
+- **LaTeX PDFs**: Computer/Latin Modern fonts mapped (italic and bold from the font name); accents
+  composed (m¨ussen → müssen); blackboard bold (ℝ, ℂ, 𝔽); CMEX brackets; list labels keep their style
+  and number ((a), (ii), 3)); dashes are no longer taken for bullets.
+- **Colours and backgrounds**: text colour per run (pdf.js merges runs of different colours); filled
+  boxes behind text (incl. rounded ones, ignoring see-through shadows) become paragraph shading.
+- Underlines drawn in pieces; numeric list ids (a non-numeric id made Word reject the file); text never
+  contains characters XML forbids.
+
+The layout engine gained tab stops (right/centre/decimal, dot leaders), paragraph shading, and PAGEREF
+page numbers computed from the layout (contents pages show current numbers).
+
 ## Not yet
 
 - **Scanned pages** (no text, one full-page picture) are reported; text recognition (Tesseract) is next.
-- Equations as Word equations; footnotes; text beside pictures (pictures go on their own line);
+- Bullets drawn as shapes (slide decks); equations as Word equations (large operators break apart); footnotes; text beside pictures (pictures go on their own line);
   multi-column pages; tables without rules; paragraph borders and shading.

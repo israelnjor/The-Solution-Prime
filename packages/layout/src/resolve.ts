@@ -54,6 +54,34 @@ export interface ResolvedParagraph {
   mark: ResolvedRun;
   /** Table style in effect when the paragraph is inside a table cell. */
   tableStyle?: string;
+  /** Background colour (w:shd fill), RRGGBB. */
+  shading?: string;
+  /** Custom tab stops, left to right: position in pt from the text column's left edge. */
+  tabs: TabStop[];
+}
+
+export interface TabStop {
+  pos: number;
+  align: "left" | "center" | "right" | "decimal" | "bar";
+  leader?: "dot" | "hyphen" | "underscore" | "middleDot" | "heavy";
+}
+
+/** Tab stops from w:tabs XML, applied to `stops` (a w:tab with w:val="clear" removes one). */
+function applyTabs(stops: TabStop[], xml: string | undefined): TabStop[] {
+  if (!xml) return stops;
+  let out = [...stops];
+  for (const m of xml.matchAll(/<w:tab\b[^>]*\/?>/g)) {
+    const val = /w:val="([^"]+)"/.exec(m[0])?.[1] ?? "left";
+    const pos = Number(/w:pos="(-?\d+)"/.exec(m[0])?.[1] ?? NaN) / 20;
+    if (Number.isNaN(pos)) continue;
+    out = out.filter((t) => Math.abs(t.pos - pos) > 0.5);
+    if (val === "clear") continue;
+    const leader = /w:leader="([^"]+)"/.exec(m[0])?.[1];
+    const align = (val === "end" ? "right" : val === "start" ? "left" : val) as TabStop["align"];
+    out.push({ pos, align: ["left", "center", "right", "decimal", "bar"].includes(align) ? align : "left",
+      ...(leader && leader !== "none" ? { leader: leader as TabStop["leader"] } : {}) });
+  }
+  return out.sort((a, b) => a.pos - b.pos);
 }
 
 const ROMAN: [number, string][] = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
@@ -146,6 +174,11 @@ export class Resolver {
       this.themeFonts.major = /<a:majorFont>\s*<a:latin typeface="([^"]*)"/.exec(xml)?.[1];
       this.themeFonts.minor = /<a:minorFont>\s*<a:latin typeface="([^"]*)"/.exec(xml)?.[1];
     }
+  }
+
+  /** A style's name ("toc 2", "heading 1"), or its id when it has none. */
+  styleName(id: string): string {
+    return this.styles.get(id)?.name ?? id;
   }
 
   private chain(id: string | undefined): Style[] {
@@ -246,6 +279,15 @@ export class Resolver {
       }
     }
     props = mergePara(props, p.props);
+    // Tab stops accumulate down the chain (defaults, table style, paragraph style, list level, direct).
+    const tabsOf = (x: ParagraphProps | undefined) => x?.extra?.find((e) => e.name === "w:tabs")?.xml;
+    let tabs: TabStop[] = applyTabs([], tabsOf(this.doc.styles.defaults.paragraph));
+    for (const st of this.chain(tableStyle)) tabs = applyTabs(tabs, tabsOf(st.paragraph));
+    for (const st of this.chain(styleId)) tabs = applyTabs(tabs, tabsOf(st.paragraph));
+    tabs = applyTabs(tabs, tabsOf(level?.paragraph));
+    tabs = applyTabs(tabs, tabsOf(p.props));
+    const shd = [...(props.extra ?? [])].reverse().find((x) => x.name === "w:shd")?.xml;
+    const shading = shd && /w:fill="([0-9A-Fa-f]{6})"/.exec(shd)?.[1]?.toUpperCase();
     const ind = props.indent ?? {};
     const sp = props.spacing ?? {};
     // The most specific border definition wins (direct formatting after the style's).
@@ -289,6 +331,8 @@ export class Resolver {
       labelRun: level && label !== undefined ? this.run(styleId, mergeRun(p.props.markRun ?? {}, level.run), tableStyle) : undefined,
       mark: this.run(styleId, p.props.markRun, tableStyle),
       tableStyle,
+      ...(shading && shading !== "FFFFFF" ? { shading } : {}),
+      tabs,
     };
   }
 

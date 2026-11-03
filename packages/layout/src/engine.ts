@@ -31,8 +31,10 @@ export interface Segment {
   strike?: boolean;
   highlight?: string;
   vertAlign?: string;
-  /** Text computed at render time (its cached text is only a placeholder). */
-  field?: "PAGE" | "NUMPAGES";
+  /** Text computed at render time (its cached text is only a placeholder). PAGEREF: filled in by the layout. */
+  field?: "PAGE" | "NUMPAGES" | "PAGEREF";
+  /** PAGEREF: the bookmark whose page number this is. */
+  ref?: string;
   /** Vertical offset from the line's baseline (equations: scripts, fractions). */
   dy?: number;
 }
@@ -185,6 +187,8 @@ interface MLine {
   startOffset: number;
   /** Where wrapping around floating objects starts or changes on this line (see WrapPoint). */
   wrap?: Omit<WrapPoint, "page" | "path" | "offset">;
+  /** Bookmarks that start on this line (for PAGEREF fields). */
+  bookmarks?: string[];
 }
 
 interface ParaBox {
@@ -255,7 +259,8 @@ type StoryBox = Pick<CellBox, "height" | "lines" | "markers" | "floats">;
 
 type Atom = { offset: number } & (
   // `breakAfter`: the line may break after this piece although no space follows (after a hyphen).
-  | { kind: "word"; text: string; run: ResolvedRun; field?: Segment["field"]; breakAfter?: boolean }
+  | { kind: "word"; text: string; run: ResolvedRun; field?: Segment["field"]; ref?: string; breakAfter?: boolean }
+  | { kind: "bookmark"; name: string }
   | { kind: "space"; text: string; run: ResolvedRun }
   | { kind: "tab"; run: ResolvedRun }
   | { kind: "br" }
@@ -315,7 +320,7 @@ const look = (r: ResolvedRun): Partial<Segment> => {
   return out;
 };
 
-const RENDER_FIELDS = new Set(["PAGE", "NUMPAGES"]);
+const RENDER_FIELDS = new Set(["PAGE", "NUMPAGES", "PAGEREF"]);
 
 export class LayoutEngine {
   private resolver: Resolver;
@@ -355,6 +360,8 @@ export class LayoutEngine {
       const kind = f?.instr.trim().split(/\s+/)[0]?.toUpperCase();
       return kind && RENDER_FIELDS.has(kind) ? (kind as Segment["field"]) : undefined;
     };
+    /** PAGEREF's bookmark: "PAGEREF _Toc123 \h". */
+    const fieldRef = () => fields[fields.length - 1]?.instr.trim().split(/\s+/)[1];
     const visit = (items: Inline[]) => {
       for (const i of items) {
         const offset = pos;
@@ -388,6 +395,11 @@ export class LayoutEngine {
           continue;
         }
         if (i.type === "break") { out.push({ kind: i.kind === "page" ? "page" : "br", offset }); continue; }
+        if (i.type === "preserved" && i.preserved.name === "w:bookmarkStart") {
+          const name = /w:name="([^"]+)"/.exec(i.preserved.xml)?.[1];
+          if (name) out.push({ kind: "bookmark", name, offset });
+          continue;
+        }
         if (i.type === "preserved" && (i.preserved.name === "m:oMath" || i.preserved.name === "m:oMathPara")) {
           const { box, display } = this.math.layout(i.preserved.xml, rp.mark.size);
           out.push({ kind: "math", box, display, offset });
@@ -412,7 +424,11 @@ export class LayoutEngine {
           continue;
         }
         if (i.type !== "text" && i.type !== "tab") continue;
-        const run = this.resolver.run(rp.styleId, i.props, rp.tableStyle);
+        // Contents entries (toc 1–9 styles) are links, but Word shows them in the entry's own style: the
+        // Hyperlink character style (blue, underlined) on their runs is not drawn.
+        const props = i.props?.style === "Hyperlink" && /^toc ?\d$/i.test(this.resolver.styleName(rp.styleId))
+          ? { ...i.props, style: undefined } : i.props;
+        const run = this.resolver.run(rp.styleId, props, rp.tableStyle);
         if (run.hidden) continue;
         if (i.type === "tab") { out.push({ kind: "tab", run, offset }); continue; }
         let at = offset;
@@ -435,7 +451,8 @@ export class LayoutEngine {
           let from = 0;
           for (const part of text.split(/(?<=[^\s-]-)(?=[^\s-])/)) {
             const last = from + part.length === text.length;
-            out.push({ kind: "word", text: part, run, offset: at + from, ...(field ? { field } : {}), ...(last ? {} : { breakAfter: true }) });
+            const ref = field === "PAGEREF" ? fieldRef() : undefined;
+            out.push({ kind: "word", text: part, run, offset: at + from, ...(field ? { field } : {}), ...(ref ? { ref } : {}), ...(last ? {} : { breakAfter: true }) });
             from += part.length;
           }
           at += piece.length;
@@ -508,6 +525,7 @@ export class LayoutEngine {
     let imageHeight = 0;
     let x = 0;
     let pendingSpace: { text: string; run: ResolvedRun; w: number } | undefined;
+    let lineBookmarks: string[] | undefined;
     let lineStart = 0;
     let startX = 0;
     let avail = 0;
@@ -564,6 +582,7 @@ export class LayoutEngine {
         width: x, height: Math.max(text, picture) + skip, ascent: Math.max(metrics.ascent, imageHeight) + skip,
         fitHeight: (picture > text ? Math.max(imageHeight, text) : Math.max(text, picture)) + skip,
         segments: segs, startX, pageBreakAfter, avail, endsWithBreak, images, rules, startOffset: lineStart,
+        ...(lineBookmarks ? { bookmarks: lineBookmarks } : {}),
       });
       // Record where wrapping starts or changes, for the editor (heights from the line's top after the skip).
       const narrowed = free && (free.left > 0.01 || free.right < width - 0.01);
@@ -581,6 +600,7 @@ export class LayoutEngine {
       dy += lines[lines.length - 1].height;
       skip = 0;
       lineStart = nextStart;
+      lineBookmarks = undefined;
       segs = [];
       images = [];
       rules = [];
@@ -600,11 +620,31 @@ export class LayoutEngine {
         pendingSpace = pendingSpace ? { ...pendingSpace, text: pendingSpace.text + a.text, w: pendingSpace.w + w } : { text: a.text, run: a.run, w };
         continue;
       }
+      if (a.kind === "bookmark") { (lineBookmarks ??= []).push(a.name); continue; }
       if (a.kind === "br") { finish(false, true, a.offset + 1); continue; }
       if (a.kind === "page") { finish(true, true, a.offset + 1); continue; }
       if (a.kind === "tab") {
         const pos = startX + x + (pendingSpace?.w ?? 0);
-        const next = (Math.floor(pos / DEFAULT_TAB + 1e-6) + 1) * DEFAULT_TAB;
+        // The next custom tab stop (positions are from the text column's left edge), else a default one.
+        const stop = rp.tabs.find((t) => t.pos > pos + 0.01 && t.align !== "bar");
+        let next: number;
+        if (stop && stop.align !== "left") {
+          // Right, centre and decimal stops: the text up to the next tab ends at (or centres on) the stop.
+          let w = 0;
+          for (let j = i + 1; j < atoms.length; j++) {
+            const b = atoms[j];
+            if (b.kind === "tab" || b.kind === "br" || b.kind === "page") break;
+            w += b.kind === "word" || b.kind === "space" ? this.textWidth(b.text, b.run) : b.kind === "image" ? b.width : b.kind === "math" ? b.box.width : 0;
+          }
+          next = Math.max(pos, stop.align === "center" ? stop.pos - w / 2 : stop.pos - w);
+        } else next = stop ? stop.pos : (Math.floor(pos / DEFAULT_TAB + 1e-6) + 1) * DEFAULT_TAB;
+        // Leader: dots (or dashes, lines) filling the space, ending at the next text.
+        const leader = stop?.leader && { dot: ".", hyphen: "-", underscore: "_", middleDot: "·", heavy: "_" }[stop.leader];
+        if (leader) {
+          const w = this.textWidth(leader, a.run);
+          const n = w > 0 ? Math.floor((next - pos - w * 0.5) / w) : 0;
+          if (n > 0) segs.push({ x: next - n * w, text: leader.repeat(n), font: key(a.run), size: a.run.size, ...look(a.run) });
+        }
         x = next - startX;
         pendingSpace = undefined;
         runs.push(...this.faces(a.run));
@@ -639,7 +679,7 @@ export class LayoutEngine {
       pendingSpace = undefined;
       word.forEach((w, k) => {
         if (w.kind === "word") {
-          segs.push({ x: startX + x, text: w.text, font: key(w.run), size: w.run.size, ...look(w.run), ...(w.field ? { field: w.field } : {}) });
+          segs.push({ x: startX + x, text: w.text, font: key(w.run), size: w.run.size, ...look(w.run), ...(w.field ? { field: w.field } : {}), ...(w.ref ? { ref: w.ref } : {}) });
           runs.push(...this.faces(w.run, w.text));
         } else if (w.kind === "image") {
           imageHeight = Math.max(imageHeight, w.height);
@@ -908,7 +948,10 @@ export class LayoutEngine {
       paragraphs.push({ text: anchor.slice(0, 80), ...pos });
       for (const n of anchor.match(MARKER) ?? []) markers[n] ??= pos;
     };
+    /** Page of each bookmark (first place it appears), for PAGEREF fields. */
+    const bookmarkPages = new Map<string, number>();
     const put = (line: MLine, x: number, at: number, extra: { story?: PositionedLine["story"]; path?: number[] } = {}) => {
+      for (const b of line.bookmarks ?? []) if (!extra.story && !bookmarkPages.has(b)) bookmarkPages.set(b, page.number);
       if (extra.path && pageOpen) {
         pageStarts.push({ page: page.number, path: extra.path, offset: line.startOffset });
         pageOpen = false;
@@ -1070,6 +1113,11 @@ export class LayoutEngine {
         const stroke = (b: { width: number; color?: string }) => ({ width: b.width, color: b.color });
         let sideTop = y;
         const drawSides = (to: number) => {
+          // Shading behind the paragraph (beneath everything else on the page), within its indents.
+          if (rp.shading && to > sideTop) {
+            const span = borderSpan();
+            page.rects.unshift({ x: span.x, y: sideTop, width: span.width, height: to - sideTop, fill: rp.shading });
+          }
           if (bd.left) page.rects.push({ x: contentLeft - bd.left.space - bd.left.width / 2, y: sideTop, width: 0, height: to - sideTop, sides: { top: false, bottom: false, left: true, right: false }, stroke: stroke(bd.left) });
           if (bd.right) page.rects.push({ x: contentRight + bd.right.space + bd.right.width / 2, y: sideTop, width: 0, height: to - sideTop, sides: { top: false, bottom: false, left: true, right: false }, stroke: stroke(bd.right) });
         };
@@ -1198,6 +1246,11 @@ export class LayoutEngine {
         y += row.height;
       }
     });
+    // PAGEREF (e.g. a table of contents' page numbers): the page where its bookmark ended up.
+    for (const p of pages) for (const l of p.lines) for (const s of l.segments) {
+      const n = s.field === "PAGEREF" && s.ref ? bookmarkPages.get(s.ref) : undefined;
+      if (n !== undefined) s.text = String(n);
+    }
     return { pages, markers, paragraphs, pageStarts, wraps, floats };
   }
 }

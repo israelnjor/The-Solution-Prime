@@ -84,8 +84,51 @@ function hex(args: unknown[]): string {
 }
 
 /** "BCDEEE+TimesNewRomanPS-BoldItalicMT" → Times New Roman, bold, italic. */
+/**
+ * TeX's fonts (Computer Modern, Latin Modern, AMS): their names say the design, not "Bold" or "Italic"
+ * (CMSSI10 = sans italic, CMBX12 = bold): mapped to the nearest Windows fonts.
+ */
+function texFont(raw: string): TextPiece["font"] | undefined {
+  const n = raw.toUpperCase();
+  const lm = /^LM(ROMAN|SANS|MONO)/.exec(n);
+  if (lm) {
+    const style = n.slice(lm[0].length);
+    return { family: lm[1] === "SANS" ? "Arial" : lm[1] === "MONO" ? "Consolas" : "Cambria", bold: /BOLD|DEMI/.test(style), italic: /ITALIC|OBLIQUE|SLANT/.test(style) };
+  }
+  if (!/^(CM|MSAM|MSBM|EUF|EUR)/.test(n)) return undefined;
+  if (/^(CMSY|CMEX|CMBSY|MSAM|MSBM|EU)/.test(n)) return { family: "Cambria Math", bold: false, italic: false };
+  if (/^CMSS/.test(n)) return { family: "Arial", bold: /^CMSS(BX|DC)/.test(n), italic: /^CMSS(I|SL|BXI)/.test(n) || /^CMSSBXO/.test(n) };
+  if (/^CMTT|^CMITT|^CMSLTT/.test(n)) return { family: "Consolas", bold: false, italic: /^CM(I|SL)TT/.test(n) };
+  return {
+    family: "Cambria",
+    bold: /^CM(BX|B\d|MIB|BSY)/.test(n),
+    italic: /^CM(TI|SL|MI|BXTI|BXSL|U)/.test(n),
+  };
+}
+
+/**
+ * Text without control characters: fonts without a Unicode map (TeX's CMEX: large brackets) come out as
+ * codes below 32. CMEX's brackets become ordinary brackets; anything else unreadable is dropped.
+ */
+function cleanText(text: string, font: string | undefined): string {
+  const cmex: Record<number, string> = {
+    0x00: "(", 0x01: ")", 0x02: "[", 0x03: "]", 0x08: "{", 0x09: "}", 0x0c: "|", 0x0d: "|",
+    0x10: "(", 0x11: ")", 0x12: "(", 0x13: ")", 0x14: "[", 0x15: "]", 0x1a: "{", 0x1b: "}",
+  };
+  const isCmex = /CMEX/.test(font ?? "");
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, (c) => (isCmex ? cmex[c.charCodeAt(0)] ?? "" : ""));
+}
+
+/** Letters of a blackboard-bold font (TeX's MSBM: ℝ, ℂ, ℕ…) as their Unicode characters. */
+function doubleStruck(text: string): string {
+  const special: Record<string, string> = { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" };
+  return text.replace(/[A-Z]/g, (c) => special[c] ?? String.fromCodePoint(0x1d538 + c.charCodeAt(0) - 65));
+}
+
 export function fontOf(name: string | undefined, flags: { bold?: boolean; italic?: boolean } = {}): TextPiece["font"] {
   const raw = (name ?? "").replace(/^[A-Z]{6}\+/, "");
+  const tex = texFont(raw);
+  if (tex) return tex;
   const [base, style = ""] = raw.split(/[-,]/, 2);
   // Weights and widths Word lists as fonts of their own: "Calibri Light", "Segoe UI Semibold".
   const variant = /Semilight|SemiLight|Semibold|SemiBold|Light|Condensed|Narrow|Black/.exec(style)?.[0];
@@ -145,12 +188,25 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
   const fills: Fill[] = [];
   const pictures: Picture[] = [];
   /** Fill colour at each text position (x, y rounded): textContent has no colours. */
-  const textColor = new Map<string, string>();
+  /** Each text run as drawn: where, its colour, its characters (pdf.js's text pieces merge runs). */
+  const textColor: { x: number; y: number; color: string; text: string }[] = [];
+  /** Inside a soft-masked (partly transparent) group: shapes there are see-through, e.g. shadows. */
+  let masked = 0;
+  const maskedGroups: boolean[] = [];
+  /** The colour of the text drawn last at or just before (x, y) on its baseline. */
+  const colorAt = (x: number, y: number) => {
+    let best: { x: number; color: string } | undefined;
+    for (const t of textColor) if (Math.abs(t.y - y) < 1 && t.x <= x + 0.5 && (!best || t.x >= best.x)) best = t;
+    return best?.color;
+  };
 
-  type State = { ctm: Matrix; fill: string; stroke: string; lineWidth: number };
-  let st: State = { ctm: IDENTITY, fill: "000000", stroke: "000000", lineWidth: 1 };
+  /** fillAlpha: fill opacity (0–1); mostly see-through shapes (shadows) are not backgrounds. */
+  type State = { ctm: Matrix; fill: string; stroke: string; lineWidth: number; fillAlpha: number };
+  let st: State = { ctm: IDENTITY, fill: "000000", stroke: "000000", lineWidth: 1, fillAlpha: 1 };
   const stack: State[] = [];
   let tm: Matrix = IDENTITY;
+  // Text state, to advance the text position after each run (as pdf.js draws it).
+  const text = { size: 0, fontMatrix: 0.001, charSpacing: 0, wordSpacing: 0, hScale: 1 };
   let lineStart: Matrix = IDENTITY;
   const P = (x: number, y: number) => apply(toPage, ...apply(st.ctm, x, y));
 
@@ -172,7 +228,17 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
       else break;
     }
     if (cur.length) subpaths.push(cur);
-    if (curved) return;
+    if (curved) {
+      // A filled shape with curves (a rounded box, a banner): its bounding box, as a background area.
+      if (!filled || st.fill === "FFFFFF" || st.fillAlpha < 0.5 || masked) return;
+      for (const sp of subpaths) {
+        const xs = sp.map((p) => p[0]);
+        const ys = sp.map((p) => p[1]);
+        const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+        if ((x1 - x0) * (y1 - y0) > 200 && (x1 - x0) * (y1 - y0) < vp.width * vp.height * 0.9) fills.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, color: st.fill });
+      }
+      return;
+    }
     for (const sp of subpaths) {
       const xs = sp.map((p) => p[0]);
       const ys = sp.map((p) => p[1]);
@@ -186,7 +252,7 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
         // Thin filled rectangles are how Word draws borders; larger ones are shading.
         if (h <= 2.5 && w > h) rules.push({ x1: x0, y1: (y0 + y1) / 2, x2: x1, y2: (y0 + y1) / 2, width: Math.max(h, 0.25), color: st.fill });
         else if (w <= 2.5 && h > w) rules.push({ x1: (x0 + x1) / 2, y1: y0, x2: (x0 + x1) / 2, y2: y1, width: Math.max(w, 0.25), color: st.fill });
-        else if (st.fill !== "FFFFFF" && w * h < vp.width * vp.height * 0.9) fills.push({ x: x0, y: y0, w, h, color: st.fill });
+        else if (st.fill !== "FFFFFF" && st.fillAlpha >= 0.5 && !masked && w * h < vp.width * vp.height * 0.9) fills.push({ x: x0, y: y0, w, h, color: st.fill });
       }
       if (stroked) {
         for (let k = 1; k < sp.length; k++) {
@@ -208,14 +274,43 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
       case OPS.setFillRGBColor: case OPS.setFillGray: case OPS.setFillColor: st.fill = hex(args); break;
       case OPS.setStrokeRGBColor: case OPS.setStrokeGray: case OPS.setStrokeColor: st.stroke = hex(args); break;
       case OPS.setLineWidth: st.lineWidth = Number(args[0]) || 0.75; break;
+      case OPS.setFont: {
+        text.size = Number(args[1]) || 0;
+        const font = page.commonObjs.has(args[0] as string) ? page.commonObjs.get(args[0] as string) as { fontMatrix?: number[] } : undefined;
+        text.fontMatrix = font?.fontMatrix?.[0] ?? 0.001;
+        break;
+      }
+      case OPS.setCharSpacing: text.charSpacing = Number(args[0]) || 0; break;
+      case OPS.setWordSpacing: text.wordSpacing = Number(args[0]) || 0; break;
+      case OPS.setHScale: text.hScale = (Number(args[0]) || 100) / 100; break;
+      case OPS.setGState:
+        for (const [key, value] of (args[0] as [string, unknown][]) ?? []) if (key === "ca") st.fillAlpha = Number(value);
+        break;
       case OPS.beginText: tm = IDENTITY; lineStart = IDENTITY; break;
       case OPS.setTextMatrix: tm = matrix(args); lineStart = tm; break;
       case OPS.moveText: case OPS.setLeadingMoveText:
         lineStart = mul([1, 0, 0, 1, Number(args[0]), Number(args[1])], lineStart); tm = lineStart; break;
       case OPS.showText: case OPS.showSpacedText: {
         const [x, y] = apply(toPage, ...apply(mul(tm, st.ctm), 0, 0));
-        textColor.set(`${Math.round(x)},${Math.round(y)}`, st.fill);
+        const glyphs = (args[0] ?? []) as ({ unicode?: string; width?: number; isSpace?: boolean } | number | null)[];
+        textColor.push({ x, y, color: st.fill, text: glyphs.map((g) => (g && typeof g === "object" ? g.unicode ?? "" : "")).join("") });
+        // Advance past the run, so the next run on the line starts where this one ended.
+        let advance = 0;
+        for (const g of glyphs) {
+          if (typeof g === "number") advance -= (g * text.size) / 1000;
+          else if (g) advance += (g.width ?? 0) * text.size * text.fontMatrix + text.charSpacing + (g.isSpace ? text.wordSpacing : 0);
+        }
+        tm = mul([1, 0, 0, 1, advance * text.hScale, 0], tm);
         break;
+      }
+      case OPS.beginGroup: {
+        const soft = !!(args[0] as { smask?: unknown } | undefined)?.smask;
+        maskedGroups.push(soft);
+        if (soft) masked++;
+        break;
+      }
+      case OPS.endGroup: {
+        if (maskedGroups.pop()) masked--;
       }
       case OPS.constructPath: {
         const [paint, path] = args as [number, ArrayLike<number>[] | ArrayLike<number>];
@@ -251,12 +346,46 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
     const obj = page.commonObjs.has(item.fontName) ? page.commonObjs.get(item.fontName) as { name?: string; bold?: boolean; italic?: boolean } : undefined;
     const x = m[4];
     const y = m[5];
-    texts.push({
-      text: item.str, x, y, width: item.width, size: Math.round(size * 100) / 100,
+    const piece: TextPiece = {
+      text: cleanText(/MSBM/.test(obj?.name ?? "") ? doubleStruck(item.str) : item.str, obj?.name), x, y, width: item.width, size: Math.round(size * 100) / 100,
       font: fontOf(obj?.name, obj ?? {}),
-      color: textColor.get(`${Math.round(x)},${Math.round(y)}`) ?? "000000",
-    });
+      color: colorAt(x, y) ?? "000000",
+    };
+    texts.push(...splitByColour(piece));
   }
+  /**
+   * A piece that pdf.js merged from runs of different colours ("is a" black, "vector space" red): split
+   * where the drawn runs change colour, using the runs' own characters and positions.
+   */
+  function splitByColour(p: TextPiece): TextPiece[] {
+    // The runs on its baseline from the one in progress where the piece starts to its end.
+    const line = textColor.filter((t) => Math.abs(t.y - p.y) < 1 && t.text).sort((a, b) => a.x - b.x);
+    let from = 0;
+    line.forEach((t, k) => { if (t.x <= p.x + 0.5) from = k; });
+    const runs = line.slice(from).filter((t, k) => k === 0 || t.x < p.x + p.width - 0.5);
+    if (new Set(runs.map((r) => r.color)).size < 2) return [p];
+    const out: TextPiece[] = [];
+    let at = 0;
+    runs.forEach((r, k) => {
+      // The run's characters, found in the piece's text from where the previous run ended.
+      const want = r.text.replace(/\s+/g, "");
+      let end = at;
+      let got = 0;
+      while (end < p.text.length && got < want.length) { if (!/\s/.test(p.text[end])) got++; end++; }
+      if (k === runs.length - 1) end = p.text.length;
+      const text = p.text.slice(at, end);
+      const x0 = Math.max(r.x, p.x);
+      const x1 = k + 1 < runs.length ? runs[k + 1].x : p.x + p.width;
+      if (text) {
+        const last = out[out.length - 1];
+        if (last && last.color === r.color) { last.text += text; last.width = x1 - last.x; }
+        else out.push({ ...p, text, x: x0, width: x1 - x0, color: r.color });
+      }
+      at = end;
+    });
+    return out.length ? out : [p];
+  }
+
   // Underlining: a thin horizontal rule just below a piece's baseline, under its text. Such rules are
   // part of the text, not table borders.
   // Lines drawn in pieces (Word draws an underline word by word): touching pieces on one line become one.

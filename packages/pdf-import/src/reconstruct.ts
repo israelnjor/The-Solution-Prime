@@ -6,7 +6,7 @@
  */
 import { blankDocument } from "@prime/editor";
 import type {
-  Block, Inline, ListDefinition, Paragraph, ParagraphProps, PrimeDocument, RunProps, Style, Table, TableCell,
+  Block, Inline, ListDefinition, ListLevel, Paragraph, ParagraphProps, PrimeDocument, RunProps, Style, Table, TableCell,
 } from "@prime/pdm";
 import type { Fill, PageContent, Picture, Rule, TextPiece } from "./extract.js";
 
@@ -26,11 +26,41 @@ interface Line {
   x0: number;
   x1: number;
   size: number;
+  /** The previous line ended on purpose (a line break, Shift+Enter in Word), within the same paragraph. */
+  breakBefore?: boolean;
 }
 
 const top = (l: Line) => l.y - l.size * 0.8;
 const bottom = (l: Line) => l.y + l.size * 0.25;
 const lineText = (l: Line) => l.pieces.map((p) => p.text).join("");
+
+/** Spacing accents (as TeX draws them: the accent, then the letter) and their combining forms. */
+const ACCENTS: Record<string, string> = {
+  "¨": "̈", "´": "́", "˝": "̋", "ˆ": "̂", "˜": "̃", "¸": "̧",
+  "ˇ": "̌", "˘": "̆", "˙": "̇", "˚": "̊", "¯": "̄", "`": "̀",
+};
+const ACCENT_THEN_LETTER = new RegExp(`([${Object.keys(ACCENTS).join("")}])(\\p{L})`, "gu");
+
+/**
+ * Accented letters drawn as an accent plus a letter ("m¨" "ussen" → "müssen"): pieces that end with an
+ * accent join the piece right after them, and accent + letter become one character.
+ */
+function composeAccents(pieces: TextPiece[]): TextPiece[] {
+  const out: TextPiece[] = [];
+  for (const p of pieces) {
+    const last = out[out.length - 1];
+    if (last && /[¨´˝ˆ˜¸ˇ˘˙˚¯]$/.test(last.text) && /^\p{L}/u.test(p.text) &&
+        p.x - (last.x + last.width) < p.size * 0.4) {
+      out[out.length - 1] = { ...last, text: last.text + p.text, width: p.x + p.width - last.x };
+      continue;
+    }
+    out.push(p);
+  }
+  return out.map((p) => {
+    const text = p.text.replace(ACCENT_THEN_LETTER, (_, a: string, l: string) => (l + ACCENTS[a]).normalize("NFC"));
+    return text === p.text ? p : { ...p, text };
+  });
+}
 
 /** Left and right edges of what is visible: spaces before and after the text do not count. */
 function extent(pieces: TextPiece[]): { x0: number; x1: number } | undefined {
@@ -59,6 +89,7 @@ function buildLines(page: PageContent, pieces: TextPiece[]): Line[] {
   }
   for (const l of lines) {
     l.pieces.sort((a, b) => a.x - b.x);
+    l.pieces = composeAccents(l.pieces);
     Object.assign(l, extent(l.pieces) ?? {});
   }
   // A line made only of spaces carries nothing.
@@ -123,7 +154,7 @@ type Item =
   | { kind: "table"; grid: Grid; lines: Line[]; pictures: Picture[]; y: number; page: number }
   | { kind: "picture"; picture: Picture; y: number; page: number };
 
-const BULLETS = /^[•●○◦▪▫■□–—‣⁃➢✓✔·o∙-]$/;
+const BULLETS = /^[•●○◦▪▫■□‣⁃➢✓✔·o∙]$/;
 const NUMBERED = /^(\(?(\d{1,3}|[a-zA-Z]|[ivxlcIVXLC]{1,5})[.)])$/;
 
 /** Text the line starts with if it is a list label (a bullet or "1." "a)" "iv."), else undefined. */
@@ -142,6 +173,12 @@ function listLabel(l: Line): { label: string; kind: "bullet" | "decimal" | "lowe
   const kind = /^\d+$/.test(core) ? "decimal" : /^[ivxlc]+$/.test(core) && core.length > 1 ? "lowerRoman" : /^[IVXLC]+$/.test(core) && core.length > 1 ? "upperRoman"
     : /^[a-z]$/.test(core) ? "lowerLetter" : "upperLetter";
   return { label, kind, textX: after };
+}
+
+function romanValue(s: string): number {
+  const v: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100 };
+  const d = s.toLowerCase().split("").map((c) => v[c] ?? 0);
+  return d.reduce((sum, x, k) => sum + (x < (d[k + 1] ?? 0) ? -x : x), 0);
 }
 
 /** Whether most of a line's characters are bold (a bold lead-in like "Key point:" does not count). */
@@ -163,11 +200,6 @@ function firstWordWidth(l: Line): number {
 const LINE_FACTOR: Record<string, number> = { calibri: 1.22, "calibri light": 1.22, cambria: 1.17, aptos: 1.2, "times new roman": 1.15, arial: 1.15, georgia: 1.14, verdana: 1.22, "segoe ui": 1.33 };
 const factor = (family: string) => LINE_FACTOR[family.toLowerCase()] ?? 1.17;
 
-const mode = <T>(values: T[]): T | undefined => {
-  const counts = new Map<T, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-};
 const round = (v: number, step = 0.5) => Math.round(v / step) * step;
 
 export function reconstruct(pages: PageContent[]): ConversionResult {
@@ -179,7 +211,11 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   // --- headers and footers: lines repeated near the top or bottom of most pages --------------
   const pageLines = pages.map((p) => buildLines(p, p.texts));
   // The same text at the same height on most pages; only the page's own number may differ.
-  const keyOf = (l: Line) => `${Math.round(l.y)}|${lineText(l).replace(new RegExp(`(^|\\D)${l.page}(\\D|$)`), "$1#$2").replace(/\s+/g, " ").trim()}`;
+  // Only page counters may differ from page to page: the page number, "3/39", "3 of 39".
+  const keyOf = (l: Line) => `${Math.round(l.y)}|${lineText(l)
+    .replace(/\d+(\s*(\/|of)\s*\d+)/g, "#$1")
+    .replace(new RegExp(`(^|\\D)${l.page}(\\D|$)`), "$1#$2")
+    .replace(/\s+/g, " ").trim()}`;
   const repeated = (zone: (l: Line, p: PageContent) => boolean) => {
     const counts = new Map<string, number>();
     pageLines.forEach((ls, i) => new Set(ls.filter((l) => zone(l, pages[i])).map(keyOf)).forEach((k) => counts.set(k, (counts.get(k) ?? 0) + 1)));
@@ -201,16 +237,46 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       const rest = text.slice(at + String(page.number).length);
       if (rest) content.push({ type: "text", text: rest, ...(props ? { props } : {}) });
     } else content.push({ type: "text", text, ...(props ? { props } : {}) });
-    return { type: "paragraph", props: { align: alignOfLine(l, page) }, content } as Paragraph;
+    const shade = shadingBehind(l);
+    return {
+      type: "paragraph", props: {
+        align: alignOfLine(l, page),
+        ...(shade ? { extra: [{ name: "w:shd", xml: `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` }] } : {}),
+      }, content,
+    } as Paragraph;
   });
+
+  // --- background areas behind text (banners, highlighted boxes) become paragraph shading ----------
+  const backgrounds = new Map(pages.map((pg) => {
+    const grids = findGrids(pg.rules, pg.fills);
+    return [pg.number, pg.fills.filter((f) => !grids.some((g) => inGrid(g, f.x + f.w / 2, f.y + f.h / 2)))] as const;
+  }));
+  /** The colour of the smallest background area behind a line, if any. */
+  function shadingBehind(l: Line): string | undefined {
+    const all = (backgrounds.get(l.page) ?? []).filter((f) => f.y <= top(l) + 2 && f.y + f.h >= l.y - 1);
+    let behind = all.filter((f) => f.x <= l.x0 + 1 && f.x + f.w >= l.x1 - 1);
+    // Light text with no single box behind it (a bar made of several boxes): the box under most of it.
+    const light = l.pieces.some((p) => p.text.trim() && parseInt(p.color, 16) > 0xd0d0d0);
+    if (!behind.length && light) {
+      const overlap = (f: Fill) => Math.max(0, Math.min(f.x + f.w, l.x1) - Math.max(f.x, l.x0));
+      behind = all.filter((f) => overlap(f) > 0).sort((a, b) => overlap(b) - overlap(a)).slice(0, 1);
+    }
+    // The one drawn last (on top: a box over its own shadow), among the smallest that cover the line.
+    const smallest = Math.min(...behind.map((f) => f.w * f.h));
+    return behind.filter((f) => f.w * f.h <= smallest * 1.15).pop()?.color;
+  }
 
   // --- page setup: the body's usual edges --------------------------------------------------------
   const first = pages[0];
   const bodyLines = pageLines.map((ls) => ls.filter((l) => !headerKeys.has(keyOf(l)) && !footerKeys.has(keyOf(l))));
   const allBody = bodyLines.flat();
-  const left = round(mode(allBody.map((l) => Math.round(l.x0))) ?? 72, 1);
-  const rights = allBody.map((l) => l.x1).sort((a, b) => b - a);
-  const right = round(rights[Math.floor(rights.length * 0.1)] ?? first.width - 72, 1);
+  // The text column: the leftmost and rightmost text (a few lines' margin of error: indented and centred
+  // lines start further in), on pages the size of the first (a landscape page is wider).
+  const sameSize = bodyLines.filter((_, i) => Math.abs(pages[i].width - first.width) < 1).flat();
+  const lefts = sameSize.map((l) => l.x0).sort((a, b) => a - b);
+  const left = round(lefts[Math.floor(lefts.length * 0.03)] ?? 72, 1);
+  const rights = sameSize.map((l) => l.x1).sort((a, b) => b - a);
+  const right = round(rights[Math.floor(rights.length * 0.03)] ?? first.width - 72, 1);
   const tops = bodyLines.map((ls) => (ls.length ? top(ls[0]) : Infinity)).filter(Number.isFinite);
   const bottoms = bodyLines.map((ls) => (ls.length ? bottom(ls[ls.length - 1]) : -Infinity)).filter(Number.isFinite);
   const marginTop = Math.max(18, Math.floor(Math.min(...tops, first.height) - 2));
@@ -328,6 +394,8 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     return undefined;
   }
 
+  /** Where each paragraph's first line starts on the page (contents levels are read from it). */
+  const firstX = new WeakMap<Paragraph, number>();
   const paragraphOf = (lines: Line[], label?: ReturnType<typeof listLabel>, styleId?: string): Paragraph => {
     const firstLine = lines[0];
     const look = styleId ? styleLook.get(styleId) : undefined;
@@ -356,7 +424,11 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
         while (pieces.length && !pieces[0].text.trim()) pieces = pieces.slice(1);
         if (pieces.length) pieces = [{ ...pieces[0], text: pieces[0].text.replace(/^\s+/, "") }, ...pieces.slice(1)];
       }
-      if (li > 0) {
+      if (li > 0 && l.breakBefore) {
+        const last = content[content.length - 1];
+        if (last?.type === "text") last.text = last.text.replace(/\s+$/, "");
+        content.push({ type: "break", kind: "line" });
+      } else if (li > 0) {
         const prev = content[content.length - 1];
         const ends = prev?.type === "text" ? prev.text : "";
         // Lines join with a space, except after a hyphen or one already there.
@@ -405,8 +477,12 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       if (Math.abs(multiple - 1) > 0.04) props.spacing = { line: Math.round(240 * multiple), lineRule: "auto" };
       else props.spacing = { line: 240, lineRule: "auto" };
     }
-    if (label) props.list = { numId: listId(label.kind), level: 0 };
-    return { type: "paragraph", props, content };
+    if (label) props.list = { numId: label.kind === "bullet" ? listId("bullet") : numberedList(label.label), level: 0 };
+    const shade = shadingBehind(firstLine);
+    if (shade) props.extra = [...(props.extra ?? []), { name: "w:shd", xml: `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` }];
+    const paragraph: Paragraph = { type: "paragraph", props, content };
+    firstX.set(paragraph, firstLine.x0);
+    return paragraph;
   };
 
   function alignOfParagraph(lines: Line[]): string | undefined {
@@ -426,7 +502,7 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   function listId(kind: NonNullable<ReturnType<typeof listLabel>>["kind"]): string {
     let id = lists.get(kind);
     if (id) return id;
-    id = String(lists.size + 1);
+    id = String(doc.lists.instances.length + 1);
     lists.set(kind, id);
     const def: ListDefinition = {
       id: `${id}`,
@@ -441,6 +517,41 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     doc.lists.definitions.push(def);
     doc.lists.instances.push({ id, definitionId: def.id });
     return id;
+  }
+
+  /**
+   * A numbered list item: its label's style ("(a)", "ii.", "3)") and number decide the list. The next
+   * number in the same style continues the list; anything else starts a new one at its own number.
+   * A lone "i" (or "v", "x") is a letter after "h" (or "u", "w"), otherwise a roman numeral.
+   */
+  let lastNumbered: { pattern: string; kind: string; value: number; numId: string } | undefined;
+  function numberedList(label: string): string {
+    const core = /[0-9]+|[a-zA-Z]+/.exec(label)?.[0] ?? "1";
+    const pattern = label.replace(core, "%1");
+    const letterValue = core.length === 1 ? core.toLowerCase().charCodeAt(0) - 96 : 0;
+    let kind: ListLevel["format"];
+    let value: number;
+    if (/^\d+$/.test(core)) { kind = "decimal"; value = Number(core); }
+    else if (/^[ivxlc]+$/i.test(core) && !(core.length === 1 && lastNumbered?.pattern === pattern &&
+        /Letter$/.test(lastNumbered.kind) && lastNumbered.value === letterValue - 1) && (core.length > 1 || /^[ivx]$/i.test(core))) {
+      kind = core === core.toLowerCase() ? "lowerRoman" : "upperRoman";
+      value = romanValue(core);
+    } else { kind = core === core.toLowerCase() ? "lowerLetter" : "upperLetter"; value = letterValue; }
+    if (lastNumbered && lastNumbered.pattern === pattern && lastNumbered.kind === kind && value === lastNumbered.value + 1) {
+      lastNumbered.value = value;
+      return lastNumbered.numId;
+    }
+    const numId = String(doc.lists.instances.length + 1);
+    doc.lists.definitions.push({
+      id: numId,
+      levels: Array.from({ length: 9 }, (_, level) => ({
+        level, start: level === 0 ? value : 1, format: kind, text: level === 0 ? pattern : `%${level + 1}.`, align: "left",
+        paragraph: { indent: { left: 36 * (level + 1), hanging: 18 } },
+      })),
+    });
+    doc.lists.instances.push({ id: numId, definitionId: numId });
+    lastNumbered = { pattern, kind: kind ?? "decimal", value, numId };
+    return numId;
   }
 
   /** Space between the end of what came before and this block's first line (pt). */
@@ -479,9 +590,19 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
         // Also a short line (an address, a sign-off) whose next word would fit before the margin.
         const fits = (limit: number) => prev.x1 + firstWordWidth(l) + l.size * 0.25 < limit - 1;
         const prevEndsShort = fits(edge) || (prev.x1 - left < (right - left) * 0.6 && fits(right));
-        const continues = sameLook && !lab && pitch < Math.max(expected * 1.25, prev.size * 1.5) && pitch > 0 &&
-          (label ? Math.abs(l.x0 - label.textX) < 3 : !prevEndsShort || alignOfLine(prev, first) === "center");
-        if (!continues) close();
+        // Room left on the previous line, whatever its alignment: if the next word would have fitted there,
+        // the line ended on purpose.
+        // (For centred and right-aligned lines, measured against the whole column: their left edges vary.)
+        const room = (right - left) - (prev.x1 - prev.x0);
+        const alignedRightOrCentre = prev.x0 > left + 12 && (Math.abs(prev.x1 - right) < 4 || Math.abs((prev.x0 + prev.x1) / 2 - (left + right) / 2) < 6);
+        const endedEarly = prevEndsShort || (alignedRightOrCentre && firstWordWidth(l) + l.size * 0.25 < room - 1);
+        const close_ = pitch > 0 && pitch < Math.max(expected * 1.25, prev.size * 1.5);
+        const continues = sameLook && !lab && close_ && (label ? Math.abs(l.x0 - label.textX) < 3 : !endedEarly);
+        // Ended early but no further away than the lines of a paragraph: a line break, not a new paragraph.
+        const tight = cur.length > 1 ? pitch < expected * 1.08 : pitch < prev.size * 1.32;
+        const lineBreak = !continues && sameLook && !lab && !label && close_ && endedEarly && tight;
+        if (lineBreak) l.breakBefore = true;
+        else if (!continues) close();
       }
       if (!cur.length) label = lab;
       cur.push(l);
@@ -591,7 +712,62 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
 
   // Word's default space after paragraphs would add to the measured gaps: none by default here.
   doc.styles.defaults.paragraph = { spacing: { after: 0, line: 240, lineRule: "auto" } };
+  rebuildContents(blocks);
   section.blocks = blocks.length ? blocks : [{ type: "paragraph", props: {}, content: [] }];
+
+  /**
+   * Tables of contents: three or more paragraphs in a row that end in a page number after a leader
+   * (dots) or a wide gap become Word contents entries — styles TOC 1–3 (by indent), a right tab stop
+   * with dots at the margin — inside a TOC field, so Word can update the table from the headings.
+   */
+  function rebuildContents(list: Block[]) {
+    const ENTRY = /^(.*?\S)(?:[\s.·…_]*?(?:\.{3,}|·{3,}|…+|_{3,})[\s.·…_]*|\t[\s.]*)([0-9]{1,4}|[ivxlc]{1,6})\s*$/i;
+    const plain = (b: Block) => (b.type === "paragraph" ? b.content.map((c) => (c.type === "text" ? c.text : c.type === "tab" ? "\t" : c.type === "link" ? c.content.map((x) => (x.type === "text" ? x.text : x.type === "tab" ? "\t" : "")).join("") : "")).join("") : "");
+    let i = 0;
+    while (i < list.length) {
+      let j = i;
+      while (j < list.length && list[j].type === "paragraph" && ENTRY.test(plain(list[j]))) j++;
+      if (j - i >= 3) {
+        const entries = list.slice(i, j) as Paragraph[];
+        // Level by where each entry's first line starts (left indent plus first-line indent), shallowest first.
+        const startOf = (e: Paragraph) => Math.round((firstX.get(e) ?? 0) / 3);
+        const indents = [...new Set(entries.map(startOf))].sort((a, b) => a - b);
+        // A list of figures or tables ("Figure 2 …") is a table of figures: Word's TOC field with \c.
+        const caption = /^(Figure|Table|Fig\.)\s+\d+/i.exec(plain(entries[0]))?.[1];
+        entries.forEach((e, k) => {
+          const m = ENTRY.exec(plain(e))!;
+          const level = caption ? 1 : Math.min(3, indents.indexOf(startOf(e)) + 1);
+          const firstText = [e.content, ...e.content.map((c) => (c.type === "link" ? c.content : []))].flat().find((c): c is Extract<Inline, { type: "text" }> => c.type === "text");
+          const props = firstText?.props ? { props: firstText.props } : {};
+          const content: Inline[] = [];
+          if (k === 0) {
+            const instr = caption ? ` TOC \\h \\z \\c "${caption === "Fig." ? "Figure" : caption}" ` : ' TOC \\o "1-3" \\h \\z \\u ';
+            content.push({ type: "fieldChar", kind: "begin" }, { type: "instr", text: instr }, { type: "fieldChar", kind: "separate" });
+          }
+          content.push({ type: "text", text: m[1].trim(), ...props }, { type: "tab" }, { type: "text", text: m[2], ...props });
+          if (k === entries.length - 1) content.push({ type: "fieldChar", kind: "end" });
+          const tabPos = Math.round((right - left) * 20);
+          e.props = {
+            style: `TOC${level}`,
+            ...(e.props.spacing ? { spacing: e.props.spacing } : {}),
+            extra: [{ name: "w:tabs", xml: `<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="${tabPos}"/></w:tabs>` }],
+          };
+          e.content = content;
+          ensureTocStyle(level);
+        });
+      }
+      i = Math.max(j, i + 1);
+    }
+  }
+
+  function ensureTocStyle(level: number) {
+    const id = `TOC${level}`;
+    if (doc.styles.styles.some((st) => st.id === id)) return;
+    doc.styles.styles.push({
+      id, type: "paragraph", name: `toc ${level}`, basedOn: "Normal", next: "Normal",
+      paragraph: { spacing: { after: 5 }, ...(level > 1 ? { indent: { left: 11 * (level - 1) } } : {}) },
+    });
+  }
 
   // --- tables ---------------------------------------------------------------------------------
   function tableOf(g: Grid, lines: Line[], pictures: Picture[]): Table {
