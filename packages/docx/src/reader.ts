@@ -18,8 +18,8 @@ export interface ReadResult {
 
 /** Paragraph-level elements that carry no content and are dropped (proofing/render caches). */
 const DROPPED = new Set(["w:proofErr", "w:lastRenderedPageBreak", "w:noProof"]);
-/** Preserved elements that are harmless to keep silently (they carry no visible content). */
-const SILENT = new Set(["w:bookmarkStart", "w:bookmarkEnd", "w:permStart", "w:permEnd", "w:commentRangeStart", "w:commentRangeEnd"]);
+/** Preserved elements that are harmless to keep silently (no visible content, or editable elsewhere: comments are in the Comments pane). */
+const SILENT = new Set(["w:bookmarkStart", "w:bookmarkEnd", "w:permStart", "w:permEnd", "w:commentRangeStart", "w:commentRangeEnd", "w:commentReference"]);
 /** User-facing names for preserved content, used in conversion warnings. */
 const FRIENDLY: Record<string, string> = {
   "w:drawing": "Floating image or shape",
@@ -253,7 +253,7 @@ class Reader {
           content: this.readInlines(elements(content), ctx),
         });
       } else if (n === "w:ins" || n === "w:del") {
-        this.warn("Tracked changes are shown and kept; accepting or rejecting them is not supported yet.");
+        this.warn("Tracked changes are shown and can be accepted or rejected; new edits are not tracked yet.");
         out.push({ type: "revision", kind: n === "w:ins" ? "ins" : "del", attrs: rawAttrs(e), content: this.readInlines(elements(e), ctx) });
       } else if (DROPPED.has(n)) continue;
       else {

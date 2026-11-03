@@ -73,3 +73,14 @@ The rest of each keystroke is the browser laying out and painting a 145-page edi
 code now accounts for ~11 ms of the 44). Timings on this computer vary by ±20% between runs (and a
 run is spoiled when a re-layout lands during typing), so compare three runs. Further gains would need
 pages kept out of the browser's layout while off screen, a larger change.
+
+### Later the same day: tab stops on screen
+
+With tabs drawn at their stops (as the layout places them) instead of the browser's fixed tab width,
+the screen and the pages agree on far more lines, so fitting has less to correct:
+
+| 145 pages | Before | After |
+|---|---|---|
+| Keystroke until painted, median / worst | 43–45 ms / ~150 ms | **28–29 ms / 40 ms** |
+| One-off fitting pass after a layout | ~425 ms | ~160 ms |
+| Page alignment | within 1 px | within 1 px |

@@ -405,3 +405,80 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .ac-list li { display: flex; gap: 8px; align-items: center; }
 .ac-list li button { margin-left: auto; }
 .autocorrect .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+/* Wave 1: small launcher buttons (⋯) that open a group's full dialog. */
+.toolbar .launcher { padding: 2px 6px; color: var(--muted); }
+.toolbar .case-select { width: 56px; }
+.toolbar sup, .toolbar sub { font-size: 0.65em; line-height: 0; }
+
+/* Ruler. */
+.ruler { position: relative; height: 24px; background: #e9ebef; border-bottom: 1px solid var(--chrome-border); overflow: hidden; user-select: none; flex: none; }
+.ruler-margin { position: absolute; top: 4px; height: 16px; background: #c9ced6; }
+.ruler-text { position: absolute; top: 4px; height: 16px; background: #fff; cursor: copy; }
+.ruler-tick { position: absolute; top: 10px; width: 1px; height: 4px; background: #77808c; pointer-events: none; }
+.ruler-tick.half { top: 8px; height: 8px; }
+.ruler-num { position: absolute; top: 5px; transform: translateX(-50%); font: 9px/14px "Segoe UI", sans-serif; color: #4a5361; pointer-events: none; }
+.ruler-kind { position: absolute; left: 2px; top: 2px; width: 20px; height: 20px; padding: 0; z-index: 2; font: 12px/18px "Segoe UI Symbol", sans-serif; border: 1px solid #b6bdc8; background: #fff; border-radius: 3px; cursor: pointer; }
+.ruler-marker { position: absolute; width: 10px; margin-left: -5px; cursor: ew-resize; z-index: 1; }
+.ruler-marker.first { top: 2px; height: 7px; background: #5b6575; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.ruler-marker.hanging { top: 13px; height: 6px; background: #5b6575; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.ruler-marker.left { top: 19px; height: 5px; background: #5b6575; }
+.ruler-marker.right { top: 13px; height: 7px; background: #5b6575; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.ruler-tab { position: absolute; top: 9px; transform: translateX(-2px); font: bold 11px/12px "Segoe UI Symbol", sans-serif; color: #2b3442; cursor: ew-resize; z-index: 1; }
+.ruler-tab.away { opacity: 0.3; }
+.ruler-guide { position: fixed; top: 0; bottom: 0; width: 0; border-left: 1px dashed #5b6575; pointer-events: none; z-index: 3; }
+
+/* Right-click menu and Paste Options. */
+.context-menu { position: fixed; z-index: 60; min-width: 230px; padding: 4px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18); }
+.context-menu button, .paste-menu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; padding: 5px 10px; border: none; background: none; font: inherit; text-align: left; border-radius: 4px; cursor: pointer; }
+.context-menu button:hover:not(:disabled), .context-menu button:focus-visible, .paste-menu button:hover { background: #e8eef8; outline: none; }
+.context-menu button:disabled { color: #9aa1ab; cursor: default; }
+.context-menu kbd, .paste-menu kbd { font: 11px "Segoe UI", sans-serif; color: var(--muted); }
+.context-sep { height: 1px; margin: 4px 6px; background: var(--chrome-border); }
+.paste-options { position: fixed; z-index: 55; }
+.paste-button { font: 11px "Segoe UI", sans-serif; padding: 1px 6px; border: 1px solid #b6bdc8; border-radius: 3px; background: #fff; cursor: pointer; }
+.paste-menu { margin-top: 2px; padding: 4px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18); min-width: 220px; }
+.paste-menu button.on { font-weight: 600; }
+
+/* Format painter: the brush cursor over the document. */
+.canvas.painting .pw-editor { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='24'%3E%3Cpath d='M3 2h10v6H3z' fill='%23fff' stroke='%23000'/%3E%3Cpath d='M7 8v4h2v10h-2' fill='none' stroke='%23000' stroke-width='1.5'/%3E%3C/svg%3E") 8 22, text; }
+
+/* Show ¶: paragraph marks, spaces, tabs and breaks. */
+.pw-show-marks p::after { content: "¶"; color: #5b7fc7; font-family: "Segoe UI", sans-serif; font-weight: 400; font-style: normal; text-decoration: none; }
+.pw-show-marks .pw-space { background: radial-gradient(circle, #5b7fc7 1px, transparent 1.3px) center / 100% 100% no-repeat; }
+.pw-show-marks .pw-tab { position: relative; }
+.pw-show-marks .pw-tab::before { content: "→"; position: absolute; left: 0; top: 0; color: #5b7fc7; font: 400 0.9em "Segoe UI Symbol", sans-serif; }
+.pw-show-marks .pw-page-break::before { content: "Page Break"; display: block; text-align: center; font: 10px "Segoe UI", sans-serif; color: #5b7fc7; border-top: 1px dotted #5b7fc7; }
+
+/* Tab leaders on individually sized tabs (any paragraph with tab stops). */
+.pw-editor .pw-tab.pw-leader-dot, .pw-editor .pw-tab.pw-leader-middleDot {
+  background: radial-gradient(circle, currentColor 0.6px, transparent 0.9px) left calc(100% - 0.28em) / 4px 4px repeat-x;
+}
+.pw-editor .pw-tab.pw-leader-hyphen { background: linear-gradient(90deg, currentColor 50%, transparent 50%) left calc(100% - 0.35em) / 5px 1px repeat-x; }
+.pw-editor .pw-tab.pw-leader-underscore, .pw-editor .pw-tab.pw-leader-heavy { border-bottom: 1px solid currentColor; }
+
+/* Font, Symbol, Date & Time dialogs; tab stops in the Paragraph dialog. */
+.hf-dialog.font-dialog { width: min(600px, 96vw); }
+.font-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px 12px; margin-bottom: 10px; }
+.font-grid label { display: grid; gap: 3px; font-size: 12px; }
+.font-grid input, .font-grid select { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.font-grid input[type="color"] { padding: 1px; height: 28px; }
+.font-effects { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 12px; border: 1px solid var(--chrome-border); border-radius: 6px; padding: 8px 12px; margin: 0 0 10px; }
+.font-spacing { display: flex; gap: 16px; border: 1px solid var(--chrome-border); border-radius: 6px; padding: 8px 12px; margin: 0 0 10px; }
+.font-spacing input { width: 60px; }
+.font-preview { height: 70px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--chrome-border); border-radius: 6px; background: #fff; color: #000; white-space: nowrap; }
+.hf-dialog.symbol-dialog { width: min(560px, 96vw); }
+.symbol-label { font-size: 12px; color: var(--muted); margin: 4px 0; }
+.symbol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 3px; margin: 6px 0; max-height: 260px; overflow: auto; }
+.symbol-grid button { height: 34px; font: 18px "Segoe UI Symbol", "Segoe UI", sans-serif; border: 1px solid var(--chrome-border); background: #fff; border-radius: 4px; cursor: pointer; }
+.symbol-grid button:hover { background: #e8eef8; }
+.symbol-dialog .hint, .datetime-dialog .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }
+.hf-dialog.datetime-dialog { width: min(380px, 96vw); }
+.datetime-list { display: grid; max-height: 300px; overflow: auto; border: 1px solid var(--chrome-border); border-radius: 6px; margin-bottom: 8px; }
+.datetime-list button { text-align: left; padding: 5px 10px; border: none; background: none; font: inherit; cursor: pointer; }
+.datetime-list button.on { background: var(--accent, #2b579a); color: #fff; }
+.para-breaks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.para-tabs .tab-add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.para-tabs .tab-add input { width: 110px; }
+.para-tabs .tab-list { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 2px; max-height: 120px; overflow: auto; }
+.para-tabs .tab-list li { display: flex; gap: 8px; align-items: center; }
+.para-tabs .tab-list li button { margin-left: auto; }

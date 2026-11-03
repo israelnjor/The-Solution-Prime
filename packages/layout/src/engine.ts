@@ -31,6 +31,8 @@ export interface Segment {
   strike?: boolean;
   highlight?: string;
   vertAlign?: string;
+  /** Extra space after each character, pt. */
+  charSpacing?: number;
   /** Text computed at render time (its cached text is only a placeholder). PAGEREF: filled in by the layout. */
   field?: "PAGE" | "NUMPAGES" | "PAGEREF";
   /** PAGEREF: the bookmark whose page number this is. */
@@ -321,6 +323,7 @@ const look = (r: ResolvedRun): Partial<Segment> => {
   if (r.strike) out.strike = true;
   if (r.highlight) out.highlight = r.highlight;
   if (r.vertAlign) out.vertAlign = r.vertAlign;
+  if (r.charSpacing) out.charSpacing = r.charSpacing;
   return out;
 };
 
@@ -470,7 +473,7 @@ export class LayoutEngine {
 
   private textWidth(text: string, run: ResolvedRun): number {
     const size = run.vertAlign ? run.size * 0.65 : run.size;
-    return this.m.width(text, key(run)) * size;
+    return this.m.width(text, key(run)) * size + (run.charSpacing ? run.charSpacing * [...text].length : 0);
   }
 
   /** Fonts that actually draw `text` in this run: the run's font plus any fallback fonts. */

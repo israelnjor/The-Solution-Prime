@@ -3,6 +3,7 @@ import {
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
   setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
   setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
+  changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
@@ -12,7 +13,7 @@ import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
 import { RecentMenu } from "./RecentList";
 
-const FONTS = ["Aptos", "Arial", "Book Antiqua", "Calibri", "Calibri Light", "Cambria", "Candara", "Century Gothic",
+export const FONTS = ["Aptos", "Arial", "Book Antiqua", "Calibri", "Calibri Light", "Cambria", "Candara", "Century Gothic",
   "Consolas", "Constantia", "Corbel", "Courier New", "Garamond", "Georgia", "Palatino Linotype", "Segoe UI",
   "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"];
 const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
@@ -22,9 +23,9 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "home" | "insert" | "layout" | "review" | "table" | "picture";
-/** Word's keys for the tabs: Alt+H, Alt+N, Alt+P, Alt+R. */
-const TAB_KEYS: Record<string, string> = { home: "H", insert: "N", layout: "P", review: "R" };
+type Tab = "home" | "insert" | "layout" | "review" | "view" | "table" | "picture";
+/** Word's keys for the tabs: Alt+H, Alt+N, Alt+P, Alt+R, Alt+W. */
+const TAB_KEYS: Record<string, string> = { home: "H", insert: "N", layout: "P", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
 
 const CM = 72 / 2.54;
@@ -63,7 +64,19 @@ export interface RibbonProps {
   onSignature(): void;
   onBlocks(): void;
   onAutoCorrect(): void;
+  /** The format painter: on (once, or kept on with a double-click) or off. */
+  painter: boolean;
+  onPainter(sticky: boolean): void;
+  onFontDialog(): void;
+  onSymbol(): void;
+  onDateTime(): void;
+  showMarks: boolean;
+  onShowMarks(): void;
+  ruler: boolean;
+  onRuler(): void;
 }
+
+const CASES: [CaseMode, string][] = [["sentence", "Sentence case."], ["lower", "lowercase"], ["upper", "UPPERCASE"], ["title", "Capitalize Each Word"], ["toggle", "tOGGLE cASE"]];
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
 const displayName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
@@ -86,7 +99,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onDateTime, showMarks, onShowMarks, ruler, onRuler }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -142,7 +155,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     <header className="ribbon">
       <nav className="tabs" role="tablist" aria-label="Ribbon tabs">
         <button className="brand" onClick={onHome} title="Home: new, open, recent documents">Prime Word</button>
-        {([["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["review", "Review"]] as const).map(([t, label]) => (
+        {([["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
           <button key={t} role="tab" aria-selected={activeTab === t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}
             title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
@@ -170,6 +183,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group">
               <button onClick={run(undo)} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
               <button onClick={run(redo)} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
+              <button className={painter ? "on" : ""} aria-pressed={painter} onClick={() => onPainter(false)} onDoubleClick={() => onPainter(true)}
+                title="Format Painter: copy this formatting, then select text to apply it (double-click to keep it on; Esc to stop)">🖌 Format Painter</button>
             </div>
             <div className="group">
               <select value={currentStyle} onChange={(e) => run(setParagraph("style", e.target.value))()} title="Paragraph style" className="style-select">
@@ -184,11 +199,20 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <select value={effective?.size ?? 11} onChange={(e) => run(setFontSize(Number(e.target.value)))()} title="Font size" className="size-select">
                 {[...new Set([...SIZES, effective?.size ?? 11])].sort((a, b) => a - b).map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
+              <button onClick={run(growFont(docRef, 1))} title="Grow Font (Ctrl+Shift+>)" aria-label="Grow Font">A<sup>▲</sup></button>
+              <button onClick={run(growFont(docRef, -1))} title="Shrink Font (Ctrl+Shift+<)" aria-label="Shrink Font">A<sup>▼</sup></button>
+              <select value="" onChange={(e) => { if (e.target.value) run(changeCase(e.target.value as CaseMode))(); }} title="Change Case (Shift+F3)" aria-label="Change Case" className="case-select">
+                <option value="">Aa</option>
+                {CASES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+              </select>
+              <button onClick={run(clearFormatting)} title="Clear All Formatting: back to plain text" aria-label="Clear All Formatting">A⌫</button>
               {([["bold", "B", "Bold (Ctrl+B)"], ["italic", "I", "Italic (Ctrl+I)"], ["underline", "U", "Underline (Ctrl+U)"], ["strike", "S", "Strikethrough"]] as const)
                 .map(([key, label, title]) => (
                   <button key={key} className={`fmt-${key} ${state && isActive(state, key) ? "on" : ""}`} onClick={run(toggleRun(key))} title={title}
                     aria-label={title} aria-pressed={!!(state && isActive(state, key))}>{label}</button>
                 ))}
+              <button className={effective?.vertAlign === "subscript" ? "on" : ""} onClick={run(toggleVertAlign("subscript"))} title="Subscript (Ctrl+=)" aria-label="Subscript">x<sub>2</sub></button>
+              <button className={effective?.vertAlign === "superscript" ? "on" : ""} onClick={run(toggleVertAlign("superscript"))} title="Superscript (Ctrl+Shift+=)" aria-label="Superscript">x<sup>2</sup></button>
               <label className="color" title="Font colour" aria-label="Font colour">
                 <span style={{ borderBottom: `3px solid #${effective?.color ?? "000000"}` }}>A</span>
                 <input type="color" value={`#${(effective?.color ?? "000000").toLowerCase()}`} onChange={(e) => run(setColor(e.target.value.slice(1)))()} />
@@ -197,6 +221,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <option value="">No highlight</option>
                 {HIGHLIGHTS.map(([name, css]) => <option key={name} value={name} style={{ background: css }}>{name}</option>)}
               </select>
+              <button onClick={onFontDialog} title="Font settings (Ctrl+D)" aria-label="Font settings" className="launcher">⋯</button>
             </div>
             <div className="group">
               <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets">• List</button>
@@ -227,7 +252,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <option value="top">Top border</option>
                 <option value="box">Box</option>
               </select>
-              <button onClick={onParagraph} title="Paragraph settings: indents and spacing" aria-label="Paragraph settings">¶</button>
+              <button className={showMarks ? "on" : ""} aria-pressed={showMarks} onClick={onShowMarks} title="Show/Hide ¶: paragraph marks, spaces and tabs (Ctrl+Shift+8)" aria-label="Show formatting marks">¶</button>
+              <button onClick={onParagraph} title="Paragraph settings: indents, spacing, line and page breaks, tabs" aria-label="Paragraph settings" className="launcher">⋯</button>
             </div>
             <div className="group">
               <button onClick={() => onFind(false)} title="Find (Ctrl+F)">Find</button>
@@ -265,6 +291,10 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onLetterhead} title="Design a letterhead: logo, name, address, contacts">Letterhead…</button>
               <button onClick={onSignature} title="Insert your signature, or make one from a photo, by drawing or typing">Signature…</button>
               <button onClick={onBlocks} title="Signature blocks, addresses, stamps and saved text: insert left, centre or right">Blocks…</button>
+            </div>
+            <div className="group">
+              <button onClick={onSymbol} title="Insert a symbol: ©, €, ₵, ½, →, Greek letters…">Symbol…</button>
+              <button onClick={onDateTime} title="Insert today's date or the time">Date &amp; Time…</button>
             </div>
             <div className="group popover-anchor">
               <button onClick={openLink} title="Insert or edit a link (Ctrl+K)">Link</button>
@@ -335,6 +365,19 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </>
           );
         })()}
+
+        {activeTab === "view" && (
+          <>
+            <div className="group" aria-label="Views">
+              <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")}>Print Layout</button>
+              <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")}>Web Layout</button>
+            </div>
+            <div className="group" aria-label="Show">
+              <label className="choice"><input type="checkbox" checked={ruler} onChange={onRuler} /> Ruler</label>
+              <label className="choice"><input type="checkbox" checked={showMarks} onChange={onShowMarks} /> Formatting marks</label>
+            </div>
+          </>
+        )}
 
         {activeTab === "review" && (
           <>

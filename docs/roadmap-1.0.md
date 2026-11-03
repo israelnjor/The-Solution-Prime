@@ -6,7 +6,7 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-03): about 40%
+## Where we are (2026-11-03, after Waves 0 and 1): about 50%
 
 | Area | Feature | Status |
 |---|---|---|
@@ -16,20 +16,22 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Open/save .doc, .rtf, .odt, .txt | ❌ |
 | | Document properties, password protection, version history | ❌ |
 | **Home: font** | Font, size, colour, highlight, bold/italic/underline/strike | ✅ |
-| | Superscript/subscript buttons, grow/shrink font, change case, clear formatting | ❌ |
-| | Underline styles, text effects, character spacing, font dialog | ❌ |
+| | Superscript/subscript, grow/shrink font, change case, clear formatting, underline styles, character spacing, font dialog | ✅ |
+| | Small caps (saved, not drawn), text effects (shadow, outline, glow) | ❌ |
 | **Home: clipboard** | Cut/copy/paste (Word and web formatting kept) | ✅ |
-| | Paste options (keep text only, match formatting), format painter | ❌ |
+| | Paste options (keep source, merge, text only), format painter, Ctrl+Shift+C / V | ✅ |
 | **Home: paragraph** | Alignment, line/paragraph spacing, indents, bullets, numbering, list levels | ✅ |
 | | Borders (basic) | 🟡 |
-| | Multilevel list library, shading, sort, show ¶ marks, ruler with tab stops | ❌ |
+| | Show ¶ marks, ruler (indents, tab stops), tab stops on screen, line and page breaks, tabs dialog | ✅ |
+| | Multilevel list library, shading, sort | ❌ |
 | **Home: styles** | Apply paragraph styles | ✅ |
 | | Create / modify styles, style gallery | ❌ |
 | **Home: editing** | Find / Replace | ✅ |
 | | Find options (formatting, wildcards), Go To, navigation pane | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
 | | Text boxes, equations (shown, moved; not editable) | 🟡 |
-| | Section/column breaks, symbol, date & time, shapes, charts, SmartArt, WordArt, drop cap, bookmarks, cross-references | ❌ |
+| | Symbol (with ₵ and ₦), date & time (as text or a DATE field) | ✅ |
+| | Section/column breaks, shapes, charts, SmartArt, WordArt, drop cap, bookmarks, cross-references | ❌ |
 | **Design** | Themes, style sets, watermark, page colour, page borders | ❌ |
 | **Layout** | Margins, orientation, size, indents/spacing | ✅ |
 | | Floating objects: move/resize | ✅ |
@@ -38,21 +40,21 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Insert/update TOC, footnotes/endnotes (kept, not editable), captions, table of figures, citations & bibliography, cross-references, index | ❌ |
 | **Review** | Spelling, word count, comments, show/accept/reject tracked changes | ✅ |
 | | Record tracked changes, grammar, thesaurus, compare, read aloud, protect | ❌ |
-| **View** | Print / Web layout, zoom | ✅ |
-| | Read mode, outline, navigation pane, ruler, multiple pages, dark mode | ❌ |
+| **View** | Print / Web layout, zoom, ruler, formatting marks | ✅ |
+| | Read mode, outline, navigation pane, vertical ruler, multiple pages, dark mode | ❌ |
 | **Tables** | Insert, add/delete rows and columns, Tab navigation | ✅ |
 | | Merge/split cells, borders & shading, table styles, cell alignment, column resize, header row repeat, sort, text↔table | ❌ |
 | **Pictures** | Insert, inline/floating display, wrap options, drag anywhere, crop, rotate, alt text | ✅ |
 | | Picture styles, free rotation, adjustments (brightness, colour) | ❌ |
 | **Make it yours** | My templates, letterhead designer, signatures (photo/scan clean-up, draw, type), blocks (signature blocks, addresses, stamps, saved text; left/centre/right; cursor, header or footer), drag paragraphs (handle, Alt+Shift+↑/↓) | ✅ |
-| **Everyday behaviour** | Undo/redo, keyboard shortcuts (core), accessibility basics | ✅ |
-| | Right-click menu, AutoCorrect, smart quotes, auto-lists ("1. " / "- "), status bar "Page X of Y" | ❌ |
+| **Everyday behaviour** | Undo/redo, keyboard shortcuts (Word's formatting keys too), accessibility basics | ✅ |
+| | Right-click menu, AutoCorrect (own replacements), smart quotes, auto-lists ("1. " / "- "), status bar "Page X of Y" | ✅ |
 
 ## Where we are ahead (value propositions)
 
 - **PDF → Word built in**, offline, free — Word needs Acrobat or online services for good results.
 - **Offline and private**: nothing leaves the computer; no account, no subscription.
-- **Fast on long documents** (145 pages: ~45 ms per keystroke until painted, no freezes while typing)
+- **Fast on long documents** (145 pages: ~28 ms per keystroke until painted, no freezes while typing)
   and a small installer (5.6 MB, PDF converter included).
 - **Faithful to Word's layout**: same pages, same line positions (measured against Word itself).
 - **Make it yours**: design a letterhead in a minute; turn a phone photo of a signature into a clean
@@ -67,7 +69,7 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
 0. **Make it yours** ✅ (2026-11-03) — pictures that move freely (wrap, drag, crop, rotate, alt
    text); drag paragraphs; my templates and the letterhead designer; signatures; blocks and stamps.
 
-1. **Feels like Word** — right-click menu; format painter; clear formatting; change case; grow/shrink
+1. **Feels like Word** ✅ (2026-11-03) — right-click menu; format painter; clear formatting; change case; grow/shrink
    font; superscript/subscript; paste options; show ¶ marks; ruler (indents, tab stops); AutoCorrect,
    smart quotes, automatic lists; symbol; date & time; "Page X of Y" in the status bar; font and
    paragraph dialogs complete.

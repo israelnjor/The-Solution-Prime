@@ -117,6 +117,20 @@ export function insertField(instr: "PAGE" | "NUMPAGES"): Command {
   };
 }
 
+/** A field with its current result as text, e.g. DATE \@ "d MMMM yyyy" showing today's date. */
+export function insertFieldResult(instr: string, result: string): Command {
+  return (state, dispatch) => {
+    if (!result) return false;
+    if (!dispatch) return true;
+    const { from, to } = state.selection;
+    const tr = state.tr.insertText(result, from, to);
+    tr.addMark(from, from + result.length, state.schema.marks.field.create({ instr: ` ${instr} ` }));
+    tr.removeStoredMark(state.schema.marks.field);
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
 /** The section at the cursor: its 1-based number and how many sections there are. */
 export function sectionInfo(state: EditorState): { number: number; count: number; titlePage: boolean } {
   const all = sections(state);

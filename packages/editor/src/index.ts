@@ -8,7 +8,7 @@ export {
   deleteFloat, floatAt, floatEditing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
   setPictureWrap, withBox, type FloatBox,
 } from "./floats.js";
-export { PAGE_GAP, pagination, paginationKey, type PagedOptions, mark, timed } from "./paged.js";
+export { PAGE_GAP, pageAt, pagination, paginationKey, type PagedOptions, mark, timed } from "./paged.js";
 export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
 export { changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, toggleList } from "./lists.js";
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";
@@ -17,7 +17,7 @@ export { findAll, findNext, findPlugin, findState, type FindQuery, replaceAll, r
 export { cssToRunProps, pastePlugin, toHex, toPt } from "./paste.js";
 export { storyFromProseMirror, storyToProseMirror } from "./convert.js";
 export {
-  insertField, ownStory, PAPER, pageSetup, type SectionAttrs, sectionInfo, setPageSetup, setStory, setTitlePage, storyAt,
+  insertField, insertFieldResult, ownStory, PAPER, pageSetup, type SectionAttrs, sectionInfo, setPageSetup, setStory, setTitlePage, storyAt,
 } from "./docsetup.js";
 export { type BorderKind, bordersAt, setBorders, setIndent, setLineSpacing, setParagraphSpacing, updateParagraphs } from "./paragraph.js";
 export { type Template, TEMPLATES } from "./templates.js";
@@ -29,3 +29,7 @@ export { blockHandle, moveBlock } from "./blocks.js";
 export { letterheadDocument, letterheadStories, type LetterheadSpec } from "./letterhead.js";
 export { addressBlock, insertPart, type Part, type PartAlign, type PartPlace, partFromSelection, picturePart, signatureBlock, type SignatureBlockSpec } from "./parts.js";
 export { AUTOFORMAT_DEFAULTS, autoFormat, autoFormatAfter, type AutoFormatOptions, CORRECTIONS } from "./autoformat.js";
+export { changeCase, type CaseMode, clearCharFormatting, clearFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, FONT_SIZES, growFont, pasteFormat, toggleVertAlign } from "./formatting.js";
+export { pasteAs, type PasteMode, pasteOptions, pasteOptionsKey, type PasteState } from "./pasteoptions.js";
+export { setShowMarks, showMarks, showMarksKey } from "./marks.js";
+export { setTabStops, tabStops } from "./tabs.js";

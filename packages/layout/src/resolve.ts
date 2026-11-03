@@ -12,8 +12,12 @@ export interface ResolvedRun {
   caps: boolean;
   hidden: boolean;
   vertAlign?: string;
+  /** Extra space after each character, pt. */
+  charSpacing?: number;
   color?: string;
   underline: boolean;
+  /** Word's underline style (w:u w:val) when not a single line: "double", "dotted", "wave"… */
+  underlineStyle?: string;
   strike: boolean;
   highlight?: string;
 }
@@ -210,8 +214,10 @@ export class Resolver {
       vertAlign: p.vertAlign && p.vertAlign !== "baseline" ? p.vertAlign : undefined,
       color: p.color && p.color !== "AUTO" ? p.color : undefined,
       underline: !!p.underline && p.underline.val !== "none",
+      ...(p.underline?.val && !["single", "none", "words"].includes(p.underline.val) ? { underlineStyle: p.underline.val } : {}),
       strike: !!p.strike || !!p.doubleStrike,
       highlight: p.highlight && p.highlight !== "none" ? p.highlight : undefined,
+      ...(p.charSpacing ? { charSpacing: p.charSpacing } : {}),
     };
   }
 
@@ -240,10 +246,14 @@ export class Resolver {
     if (r.caps !== undefined) out.caps = r.caps;
     if (r.hidden !== undefined) out.hidden = r.hidden;
     if (r.color !== undefined) out.color = r.color === "AUTO" ? undefined : r.color;
-    if (r.underline !== undefined) out.underline = r.underline.val !== "none";
+    if (r.underline !== undefined) {
+      out.underline = r.underline.val !== "none";
+      out.underlineStyle = r.underline.val && !["single", "none", "words"].includes(r.underline.val) ? r.underline.val : undefined;
+    }
     if (r.strike !== undefined || r.doubleStrike !== undefined) out.strike = !!r.strike || !!r.doubleStrike;
     if (r.highlight !== undefined) out.highlight = r.highlight === "none" ? undefined : r.highlight;
     if (r.vertAlign !== undefined) out.vertAlign = r.vertAlign === "baseline" ? undefined : r.vertAlign;
+    if (r.charSpacing !== undefined) out.charSpacing = r.charSpacing || undefined;
     return out;
   }
 

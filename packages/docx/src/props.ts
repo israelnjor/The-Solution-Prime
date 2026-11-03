@@ -46,6 +46,7 @@ export function readRunProps(rPr: Element | undefined): RunProps | undefined {
     else if (n === "w:u" && leaf(c)) p.underline = attrs(c);
     else if (n === "w:shd" && leaf(c)) p.shading = attrs(c);
     else if (n === "w:vertAlign" && simple(c)) p.vertAlign = val(c) as RunProps["vertAlign"];
+    else if (n === "w:spacing" && simple(c) && /^-?\d+$/.test(val(c) ?? "")) p.charSpacing = Number(val(c)) / 20;
     else p.extra = push(p.extra, c);
   }
   return p;
@@ -66,6 +67,7 @@ export function writeRunProps(p: RunProps | undefined): string {
   if (p.underline) items.push(["w:u", el("w:u", p.underline)]);
   if (p.shading) items.push(["w:shd", el("w:shd", p.shading)]);
   if (p.vertAlign !== undefined) items.push(valXml("w:vertAlign", p.vertAlign));
+  if (p.charSpacing !== undefined) items.push(valXml("w:spacing", String(Math.round(p.charSpacing * 20))));
   items.push(...extraItems(p.extra));
   return wrap("w:rPr", RPR_ORDER, items);
 }

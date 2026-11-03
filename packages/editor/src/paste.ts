@@ -245,7 +245,7 @@ export function pastePlugin(doc: () => PrimeDocument): Plugin {
         const at = $from.before();
         const tr = view.state.tr.replaceSelection(slice);
         tr.setNodeMarkup(tr.mapping.map(at, -1), undefined, { ...$from.parent.attrs, props: first.attrs.props });
-        view.dispatch(tr.scrollIntoView());
+        view.dispatch(tr.scrollIntoView().setMeta("paste", true).setMeta("uiEvent", "paste"));
         return true;
       },
     },

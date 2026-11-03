@@ -3,7 +3,7 @@
  * print and preview — the PDF shows exactly the pages the layout engine computed.
  */
 import fontkit from "@pdf-lib/fontkit";
-import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, rgb } from "pdf-lib";
+import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, rgb, setCharacterSpacing } from "pdf-lib";
 import type { FontKey, ImageSource, LayoutResult, Page, Segment } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 
@@ -122,7 +122,7 @@ class Renderer {
       const piece = face?.hasGlyphForCodePoint ? { ...raw, text: symbolText(raw.text, (cp) => face.hasGlyphForCodePoint!(cp)) } : raw;
       let width: number;
       try {
-        width = font.widthOfTextAtSize(piece.text, size);
+        width = font.widthOfTextAtSize(piece.text, size) + (seg.charSpacing ?? 0) * [...piece.text].length;
       } catch {
         width = 0;
       }
@@ -131,7 +131,10 @@ class Renderer {
       }
       if (piece.text.trim()) {
         try {
+          // Character spacing (expanded/condensed): the PDF's own Tc, set around this text only.
+          if (seg.charSpacing) out.pushOperators(setCharacterSpacing(seg.charSpacing));
           out.drawText(piece.text, { x, y, size, font, color: color(seg.color) });
+          if (seg.charSpacing) out.pushOperators(setCharacterSpacing(0));
         } catch {
           // A glyph the embedded font cannot encode: skip the piece rather than fail the export.
         }

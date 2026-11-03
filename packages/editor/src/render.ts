@@ -35,10 +35,14 @@ export function runCss(r: Partial<ResolvedRun>): string {
   if (r.color) css.push(`color:#${r.color}`);
   if (r.underline || r.strike) {
     css.push(`text-decoration:${[r.underline ? "underline" : "", r.strike ? "line-through" : ""].join(" ").trim()}`);
+    const u = r.underline ? r.underlineStyle : undefined;
+    if (u) css.push(`text-decoration-style:${u.startsWith("double") ? "double" : u.startsWith("dotted") ? "dotted" : u.startsWith("dash") ? "dashed" : u.startsWith("wav") ? "wavy" : "solid"}`);
+    if (u && /thick|Heavy/.test(u)) css.push("text-decoration-thickness:2px");
   }
   if (r.highlight) css.push(`background:${HIGHLIGHT[r.highlight] ?? "transparent"}`);
   if (r.vertAlign) css.push(`vertical-align:${r.vertAlign === "superscript" ? "super" : "sub"}`);
   if (r.caps) css.push("text-transform:uppercase");
+  if (r.charSpacing) css.push(`letter-spacing:${pt(r.charSpacing)}`);
   if (r.hidden) css.push("display:none");
   return css.join(";");
 }

@@ -3,6 +3,8 @@ import {
   blankDocument, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
+  changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
+  pageAt, setAltText, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
 } from "@prime/editor";
 import type { LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
@@ -13,7 +15,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { baseKeymap, chainCommands } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
-import { type Command, EditorState, NodeSelection } from "prosemirror-state";
+import { type Command, EditorState, NodeSelection, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { Profiler, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { FindPanel } from "./FindPanel";
@@ -27,7 +29,13 @@ import { PageSheets } from "./PageSheets";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
-import { LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
+import { FONTS, LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
+import { ContextMenu } from "./ContextMenu";
+import { DateTimeDialog } from "./DateTimeDialog";
+import { FontDialog } from "./FontDialog";
+import { PasteOptions } from "./PasteOptions";
+import { Ruler } from "./Ruler";
+import { SymbolDialog } from "./SymbolDialog";
 import { CommentsPane } from "./CommentsPane";
 import { Home } from "./Home";
 import type { ConversionResult } from "@prime/pdf-import";
@@ -41,6 +49,8 @@ import { saveTemplate } from "./MyTemplates";
 
 /** Raised by Ctrl+P in the editor. */
 const PRINT_EVENT = "prime-word:print";
+/** Raised by Ctrl+Shift+8: show or hide formatting marks. */
+const MARKS_EVENT = "prime-word:marks";
 
 interface Loaded {
   base: PrimeDocument;
@@ -94,6 +104,17 @@ export function App() {
   const [choosingBlock, setChoosingBlock] = useState(false);
   const [autoCorrecting, setAutoCorrecting] = useState(false);
   const autoCorrect = useRef(loadAutoCorrect());
+  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock">();
+  const [menu, setMenu] = useState<{ x: number; y: number }>();
+  /** The format painter: the formatting it carries, and whether it stays on after one use. */
+  const [painter, setPainter] = useState<{ format: CopiedFormat; sticky: boolean }>();
+  /** Formatting copied with Ctrl+Shift+C, for Ctrl+Shift+V. */
+  const copied = useRef<CopiedFormat>();
+  const remembered = (key: string) => { try { return localStorage.getItem(key) === "1"; } catch { return false; } };
+  const remember = (key: string, on: boolean) => { try { localStorage.setItem(key, on ? "1" : "0"); } catch { /* storage unavailable */ } };
+  const [marksOn, setMarksOn] = useState(() => remembered("prime-word:marks"));
+  const [rulerOn, setRulerOn] = useState(() => remembered("prime-word:ruler"));
+  const toggleMarks = () => setMarksOn((on) => { remember("prime-word:marks", !on); return !on; });
   // Bumped when a template is saved, so the template lists reload.
   const [templatesVersion, setTemplatesVersion] = useState(0);
   // PDF → Word: the PDF being converted, then what the converted document came from.
@@ -199,6 +220,23 @@ export function App() {
           "Shift-Tab": chainCommands(moveCell(-1), changeLevel(-1)),
           // Enter on an empty list item ends the list (as in Word).
           Enter: exitEmptyListItem,
+          // Word's formatting keys.
+          "Mod-Space": clearCharFormatting, "Mod-q": clearParagraphFormatting, "Shift-F3": changeCase("cycle"),
+          "Mod->": growFont(() => fileRef.current.base, 1), "Mod-Shift->": growFont(() => fileRef.current.base, 1),
+          "Mod-<": growFont(() => fileRef.current.base, -1), "Mod-Shift-<": growFont(() => fileRef.current.base, -1),
+          "Mod-]": growFont(() => fileRef.current.base, 1, true), "Mod-[": growFont(() => fileRef.current.base, -1, true),
+          "Mod-=": toggleVertAlign("subscript"), "Mod-+": toggleVertAlign("superscript"), "Mod-Shift-=": toggleVertAlign("superscript"), "Mod-Shift-+": toggleVertAlign("superscript"),
+          "Mod-Shift-a": updateRun((p) => ({ ...p, caps: !p.caps || undefined })),
+          "Mod-Shift-d": updateRun((p) => ({ ...p, underline: p.underline?.val === "double" ? undefined : { val: "double" } })),
+          "Mod-e": setParagraph("align", "center"), "Mod-l": setParagraph("align", undefined), "Mod-r": setParagraph("align", "right"), "Mod-j": setParagraph("align", "both"),
+          "Mod-1": setLineSpacing("multiple", 1), "Mod-2": setLineSpacing("multiple", 2), "Mod-5": setLineSpacing("multiple", 1.5),
+          "Mod-Shift-l": toggleList(() => fileRef.current.base, "bullet"),
+          "Mod-Alt-1": setParagraph("style", "Heading1"), "Mod-Alt-2": setParagraph("style", "Heading2"), "Mod-Alt-3": setParagraph("style", "Heading3"),
+          "Mod-Shift-n": setParagraph("style", undefined),
+          "Mod-d": command(() => setDialog("font")),
+          "Mod-Shift-8": command(() => window.dispatchEvent(new Event(MARKS_EVENT))), "Mod-*": command(() => window.dispatchEvent(new Event(MARKS_EVENT))),
+          "Mod-Shift-c": (state) => { copied.current = copyFormat(state); flash("Formatting copied: select text and press Ctrl+Shift+V to apply it"); return true; },
+          "Mod-Shift-v": (state, dispatch) => (copied.current ? pasteFormat(copied.current)(state, dispatch) : false),
         }),
         keymap(baseKeymap),
         paragraphStyles(file.base, measurer),
@@ -206,6 +244,9 @@ export function App() {
         pastePlugin(() => fileRef.current.base),
         floatEditing(),
         blockHandle(),
+        pasteOptions(),
+        showMarks(),
+        tabStops(() => fileRef.current.base),
         reviewPlugin(),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
@@ -233,6 +274,37 @@ export function App() {
     refresh();
     return () => v.destroy();
   }, [file.base, file.fonts, save, mode, snapshot, spelling]);
+
+  // Formatting marks: the setting (remembered on this computer) applied to the editor, also after it is recreated.
+  useEffect(() => {
+    const v2 = view.current;
+    if (v2) setShowMarks(v2, marksOn);
+  }, [marksOn, file.base, file.fonts, mode, spelling]);
+  useEffect(() => {
+    window.addEventListener(MARKS_EVENT, toggleMarks);
+    return () => window.removeEventListener(MARKS_EVENT, toggleMarks);
+  });
+
+  // The format painter: the next selection made with the mouse gets the copied formatting (every one
+  // until Esc, when it was double-clicked on).
+  useEffect(() => {
+    if (!painter) return;
+    const v2 = view.current;
+    if (!v2) return;
+    const up = (e: MouseEvent) => {
+      if (!v2.dom.contains(e.target as Node)) return;
+      // After the editor has taken the selection from the mouse.
+      setTimeout(() => {
+        if (v2.state.selection.empty) return;
+        pasteFormat(painter.format)(v2.state, v2.dispatch);
+        if (!painter.sticky) setPainter(undefined);
+      }, 0);
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") setPainter(undefined); };
+    window.addEventListener("mouseup", up);
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("mouseup", up); window.removeEventListener("keydown", key); };
+  }, [painter]);
 
   // Load the document's dictionary (offline, shipped with the app), then check the document.
   useEffect(() => {
@@ -451,7 +523,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -470,6 +542,7 @@ export function App() {
       if (test === "signature") signatureSelfTest(v);
       if (test === "blocks") blocksSelfTest(v);
       if (test === "autocorrect") autoCorrectSelfTest(v);
+      if (test === "wave1") wave1SelfTest(v);
       if (test === "lines" && measurerRef.current) linesSelfTest(v, () => fileRef.current.base, measurerRef.current);
     });
   }, [layout, layoutOf, file.base]);
@@ -545,6 +618,13 @@ export function App() {
         onSignature={() => setSigning(true)}
         onBlocks={() => setChoosingBlock(true)}
         onAutoCorrect={() => setAutoCorrecting(true)}
+        painter={!!painter} onPainter={(sticky) => {
+          if (painter && !sticky) { setPainter(undefined); return; }
+          if (v) setPainter({ format: copyFormat(v.state), sticky });
+        }}
+        onFontDialog={() => setDialog("font")} onSymbol={() => setDialog("symbol")} onDateTime={() => setDialog("datetime")}
+        showMarks={marksOn} onShowMarks={toggleMarks}
+        ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
         onSaveTemplate={() => {
           if (!v) return;
           const name = window.prompt("Save as a template named:", fileRef.current.name.replace(/\.docx$/i, ""));
@@ -560,14 +640,22 @@ export function App() {
         }}
       />
 
-      <main className="canvas" onContextMenu={(e) => {
+      {rulerOn && mode === "print" && v && (
+        <Ruler view={v} doc={file.base} pageWidth={section.pageWidth ?? 612} margins={{ left: margins.left ?? 72, right: margins.right ?? 72 }} />
+      )}
+      <main className={`canvas ${painter ? "painting" : ""}`} onContextMenu={(e) => {
         const v2 = view.current;
-        if (!v2 || !speller.current || !(e.target as HTMLElement).closest(".pw-misspelled")) return;
+        if (!v2 || !v2.dom.contains(e.target as Node)) return;
         const pos = v2.posAtCoords({ left: e.clientX, top: e.clientY })?.pos;
-        const issue = pos === undefined ? undefined : misspellingAt(v2, pos);
-        if (!issue) return;
+        const issue = pos !== undefined && speller.current && (e.target as HTMLElement).closest(".pw-misspelled") ? misspellingAt(v2, pos) : undefined;
         e.preventDefault();
-        setSpellMenu({ issue, x: e.clientX, y: e.clientY });
+        if (issue) { setSpellMenu({ issue, x: e.clientX, y: e.clientY }); return; }
+        // A right-click outside the selection moves the cursor there first (as in Word).
+        const { from, to } = v2.state.selection;
+        if (pos !== undefined && (pos < from || pos > to) && !(e.target as HTMLElement).closest("img")) {
+          v2.dispatch(v2.state.tr.setSelection(TextSelection.create(v2.state.doc, pos)));
+        }
+        setMenu({ x: e.clientX, y: e.clientY });
       }} onKeyDown={(e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") { e.preventDefault(); void open(); }
       }}>
@@ -617,7 +705,7 @@ export function App() {
 
       <footer className="status" aria-label="Status bar">
         <span>{file.name}</span>
-        {mode === "print" && layout && <span>{layout.pages.length} page{layout.pages.length > 1 ? "s" : ""}</span>}
+        {mode === "print" && layout && <span>Page {v ? pageAt(v.state) : 1} of {layout.pages.length}</span>}
         <span>{v ? countWords(v.state.doc) : 0} words</span>
         <button className="link" onClick={() => setSpelling((on) => !on)} title="Turn spell checking on or off">
           {spelling ? `Spelling: ${v ? (spellKey.getState(v.state)?.issues.length ?? 0) : 0} to review` : "Spelling: off"}
@@ -665,6 +753,20 @@ export function App() {
         <TemplatePicker templatesVersion={templatesVersion} onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />
       )}
       {editingParagraph && v && <ParagraphDialog view={v} doc={file.base} onClose={() => setEditingParagraph(false)} />}
+      {dialog === "font" && v && <FontDialog view={v} doc={file.base} fonts={FONTS} onClose={() => setDialog(undefined)} />}
+      {dialog === "symbol" && v && <SymbolDialog view={v} onClose={() => setDialog(undefined)} />}
+      {dialog === "datetime" && v && <DateTimeDialog view={v} onClose={() => setDialog(undefined)} />}
+      {dialog === "saveBlock" && v && <BlocksDialog view={v} base={baseOf} initial="selection" onClose={() => setDialog(undefined)} />}
+      {v && <PasteOptions view={v} />}
+      {menu && v && (
+        <ContextMenu view={v} x={menu.x} y={menu.y} onClose={() => setMenu(undefined)} actions={{
+          onFont: () => setDialog("font"), onParagraph: () => setEditingParagraph(true),
+          onLink: () => window.dispatchEvent(new Event(LINK_EVENT)), onComment: () => setComments("writing"),
+          onEditPicture: () => setEditingPicture(true),
+          onAltText: () => { const t = window.prompt("Alt text (describe the picture for people who cannot see it):"); if (t !== null) setAltText(t)(v.state, v.dispatch); },
+          onSaveBlock: () => setDialog("saveBlock"), onNotice: flash,
+        }} />
+      )}
       {editingHeaderFooter && v && measurerRef.current && (
         <HeaderFooterEditor view={v} doc={file.base} measurer={measurerRef.current} onClose={() => setEditingHeaderFooter(false)} />
       )}

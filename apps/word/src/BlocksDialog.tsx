@@ -32,9 +32,9 @@ function PartThumb({ part, align, width = 160 }: { part: Part; align?: PartAlign
  * Blocks: signature blocks, addresses, stamps and saved text, kept on this computer; inserted at the
  * cursor or into the header or footer, aligned left, centred or right.
  */
-export function BlocksDialog({ view, base, onClose }: { view: EditorView; base: () => PrimeDocument; onClose(): void }) {
+export function BlocksDialog({ view, base, onClose, initial }: { view: EditorView; base: () => PrimeDocument; onClose(): void; initial?: "selection" }) {
   const [saved, setSaved] = useState<SavedBlock[]>();
-  const [making, setMaking] = useState<Maker | "selection">();
+  const [making, setMaking] = useState<Maker | "selection" | undefined>(initial);
   const [place, setPlace] = useState<PartPlace>("cursor");
   const [align, setAlign] = useState<PartAlign>("left");
   const selection = useMemo(() => partFromSelection(base)(view.state), [view, base]);

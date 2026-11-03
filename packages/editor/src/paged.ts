@@ -7,7 +7,7 @@
 import { type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
-import { Plugin, PluginKey } from "prosemirror-state";
+import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { fromProseMirror } from "./convert.js";
 import { inkSvg } from "./ink.js";
@@ -52,6 +52,16 @@ interface PagedState {
 }
 
 export const paginationKey = new PluginKey<PagedState>("pagination");
+
+/** The page a position is on, as the pages are drawn (1 before the first page break). */
+export function pageAt(state: EditorState, pos = state.selection.head): number {
+  let page = 1;
+  for (const d of paginationKey.getState(state)?.decorations.find(0, pos) ?? []) {
+    const p = (d.spec as { page?: number }).page;
+    if (p && p > page && d.from <= pos) page = p;
+  }
+  return page;
+}
 
 function gap(page: number, inline: boolean): () => HTMLElement {
   return () => {
@@ -184,9 +194,9 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
   for (const s of starts) {
     if (s.kind === "row") {
       const row = doc.nodeAt(s.pos);
-      if (row) out.push(Decoration.node(s.pos, s.pos + row.nodeSize, { class: "pw-page-row", "data-page": String(s.page) }));
+      if (row) out.push(Decoration.node(s.pos, s.pos + row.nodeSize, { class: "pw-page-row", "data-page": String(s.page) }, { page: s.page }));
     } else {
-      out.push(Decoration.widget(s.pos, gap(s.page, s.kind === "inline"), { side: -1, key: `gap-${s.page}-${s.kind}` }));
+      out.push(Decoration.widget(s.pos, gap(s.page, s.kind === "inline"), { side: -1, key: `gap-${s.page}-${s.kind}`, page: s.page }));
     }
   }
   return DecorationSet.create(doc, out);

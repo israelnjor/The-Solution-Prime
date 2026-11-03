@@ -639,3 +639,140 @@ export function autoCorrectSelfTest(view: import("prosemirror-view").EditorView)
     console.log("[selftest] align", JSON.stringify({ typed, backspaced, entered, list, listText, undone, undone2 }));
   })();
 }
+
+/**
+ * Wave 1, through the UI: grow font, change case, clear formatting, format painter, right-click menu →
+ * Font dialog, Symbol, Date & Time (as a field), Show ¶, the ruler (adds a tab stop), tabs at their stop,
+ * Page X of Y, Paste Options (keep text only), the Paragraph dialog's line and page breaks.
+ */
+export function wave1SelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent?.trim() ?? "").startsWith(label) || b.getAttribute("aria-label") === label)?.click();
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const type = (el: HTMLInputElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    const { toggleRun } = await import("@prime/editor");
+    await wait(1500);
+    // The first top-level paragraph after the title with some text: select its first word.
+    let at = -1;
+    view.state.doc.forEach((n, pos) => { if (at < 0 && n.type.name === "paragraph" && n.textContent.length > 20 && pos > 0) at = pos; });
+    const para = () => view.state.doc.nodeAt(at)!;
+    const runOf = (n: import("prosemirror-model").Node | null | undefined) => n?.marks.find((m) => m.type.name === "run")?.attrs.props ?? {};
+    const word = para().textContent.indexOf(" ");
+    const selectWord = () => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 1, at + 1 + word)));
+    selectWord();
+    view.focus();
+    click("Grow Font"); await wait(100);
+    out.grow = runOf(view.state.doc.nodeAt(at + 1)).size;
+    choose(document.querySelector<HTMLSelectElement>(".case-select"), "upper"); await wait(100);
+    out.upper = view.state.doc.textBetween(at + 1, at + 1 + word);
+    click("Clear All Formatting"); await wait(100);
+    out.cleared = JSON.stringify(runOf(view.state.doc.nodeAt(at + 1)));
+
+    // Format painter: bold the first word, copy it, brush it onto the next words.
+    selectWord();
+    toggleRun("bold")(view.state, view.dispatch);
+    click("🖌 Format Painter"); await wait(100);
+    const p2 = para().textContent.indexOf(" ", word + 1);
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 2 + word, at + 1 + p2)));
+    view.dom.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await wait(100);
+    out.painted = !!runOf(view.state.doc.nodeAt(at + 2 + word)).bold;
+    out.painterOff = !document.querySelector(".canvas.painting");
+
+    // Right-click → Font… → 16 pt.
+    const target = view.nodeDOM(at) as HTMLElement;
+    const r = target.getBoundingClientRect();
+    selectWord();
+    target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+    await wait(200);
+    out.menu = [...document.querySelectorAll(".context-menu button span")].map((s) => s.textContent).slice(0, 9);
+    click("Font…", document.querySelector(".context-menu")!); await wait(200);
+    type(document.querySelector<HTMLInputElement>(".font-dialog input[type=number]"), "16");
+    await wait(50);
+    click("OK", document.querySelector(".font-dialog")!); await wait(150);
+    out.fontDialog = runOf(view.state.doc.nodeAt(at + 1)).size;
+
+    // Symbol: ₵ at the end of the paragraph.
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + para().nodeSize - 1)));
+    click("Insert"); await wait(150);
+    click("Symbol"); await wait(200);
+    click("Currency", document.querySelector(".symbol-dialog")!); await wait(100);
+    [...document.querySelectorAll<HTMLButtonElement>(".symbol-dialog .symbol-grid button")].find((b) => b.textContent === "₵")?.click();
+    click("Close", document.querySelector(".symbol-dialog")!); await wait(100);
+    out.symbol = para().textContent.endsWith("₵");
+
+    // Date & Time, as a field.
+    click("Date & Time"); await wait(200);
+    const auto = document.querySelector<HTMLInputElement>(".datetime-dialog input[type=checkbox]");
+    if (auto && !auto.checked) auto.click();
+    await wait(50);
+    click("OK", document.querySelector(".datetime-dialog")!); await wait(150);
+    let field = "";
+    para().forEach((n) => { const f = n.marks.find((m) => m.type.name === "field"); if (f) field = `${f.attrs.instr.trim()} = ${n.text}`; });
+    out.dateField = field;
+
+    // Show ¶.
+    click("Home"); await wait(100);
+    click("Show formatting marks"); await wait(400);
+    out.marks = { on: view.dom.classList.contains("pw-show-marks"), spaces: document.querySelectorAll(".pw-space").length };
+    click("Show formatting marks"); await wait(100);
+
+    // Ruler: turn it on, click at 5 cm: a left tab stop for this paragraph.
+    click("View"); await wait(150);
+    const rulerBox = [...document.querySelectorAll<HTMLInputElement>(".toolbar input[type=checkbox]")][0];
+    if (rulerBox && !rulerBox.checked) rulerBox.click();
+    await wait(300);
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 1)));
+    await wait(100);
+    const text = document.querySelector<HTMLElement>(".ruler-text");
+    const column = view.dom.getBoundingClientRect();
+    const section = view.state.doc.attrs.section?.props ?? {};
+    const scale = column.width / ((section.pageWidth ?? 612) - (section.margins?.left ?? 72) - (section.margins?.right ?? 72));
+    const cm = 72 / 2.54;
+    text?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: column.left + 5 * cm * scale, clientY: text.getBoundingClientRect().top + 5 }));
+    await wait(150);
+    out.rulerTab = (para().attrs.props.extra ?? []).find((e: { name: string }) => e.name === "w:tabs")?.xml;
+    out.rulerMarkers = document.querySelectorAll(".ruler-marker").length;
+
+    // A tab at the start of the paragraph now ends at 5 cm on screen.
+    view.dispatch(view.state.tr.insert(at + 1, view.state.schema.nodes.tab.create()));
+    await wait(200);
+    const tabEl = (view.nodeDOM(at) as HTMLElement).querySelector<HTMLElement>(".pw-tab");
+    out.tabEndsAtCm = tabEl ? +((tabEl.getBoundingClientRect().right - column.left) / scale / cm).toFixed(2) : null;
+
+    // Page X of Y.
+    out.status = [...document.querySelectorAll(".status span")].map((s) => s.textContent).find((t) => t?.startsWith("Page"));
+
+    // Paste formatted text, then Keep Text Only from the Paste Options button.
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 2)));
+    view.focus();
+    view.pasteHTML("<p><b style='color:red'>Pasted bold</b> words</p>");
+    await wait(200);
+    out.pasteButton = !!document.querySelector(".paste-options");
+    click("Paste Options"); await wait(100);
+    click("Keep Text Only", document.querySelector(".paste-menu") ?? document); await wait(150);
+    let pastedBold = false;
+    view.state.doc.nodesBetween(at, at + 40, (n) => { if (n.isText && n.text?.includes("Pasted") && runOf(n).bold) pastedBold = true; });
+    out.pasteTextOnly = !pastedBold && para().textContent.includes("Pasted bold words");
+
+    // Paragraph dialog: Keep with next.
+    click("Home"); await wait(100);
+    click("Paragraph settings"); await wait(200);
+    [...document.querySelectorAll<HTMLLabelElement>(".para-breaks label")].find((l) => l.textContent?.includes("Keep with next"))?.querySelector("input")?.click();
+    await wait(50);
+    click("OK", document.querySelector(".para-dialog")!); await wait(150);
+    out.keepNext = !!para().attrs.props.keepNext;
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}

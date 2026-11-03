@@ -52,6 +52,8 @@ export interface RunProps {
   underline?: Attrs;
   shading?: Attrs;
   vertAlign?: "superscript" | "subscript" | "baseline";
+  /** Extra space after each character, in pt (negative: condensed). w:spacing. */
+  charSpacing?: number;
   extra?: Preserved[];
 }
 
