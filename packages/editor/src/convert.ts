@@ -61,7 +61,7 @@ function inlines(items: Inline[], schema: Schema, marks: readonly Mark[]): Node[
       case "image":
         out.push(n.image.create({
           props: i.props ?? {}, imageId: i.imageId, width: i.width, height: i.height,
-          name: i.name ?? null, description: i.description ?? null,
+          name: i.name ?? null, description: i.description ?? null, float: i.float ?? null,
         }, null, marks));
         break;
       case "fieldChar": out.push(n.field_char.create({ props: i.props ?? {}, kind: i.kind }, null, marks)); break;
@@ -184,6 +184,7 @@ function leaf(node: Node): Inline {
       return {
         type: "image", imageId: a.imageId, width: a.width, height: a.height,
         ...(a.name !== null ? { name: a.name } : {}), ...(a.description !== null ? { description: a.description } : {}),
+        ...(a.float ? { float: a.float } : {}),
         ...props(a.props),
       };
     case "field_char": return { type: "fieldChar", kind: a.kind, ...props(a.props) };

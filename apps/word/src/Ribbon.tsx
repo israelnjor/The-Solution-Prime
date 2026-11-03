@@ -2,7 +2,7 @@ import {
   addColumn, addRow, changeLevel, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
   setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
-  setLineSpacing, acceptOrReject, gotoChange,
+  setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
@@ -22,7 +22,7 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "home" | "insert" | "layout" | "review" | "table";
+type Tab = "home" | "insert" | "layout" | "review" | "table" | "picture";
 /** Word's keys for the tabs: Alt+H, Alt+N, Alt+P, Alt+R. */
 const TAB_KEYS: Record<string, string> = { home: "H", insert: "N", layout: "P", review: "R" };
 export type Markup = "all" | "none" | "original";
@@ -57,6 +57,11 @@ export interface RibbonProps {
   onNewComment(): void;
   onHome(): void;
   onConvertPdf(): void;
+  onEditPicture(): void;
+  onLetterhead(): void;
+  onSaveTemplate(): void;
+  onSignature(): void;
+  onBlocks(): void;
 }
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
@@ -80,7 +85,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -112,7 +117,13 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
   const effective = state ? resolver.run(currentStyle, runAtSelection(state)) : undefined;
   const fonts = [...new Set([...FONTS, ...(effective ? [effective.font] : [])])].sort();
   const tableActive = !!state && inTable(state);
-  const activeTab = tab === "table" && !tableActive ? "home" : tab;
+  const picture = state ? pictureAt(state) : undefined;
+  const activeTab = (tab === "table" && !tableActive) || (tab === "picture" && !picture) ? "home" : tab;
+  // Selecting a picture shows its tab (as Word does); leaving it returns to where you were.
+  const pictureKey = picture ? `${picture.pos}` : "";
+  useEffect(() => {
+    if (pictureKey) setTab((t) => (t === "picture" ? t : "picture"));
+  }, [pictureKey]);
 
   const openLink = () => {
     setLinkUrl((state && linkAt(state)) ?? "https://");
@@ -135,6 +146,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
         {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table</button>}
+        {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>Picture</button>}
         <span className="spacer" />
         <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
         <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")} title="One continuous column">Web Layout</button>
@@ -150,6 +162,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onConvertPdf} title="Turn a PDF into an editable Word document">Convert PDF</button>
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
               <button onClick={() => onSave(true)} title="Save as a new file">Save As</button>
+              <button onClick={onSaveTemplate} title="Save this document as a template, to start new documents from">Save as Template</button>
               <button onClick={onExportPdf} title="Export as PDF">Export PDF</button>
               <button onClick={onPrint} title="Print (Ctrl+P)">Print</button>
             </div>
@@ -248,6 +261,9 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </div>
             <div className="group">
               <button onClick={onHeaderFooter} title="Edit the header and footer, add page numbers">Header &amp; Footer</button>
+              <button onClick={onLetterhead} title="Design a letterhead: logo, name, address, contacts">Letterhead…</button>
+              <button onClick={onSignature} title="Insert your signature, or make one from a photo, by drawing or typing">Signature…</button>
+              <button onClick={onBlocks} title="Signature blocks, addresses, stamps and saved text: insert left, centre or right">Blocks…</button>
             </div>
             <div className="group popover-anchor">
               <button onClick={openLink} title="Insert or edit a link (Ctrl+K)">Link</button>
@@ -339,6 +355,33 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <option value="none">No Markup (final)</option>
                 <option value="original">Original</option>
               </select>
+            </div>
+          </>
+        )}
+
+        {activeTab === "picture" && picture && (
+          <>
+            <div className="group">
+              <label className="field">Wrap text{" "}
+                <select value={pictureWrap(picture.node)} onChange={(e) => run(setPictureWrap(e.target.value as PictureWrap))()}
+                  title="How the picture sits with the text" aria-label="Wrap text">
+                  {!picture.kept && <option value="inline">In line with text</option>}
+                  <option value="square">Square</option>
+                  <option value="tight">Tight</option>
+                  <option value="topAndBottom">Top and bottom</option>
+                  <option value="behind">Behind text</option>
+                  <option value="inFront">In front of text</option>
+                </select>
+              </label>
+              {pictureWrap(picture.node) !== "inline" && <span className="hint">Drag the picture to move it; drag a corner to resize.</span>}
+            </div>
+            <div className="group">
+              <button onClick={onEditPicture} disabled={picture.kept} title={picture.kept ? "Pictures with effects from Word cannot be cropped yet" : "Crop and rotate"}>Crop &amp; Rotate…</button>
+              <button disabled={picture.kept} onClick={() => {
+                const text = window.prompt("Alternative text (read aloud by screen readers):", picture.node.attrs.description ?? "");
+                if (text !== null) run(setAltText(text))();
+              }}>Alt Text…</button>
+              <button onClick={() => v && (v.dispatch(v.state.tr.deleteSelection()), v.focus())}>Delete</button>
             </div>
           </>
         )}

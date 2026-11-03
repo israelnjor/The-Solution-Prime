@@ -107,6 +107,20 @@ function imageUrl(base: PrimeDocument, part: string): string | undefined {
   return url;
 }
 
+/** Object URLs for image resources (pictures inserted in Prime Word or read as ordinary pictures). */
+function resourceUrl(base: PrimeDocument, id: string): string | undefined {
+  let urls = imageUrls.get(base);
+  if (!urls) imageUrls.set(base, (urls = new Map()));
+  const key = `resource:${id}`;
+  let url = urls.get(key);
+  const res = base.images[id];
+  if (url === undefined && res) {
+    url = URL.createObjectURL(new Blob([Uint8Array.from(atob(res.data), (c) => c.charCodeAt(0))], { type: res.contentType }));
+    urls.set(key, url);
+  }
+  return url;
+}
+
 /**
  * A floating picture or text box, drawn inside its anchor paragraph where the layout put it, so it
  * moves with its text on screen. `left` is the paragraph's left indent (the layer's origin).
@@ -127,7 +141,7 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
       h.dataset.handle = corner;
       el.appendChild(h);
     }
-    const src = f.image?.part ? imageUrl(base, f.image.part) : undefined;
+    const src = f.image?.part ? imageUrl(base, f.image.part) : f.image?.imageId ? resourceUrl(base, f.image.imageId) : undefined;
     if (src) {
       const img = document.createElement("img");
       img.src = src;

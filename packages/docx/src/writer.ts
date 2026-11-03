@@ -1,6 +1,6 @@
 /** Prime Document Model -> DOCX. Emits clean OOXML in schema order; preserved content is written back verbatim. */
 import { zipSync } from "fflate";
-import type { Block, HeaderFooterKind, Inline, Paragraph, PrimeDocument, Relationship, Section, Story, Table } from "@prime/pdm";
+import type { Block, FloatInfo, FloatPosition, HeaderFooterKind, Inline, Paragraph, PrimeDocument, Relationship, Section, Story, Table } from "@prime/pdm";
 import { ContentType, EMU_PER_PT, RelType, twips } from "./ooxml.js";
 import { writeCellProps, writeParagraphProps, writeRowProps, writeRunProps, writeSectionProps, writeTableProps } from "./props.js";
 import { writeNumbering, writeStyles } from "./styles.js";
@@ -264,14 +264,38 @@ class Writer {
     const id = ++this.drawingId;
     const name = escAttr(img.name ?? `Picture ${id}`);
     const descr = img.description !== undefined ? ` descr="${escAttr(img.description)}"` : "";
-    return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>`
-      + `<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="${name}"${descr}/>`
+    const body = `<wp:extent cx="${cx}" cy="${cy}"/>`
+      + `<wp:effectExtent l="0" t="0" r="0" b="0"/>${img.float ? wrapXml(img.float) : ""}<wp:docPr id="${id}" name="${name}"${descr}/>`
       + `<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>`
       + `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>`
       + `<pic:nvPicPr><pic:cNvPr id="${id}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>`
       + `<pic:blipFill><a:blip r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
       + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>`
-      + `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+      + `</pic:pic></a:graphicData></a:graphic>`;
+    if (!img.float) return `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">${body}</wp:inline></w:drawing>`;
+    // A floating picture: positioned from its column and paragraph, with its wrapping.
+    const f = img.float;
+    const emu = (pt: number) => Math.round(pt * EMU_PER_PT);
+    const position = (axis: "H" | "V", p: FloatPosition) => `<wp:position${axis} relativeFrom="${p.from}">`
+      + (p.offset !== undefined || !p.align ? `<wp:posOffset>${emu(p.offset ?? 0)}</wp:posOffset>` : `<wp:align>${p.align}</wp:align>`)
+      + `</wp:position${axis}>`;
+    return `<w:drawing><wp:anchor distT="${emu(f.dist.top)}" distB="${emu(f.dist.bottom)}" distL="${emu(f.dist.left)}" distR="${emu(f.dist.right)}"`
+      + ` simplePos="0" relativeHeight="${251659264 + id}" behindDoc="${f.behind ? 1 : 0}" locked="0" layoutInCell="1" allowOverlap="1">`
+      + `<wp:simplePos x="0" y="0"/>${position("H", f.x)}${position("V", f.y)}${body}</wp:anchor></w:drawing>`;
+  }
+}
+
+/** The wrapping element of a floating picture (between wp:effectExtent and wp:docPr). */
+function wrapXml(f: FloatInfo): string {
+  const side = f.side ?? "bothSides";
+  const polygon = '<wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="0" y="21600"/><wp:lineTo x="21600" y="21600"/>'
+    + '<wp:lineTo x="21600" y="0"/><wp:lineTo x="0" y="0"/></wp:wrapPolygon>';
+  switch (f.wrap) {
+    case "square": return `<wp:wrapSquare wrapText="${side}"/>`;
+    case "tight": return `<wp:wrapTight wrapText="${side}">${polygon}</wp:wrapTight>`;
+    case "through": return `<wp:wrapThrough wrapText="${side}">${polygon}</wp:wrapThrough>`;
+    case "topAndBottom": return "<wp:wrapTopAndBottom/>";
+    default: return "<wp:wrapNone/>";
   }
 }
 

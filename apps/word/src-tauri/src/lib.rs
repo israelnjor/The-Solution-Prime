@@ -278,6 +278,56 @@ fn recovery_delete(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The personal library (templates, signatures, saved blocks): JSON entries in the app's data folder,
+/// one folder per kind. Kinds and ids are checked, so nothing is written outside that folder.
+fn library_file(app: &AppHandle, kind: &str, id: &str) -> Result<PathBuf, String> {
+    if !["templates", "signatures", "blocks"].contains(&kind) {
+        return Err("unknown library".into());
+    }
+    if id.is_empty() || id.len() > 80 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("bad library id".into());
+    }
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("library").join(kind);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join(format!("{id}.json")))
+}
+
+#[tauri::command]
+fn library_save(app: AppHandle, request: Request) -> Result<(), String> {
+    let path = library_file(&app, &header(&request, "x-kind")?, &header(&request, "x-id")?)?;
+    atomic_write(&path, raw_body(&request)?).map_err(|e| save_error(&e))
+}
+
+/// Ids in a library, newest first.
+#[tauri::command]
+fn library_list(app: AppHandle, kind: String) -> Result<Vec<String>, String> {
+    let dir = library_file(&app, &kind, "x")?.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut out: Vec<(String, std::time::SystemTime)> = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(id) = name.strip_suffix(".json") {
+            let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            out.push((id.to_string(), modified));
+        }
+    }
+    out.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(out.into_iter().map(|(id, _)| id).collect())
+}
+
+#[tauri::command]
+fn library_load(app: AppHandle, kind: String, id: String) -> Result<Response, String> {
+    fs::read(library_file(&app, &kind, &id)?).map(Response::new).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn library_delete(app: AppHandle, kind: String, id: String) -> Result<(), String> {
+    let path = library_file(&app, &kind, &id)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Writes a PDF to Prime Word's temporary folder and opens it in the default PDF viewer (to print).
 #[tauri::command]
 fn open_pdf(request: Request) -> Result<(), String> {
@@ -312,6 +362,10 @@ pub fn run() {
             recovery_list,
             recovery_load,
             recovery_delete,
+            library_save,
+            library_list,
+            library_load,
+            library_delete,
             open_pdf,
             fonts::font_lookup,
             fonts::font_bytes,

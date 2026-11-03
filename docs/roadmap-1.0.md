@@ -42,8 +42,9 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Read mode, outline, navigation pane, ruler, multiple pages, dark mode | ❌ |
 | **Tables** | Insert, add/delete rows and columns, Tab navigation | ✅ |
 | | Merge/split cells, borders & shading, table styles, cell alignment, column resize, header row repeat, sort, text↔table | ❌ |
-| **Pictures** | Insert, inline/floating display | ✅ |
-| | Crop, rotate, wrap options, alt text, picture styles | ❌ |
+| **Pictures** | Insert, inline/floating display, wrap options, drag anywhere, crop, rotate, alt text | ✅ |
+| | Picture styles, free rotation, adjustments (brightness, colour) | ❌ |
+| **Make it yours** | My templates, letterhead designer, signatures (photo/scan clean-up, draw, type), blocks (signature blocks, addresses, stamps, saved text; left/centre/right; cursor, header or footer), drag paragraphs (handle, Alt+Shift+↑/↓) | ✅ |
 | **Everyday behaviour** | Undo/redo, keyboard shortcuts (core), accessibility basics | ✅ |
 | | Right-click menu, AutoCorrect, smart quotes, auto-lists ("1. " / "- "), status bar "Page X of Y" | ❌ |
 
@@ -53,11 +54,17 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 - **Offline and private**: nothing leaves the computer; no account, no subscription.
 - **Fast on long documents** (145 pages: 28 ms per keystroke) and a small install (~3 MB).
 - **Faithful to Word's layout**: same pages, same line positions (measured against Word itself).
+- **Make it yours**: design a letterhead in a minute; turn a phone photo of a signature into a clean
+  e-signature; keep signature blocks, addresses and company stamps and insert them left, centre or
+  right with one click — Word has no letterhead designer, no signature clean-up and no stamp maker.
 - **Ambient AI** (planned, after 1.0): help that works offline where possible.
 
 ## Roadmap to ~75% (in order)
 
 Each wave is checked against Word (layout comparison, round trip, Word reopening our files).
+
+0. **Make it yours** ✅ (2026-11-03) — pictures that move freely (wrap, drag, crop, rotate, alt
+   text); drag paragraphs; my templates and the letterhead designer; signatures; blocks and stamps.
 
 1. **Feels like Word** — right-click menu; format painter; clear formatting; change case; grow/shrink
    font; superscript/subscript; paste options; show ¶ marks; ruler (indents, tab stops); AutoCorrect,
@@ -73,8 +80,7 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
 5. **Review, view and files** — record tracked changes, compare documents, navigation pane, read
    mode, outline view, multiple pages, print dialog, document properties, password protection,
    .doc/.rtf/.odt/.txt open and save, thesaurus, read aloud, grammar (basic).
-6. **Objects** — shapes and text boxes (insert and edit), picture crop/rotate/wrap/alt text, simple
-   charts.
+6. **Objects** — shapes and text boxes (insert and edit), simple charts.
 7. **Release** — text recognition for scanned PDFs, code signing, automatic updates, About/version,
    user guide.
 

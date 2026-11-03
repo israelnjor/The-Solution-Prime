@@ -2,9 +2,9 @@
  * Moving and resizing floating pictures and text boxes. The object stays the XML Word wrote; only its
  * position (wp:positionH / wp:positionV) and size (wp:extent and the shape's a:ext) are rewritten.
  */
-import type { FloatInfo } from "@prime/pdm";
+import type { FloatInfo, PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
-import { type Command, Plugin } from "prosemirror-state";
+import { type Command, type EditorState, NodeSelection, Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
 const EMU = 12700;
@@ -26,7 +26,8 @@ export function floatAt(doc: Node, paraPos: number, index: number): { pos: numbe
   let found: { pos: number; node: Node } | undefined;
   para.descendants((node, pos) => {
     if (found) return false;
-    if (node.type.name === "run_preserved" && node.attrs.float && n++ === index) found = { pos: paraPos + 1 + pos, node };
+    // Kept floating objects (from Word files) and floating pictures, in document order (as the layout counts them).
+    if ((node.type.name === "run_preserved" || node.type.name === "image") && node.attrs.float && n++ === index) found = { pos: paraPos + 1 + pos, node };
     return true;
   });
   return found;
@@ -54,6 +55,14 @@ export function setFloatBox(paraPos: number, index: number, box: FloatBox): Comm
     if (!target) return false;
     if (dispatch) {
       const float = target.node.attrs.float as FloatInfo;
+      if (target.node.type.name === "image") {
+        // A picture of our own: its position and size are attributes.
+        dispatch(state.tr.setNodeMarkup(target.pos, undefined, {
+          ...target.node.attrs, width: box.width, height: box.height,
+          float: { ...float, x: { from: "column", offset: box.x }, y: { from: "paragraph", offset: box.y } },
+        }));
+        return true;
+      }
       // A text box that grows with its text keeps doing so: only its width is set.
       const keepHeight = float.kind === "textbox" && (float.autoHeight || float.height < 1);
       const preserved = target.node.attrs.preserved as { name: string; xml: string };
@@ -109,6 +118,10 @@ export function floatEditing(): Plugin {
           if (!el) { select(undefined); return false; }
           event.preventDefault();
           select(el);
+          // Also select it in the document, so the ribbon shows the picture's options.
+          const where = locate(view, el);
+          const node = where && floatAt(view.state.doc, where.paraPos, where.index);
+          if (node) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, node.pos)));
           const handle = target.dataset.handle; // "nw" | "ne" | "sw" | "se" when resizing
           const start = { x: event.clientX, y: event.clientY };
           const box: FloatBox = { x: Number(el.dataset.x), y: Number(el.dataset.y), width: Number(el.dataset.w), height: Number(el.dataset.h) };
@@ -162,4 +175,106 @@ export function floatEditing(): Plugin {
       },
     },
   });
+}
+
+// --- pictures: wrapping, replacing, alt text ---------------------------------------------------
+
+/** How a picture sits with the text (Word's Wrap Text). */
+export type PictureWrap = "inline" | "square" | "tight" | "topAndBottom" | "behind" | "inFront";
+
+/** The selected picture (an ordinary picture, or a floating object kept from a Word file), if any. */
+export function pictureAt(state: EditorState): { pos: number; node: Node; kept: boolean } | undefined {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection)) return undefined;
+  const node = sel.node;
+  if (node.type.name === "image") return { pos: sel.from, node, kept: false };
+  if (node.type.name === "run_preserved" && node.attrs.float) return { pos: sel.from, node, kept: true };
+  return undefined;
+}
+
+/** A picture's current wrap. */
+export function pictureWrap(node: Node): PictureWrap {
+  const f = node.attrs.float as FloatInfo | null;
+  if (!f) return "inline";
+  if (f.wrap === "none") return f.behind ? "behind" : "inFront";
+  return f.wrap === "through" ? "tight" : f.wrap;
+}
+
+const WRAP_ELEMENT = /<wp:wrap(None|Square|Tight|Through|TopAndBottom)\b[^>]*?(\/>|>[\s\S]*?<\/wp:wrap\1>)/;
+
+/** Wrap XML for a kept floating object (its wp:wrap* element and behindDoc flag). */
+function withWrap(xml: string, wrap: PictureWrap): string {
+  const polygon = '<wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="0" y="21600"/><wp:lineTo x="21600" y="21600"/><wp:lineTo x="21600" y="0"/><wp:lineTo x="0" y="0"/></wp:wrapPolygon>';
+  const element = wrap === "square" ? '<wp:wrapSquare wrapText="bothSides"/>'
+    : wrap === "tight" ? `<wp:wrapTight wrapText="bothSides">${polygon}</wp:wrapTight>`
+    : wrap === "topAndBottom" ? "<wp:wrapTopAndBottom/>" : "<wp:wrapNone/>";
+  return xml.replace(WRAP_ELEMENT, element).replace(/(<wp:anchor\b[^>]*?)behindDoc="[01]"/, `$1behindDoc="${wrap === "behind" ? 1 : 0}"`);
+}
+
+/**
+ * Changes how a picture sits with the text. In line → floating: it floats where it was (at the left of
+ * its column, just below its paragraph's first line), and can then be dragged anywhere. Floating → in
+ * line works for pictures of our own; kept objects from Word files stay floating.
+ */
+export function setPictureWrap(wrap: PictureWrap): Command {
+  return (state, dispatch) => {
+    const pic = pictureAt(state);
+    if (!pic || (pic.kept && wrap === "inline")) return false;
+    if (!dispatch) return true;
+    const old = pic.node.attrs.float as FloatInfo | null;
+    const float: FloatInfo | null = wrap === "inline" ? null : {
+      kind: "picture",
+      width: pic.node.attrs.width ?? old?.width ?? 0,
+      height: pic.node.attrs.height ?? old?.height ?? 0,
+      x: old?.x ?? { from: "column", offset: 0 },
+      y: old?.y ?? { from: "paragraph", offset: 0 },
+      wrap: wrap === "behind" || wrap === "inFront" ? "none" : wrap,
+      side: "bothSides",
+      ...(wrap === "behind" ? { behind: true } : {}),
+      // Word's default distance from the text: 0.125" at the sides.
+      dist: old?.dist ?? { top: 0, bottom: 0, left: 9, right: 9 },
+      ...(old?.imagePart ? { imagePart: old.imagePart } : {}),
+    };
+    const attrs = pic.kept
+      ? { ...pic.node.attrs, float: { ...old, ...float }, preserved: { ...pic.node.attrs.preserved, xml: withWrap(pic.node.attrs.preserved.xml, wrap) } }
+      : { ...pic.node.attrs, float };
+    const tr = state.tr.setNodeMarkup(pic.pos, undefined, attrs);
+    dispatch(tr.setSelection(NodeSelection.create(tr.doc, pic.pos)));
+    return true;
+  };
+}
+
+/**
+ * Replaces a picture's image (after cropping or rotating it): a new image resource, at the given size
+ * in pt. The old image stays in the document only if something else still uses it.
+ */
+export function replacePicture(base: () => PrimeDocument, image: { data: string; contentType: string; width: number; height: number }): Command {
+  return (state, dispatch) => {
+    const pic = pictureAt(state);
+    if (!pic || pic.kept) return false;
+    if (!dispatch) return true;
+    const doc = base();
+    const ext = image.contentType === "image/jpeg" ? "jpeg" : "png";
+    let n = 1;
+    while (doc.images[`word/media/prime-edit${n}.${ext}`]) n++;
+    const imageId = `word/media/prime-edit${n}.${ext}`;
+    doc.images[imageId] = { contentType: image.contentType, extension: ext, data: image.data };
+    const float = pic.node.attrs.float as FloatInfo | null;
+    const tr = state.tr.setNodeMarkup(pic.pos, undefined, {
+      ...pic.node.attrs, imageId, width: image.width, height: image.height,
+      float: float ? { ...float, width: image.width, height: image.height } : null,
+    });
+    dispatch(tr.setSelection(NodeSelection.create(tr.doc, pic.pos)));
+    return true;
+  };
+}
+
+/** Sets a picture's alternative text (read by screen readers; Word's Alt Text). */
+export function setAltText(text: string): Command {
+  return (state, dispatch) => {
+    const pic = pictureAt(state);
+    if (!pic || pic.kept) return false;
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pic.pos, undefined, { ...pic.node.attrs, description: text || null }));
+    return true;
+  };
 }

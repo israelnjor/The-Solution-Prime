@@ -2,7 +2,7 @@ import { readDocx, writeDocx } from "@prime/docx";
 import {
   blankDocument, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
-  wordCount, floatEditing, reviewPlugin,
+  wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap,
 } from "@prime/editor";
 import type { LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
@@ -13,7 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { baseKeymap, chainCommands } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
-import { type Command, EditorState } from "prosemirror-state";
+import { type Command, EditorState, NodeSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { Profiler, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { FindPanel } from "./FindPanel";
@@ -32,6 +32,11 @@ import { CommentsPane } from "./CommentsPane";
 import { Home } from "./Home";
 import type { ConversionResult } from "@prime/pdf-import";
 import { PdfConverter } from "./PdfConverter";
+import { PictureEditor } from "./PictureEditor";
+import { LetterheadDesigner } from "./LetterheadDesigner";
+import { type SavedSignature, SignatureDialog } from "./SignatureDialog";
+import { BlocksDialog } from "./BlocksDialog";
+import { saveTemplate } from "./MyTemplates";
 
 /** Raised by Ctrl+P in the editor. */
 const PRINT_EVENT = "prime-word:print";
@@ -82,6 +87,12 @@ export function App() {
   const [editingHeaderFooter, setEditingHeaderFooter] = useState(false);
   const [editingParagraph, setEditingParagraph] = useState(false);
   const [pickingTemplate, setPickingTemplate] = useState(false);
+  const [editingPicture, setEditingPicture] = useState(false);
+  const [designingLetterhead, setDesigningLetterhead] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const [choosingBlock, setChoosingBlock] = useState(false);
+  // Bumped when a template is saved, so the template lists reload.
+  const [templatesVersion, setTemplatesVersion] = useState(0);
   // PDF → Word: the PDF being converted, then what the converted document came from.
   const [converter, setConverter] = useState<{ initial?: { bytes: Uint8Array; name: string } }>();
   const [conversion, setConversion] = useState<{ from: string; warnings: string[] }>();
@@ -176,6 +187,8 @@ export function App() {
           "Mod-k": command(() => window.dispatchEvent(new Event(LINK_EVENT))),
           "Mod-p": command(() => window.dispatchEvent(new Event(PRINT_EVENT))),
           "Mod-Enter": insertPageBreak,
+          // Word's "move paragraph up / down".
+          "Alt-Shift-ArrowUp": moveBlock(-1), "Alt-Shift-ArrowDown": moveBlock(1),
           // Tab moves between table cells, or changes a list item's level.
           Tab: chainCommands(moveCell(1), changeLevel(1)),
           "Shift-Tab": chainCommands(moveCell(-1), changeLevel(-1)),
@@ -187,6 +200,7 @@ export function App() {
         findPlugin(),
         pastePlugin(() => fileRef.current.base),
         floatEditing(),
+        blockHandle(),
         reviewPlugin(),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
@@ -280,6 +294,24 @@ export function App() {
         text: document.querySelector(".ProseMirror")?.textContent?.slice(0, 160),
       })}`), 3000);
     }
+  };
+
+  /**
+   * A saved signature at the cursor: a floating picture in front of the text (about 150pt wide),
+   * selected, so it can be dragged onto the signature line at once.
+   */
+  const insertSignature = (s: SavedSignature) => {
+    const v2 = view.current;
+    if (!v2) return;
+    const width = 150 * (96 / 72); // insertImage takes pixels at 96 dpi
+    insertImage(() => fileRef.current.base, {
+      data: s.data.png, contentType: "image/png", width, height: (width / s.data.width) * s.data.height, name: s.name,
+    })(v2.state, v2.dispatch);
+    const at = v2.state.selection.from - 1;
+    if (v2.state.doc.nodeAt(at)?.type.name !== "image") return;
+    v2.dispatch(v2.state.tr.setSelection(NodeSelection.create(v2.state.doc, at)));
+    setPictureWrap("inFront")(v2.state, v2.dispatch);
+    v2.focus();
   };
 
   /** Saves a converted PDF straight to a .docx, without opening it. */
@@ -414,7 +446,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -426,6 +458,12 @@ export function App() {
       if (test === "floatdrag") floatDragSelfTest();
       if (test === "review") reviewSelfTest(v);
       if (test === "keyboard") keyboardSelfTest();
+      if (test === "picture") pictureSelfTest(v);
+      if (test === "rotate") rotateSelfTest(v);
+      if (test === "dragblock") dragBlockSelfTest(v);
+      if (test === "letterhead") letterheadSelfTest();
+      if (test === "signature") signatureSelfTest(v);
+      if (test === "blocks") blocksSelfTest(v);
       if (test === "lines" && measurerRef.current) linesSelfTest(v, () => fileRef.current.base, measurerRef.current);
     });
   }, [layout, layoutOf, file.base]);
@@ -496,7 +534,18 @@ export function App() {
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
         onMode={(m) => { setMode(m); if (m === "web") setLayout(undefined); }}
-        markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)} onConvertPdf={() => setConverter({})}
+        markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)} onConvertPdf={() => setConverter({})} onEditPicture={() => setEditingPicture(true)}
+        onLetterhead={() => setDesigningLetterhead(true)}
+        onSignature={() => setSigning(true)}
+        onBlocks={() => setChoosingBlock(true)}
+        onSaveTemplate={() => {
+          if (!v) return;
+          const name = window.prompt("Save as a template named:", fileRef.current.name.replace(/\.docx$/i, ""));
+          if (!name?.trim()) return;
+          void saveTemplate(fromProseMirror(v.state.doc, fileRef.current.base), name.trim())
+            .then(() => { setTemplatesVersion((n) => n + 1); flash(`"${name.trim()}" saved to My templates`); })
+            .catch((e) => alert(`Prime Word could not save the template:\n${(e as Error).message}`));
+        }}
         onComments={() => setComments((c) => (c === "closed" ? "open" : "closed"))}
         onNewComment={() => {
           if (!v || v.state.selection.empty) { flash("Select the text you want to comment on."); return; }
@@ -584,6 +633,15 @@ export function App() {
         <SpellMenu view={v} speller={speller.current} issue={spellMenu.issue} x={spellMenu.x} y={spellMenu.y}
           ignored={ignoredWords.current} onClose={() => setSpellMenu(undefined)} />
       )}
+      {editingPicture && v && <PictureEditor view={v} base={baseOf} onClose={() => setEditingPicture(false)} />}
+      {choosingBlock && view.current && <BlocksDialog view={view.current} base={() => fileRef.current.base} onClose={() => setChoosingBlock(false)} />}
+      {signing && <SignatureDialog onClose={() => setSigning(false)} onInsert={(s) => { setSigning(false); insertSignature(s); }} />}
+      {designingLetterhead && (
+        <LetterheadDesigner view={hasDocument && !home ? v ?? undefined : undefined} base={baseOf}
+          onNewDocument={(doc, name) => { setDesigningLetterhead(false); void newDocument({ id: "letterhead", name: name.replace(/\.docx$/, ""), description: "", create: () => doc }); }}
+          onSaved={() => { setDesigningLetterhead(false); setTemplatesVersion((n) => n + 1); flash("Letterhead saved to My templates"); }}
+          onClose={() => setDesigningLetterhead(false)} />
+      )}
       {converter && (
         <PdfConverter measurer={() => measurerRef.current ?? new CanvasMeasurer()} initial={converter.initial}
           onOpenInEditor={(r, n) => void openConverted(r, n)} onSave={(r, n) => void saveConverted(r, n)}
@@ -592,10 +650,11 @@ export function App() {
       {home && (
         <Home recovery={recovery} onPick={(t) => void newDocument(t)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)}
           onRestore={(s) => void restore(s)} onDiscard={(s) => void discardRecovery(s)}
-          {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})} />
+          {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})}
+          onLetterhead={() => setDesigningLetterhead(true)} templatesVersion={templatesVersion} />
       )}
       {pickingTemplate && (
-        <TemplatePicker onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />
+        <TemplatePicker templatesVersion={templatesVersion} onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />
       )}
       {editingParagraph && v && <ParagraphDialog view={v} doc={file.base} onClose={() => setEditingParagraph(false)} />}
       {editingHeaderFooter && v && measurerRef.current && (

@@ -5,7 +5,7 @@
 import { fromProseMirror, timed } from "@prime/editor";
 import { layoutDocument, type Measurer } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
-import { TextSelection } from "prosemirror-state";
+import { NodeSelection, TextSelection } from "prosemirror-state";
 import * as pmView from "prosemirror-view";
 import type { EditorView } from "prosemirror-view";
 import type { Slice } from "prosemirror-model";
@@ -373,4 +373,226 @@ export function keyboardSelfTest() {
     steps.push(`buttons without a readable name: ${unnamed.map((b) => b.outerHTML.slice(0, 60)).join(" | ") || "none"}`);
     console.log("[selftest] align", JSON.stringify(steps));
   }, 1500);
+}
+
+/** Picture tab: select the first picture, choose Square wrap, drag it 80px right; log what happened. */
+export function pictureSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  void (async () => {
+    await wait(1500);
+    let pos = -1;
+    view.state.doc.descendants((n, p) => { if (pos < 0 && n.type.name === "image") pos = p; return pos < 0; });
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+    await wait(300);
+    const tab = [...document.querySelectorAll(".tabs button")].find((b) => b.textContent === "Picture")?.className;
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Wrap text"]');
+    if (select) {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, "square");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    await wait(2500);
+    const el = document.querySelector<HTMLElement>('.pw-float[data-kind="picture"]');
+    const before = el && ["x", "y", "w", "h"].map((k) => Math.round(Number(el.dataset[k]))).join(",");
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const fire = (type: string, target: EventTarget, x: number, y: number) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+      fire("mousedown", el, r.left + 10, r.top + 10);
+      fire("mousemove", window, r.left + 90, r.top + 10);
+      fire("mouseup", window, r.left + 90, r.top + 10);
+    }
+    await wait(2500);
+    const after = document.querySelector<HTMLElement>('.pw-float[data-kind="picture"]');
+    console.log("[selftest] align", JSON.stringify({ tab, wrap: select?.value, before, after: after && ["x", "y", "w", "h"].map((k) => Math.round(Number(after.dataset[k]))).join(",") }));
+  })();
+}
+
+/** Crop & Rotate: rotate the first picture a quarter turn; its width and height should swap. */
+export function rotateSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith(label))?.click();
+  void (async () => {
+    await wait(1500);
+    let pos = -1;
+    view.state.doc.descendants((n, p) => { if (pos < 0 && n.type.name === "image") pos = p; return pos < 0; });
+    const size = (p: number) => { const n = view.state.doc.nodeAt(p)!; return `${Math.round(n.attrs.width)}x${Math.round(n.attrs.height)} ${n.attrs.imageId}`; };
+    const before = size(pos);
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+    await wait(300);
+    click("Crop & Rotate");
+    await wait(800);
+    click("⟳ Rotate right");
+    await wait(300);
+    click("Apply");
+    await wait(500);
+    console.log("[selftest] align", JSON.stringify({ before, after: size(pos) }));
+  })();
+}
+
+/** Drag handle: hover the 2nd paragraph, drag its handle and drop below the 5th; log the order. */
+export function dragBlockSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const order = () => { const out: string[] = []; view.state.doc.forEach((n) => out.push(n.textContent.slice(0, 14))); return out.slice(0, 6); };
+  void (async () => {
+    await wait(2500);
+    const before = order();
+    const blocks = [...view.dom.children].filter((el) => el.tagName === "P" || el.tagName === "H1") as HTMLElement[];
+    const source = blocks[1].getBoundingClientRect();
+    view.dom.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: source.left + 20, clientY: source.top + 4 }));
+    await wait(100);
+    const handle = document.querySelector<HTMLElement>(".pw-block-handle");
+    const shown = handle?.style.display;
+    const dt = new DataTransfer();
+    handle?.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+    const target = blocks[4].getBoundingClientRect();
+    const at = { clientX: target.left + 4, clientY: target.bottom - 2 };
+    view.dom.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt, ...at }));
+    view.dom.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt, ...at }));
+    await wait(300);
+    console.log("[selftest] align", JSON.stringify({ shown, before, after: order() }));
+  })();
+}
+
+/** Letterhead: fill the designer and save it as a template (?save=0 leaves it open, for a screenshot). */
+export function letterheadSelfTest() {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith(label))?.click();
+  const type = (el: HTMLInputElement | HTMLTextAreaElement | null, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  void (async () => {
+    await wait(1200);
+    click("Insert");
+    await wait(200);
+    click("Letterhead");
+    await wait(400);
+    const form = document.querySelector(".letterhead-form")!;
+    const [name, tagline] = [...form.querySelectorAll("input")];
+    const [address, contacts] = [...form.querySelectorAll("textarea")];
+    type(name, "Accra Community Library");
+    type(tagline, "Knowledge for everyone");
+    type(address, "12 Independence Avenue\nAccra, Ghana");
+    type(contacts, "+233 30 222 0000\ninfo@acl.org.gh");
+    await wait(800);
+    if (new URLSearchParams(location.search).get("save") === "0") return console.log("[selftest] align", JSON.stringify({ filled: true }));
+    click("Save as template");
+    await wait(800);
+    const { listEntries } = await import("./library");
+    const list = await listEntries("templates");
+    console.log("[selftest] align", JSON.stringify({ templates: list.map((t) => t.name), preview: !!document.querySelector(".page-thumb") }));
+  })();
+}
+
+/**
+ * Signature: a synthetic phone photo (lighting falling off to one side, a shadow, blue pen) is cleaned,
+ * saved, and inserted from the Signature dialog as a floating picture in front of the text.
+ */
+export function signatureSelfTest(view: { state: { doc: { descendants(f: (n: { type: { name: string }; attrs: Record<string, unknown> }) => void): void } } }) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith(label))?.click();
+  void (async () => {
+    await wait(1200);
+    const { cleanSignature, toCanvas, pngOf } = await import("./signature");
+    const photo = document.createElement("canvas");
+    photo.width = 1200;
+    photo.height = 800;
+    const ctx = photo.getContext("2d")!;
+    const light = ctx.createLinearGradient(0, 0, 1200, 0);
+    light.addColorStop(0, "#f2efe8");
+    light.addColorStop(1, "#9c968c"); // paper in shadow at the right
+    ctx.fillStyle = light;
+    ctx.fillRect(0, 0, 1200, 800);
+    ctx.fillStyle = "rgba(0,0,0,0.18)"; // a hand's shadow
+    ctx.beginPath();
+    ctx.ellipse(950, 650, 260, 160, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#1b2f7a";
+    ctx.lineWidth = 7;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(250, 450);
+    for (let x = 250; x <= 1000; x += 10) ctx.lineTo(x, 420 + Math.sin(x / 35) * 60 - (x - 250) * 0.1);
+    ctx.stroke();
+    const { canvas, coverage } = cleanSignature(toCanvas(photo), { sensitivity: 0, colour: "original" });
+    const d = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let opaque = 0, partial = 0;
+    for (let i = 3; i < d.length; i += 4) { if (d[i] > 200) opaque++; else if (d[i] > 0) partial++; }
+    const corner = d[3]; // the cropped corner is paper: transparent
+    const png = pngOf(canvas);
+    const { saveEntry, listEntries, deleteEntry } = await import("./library");
+    for (const e of await listEntries("signatures")) if (e.name === "Selftest signature") await deleteEntry("signatures", e.id);
+    await saveEntry("signatures", { id: "selftest-signature", name: "Selftest signature", created: Date.now(), data: { png: png.data, width: png.width, height: png.height } });
+    click("Insert");
+    await wait(200);
+    click("Signature");
+    await wait(600);
+    [...document.querySelectorAll<HTMLButtonElement>(".sig-open")].find((b) => b.title === "Insert Selftest signature")?.click();
+    await wait(400);
+    const pictures: unknown[] = [];
+    view.state.doc.descendants((n) => { if (n.type.name === "image") pictures.push({ wrap: (n.attrs.float as { wrap?: string } | null)?.wrap, width: n.attrs.width }); });
+    await deleteEntry("signatures", "selftest-signature");
+    console.log("[selftest] align", JSON.stringify({ size: [canvas.width, canvas.height], coverage: +coverage.toFixed(3), opaque, partial, corner, pictures }));
+  })();
+}
+
+/**
+ * Blocks: make a stamp and an address in the Blocks dialog, then insert the address centred at the
+ * cursor and the stamp into the header, on the right (?save=0 stops at the stamp maker, for a screenshot).
+ */
+export function blocksSelfTest(view: { state: { doc: { attrs: Record<string, unknown>; forEach(f: (n: { type: { name: string }; attrs: Record<string, unknown>; textContent: string }) => void): void } } }) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith(label))?.click();
+  const type = (el: HTMLInputElement | HTMLTextAreaElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const dialog = () => document.querySelector(".hf-dialog.blocks")!;
+  const open = async () => { click("Insert"); await wait(200); click("Blocks"); await wait(500); };
+  void (async () => {
+    await wait(1200);
+    const { listEntries, deleteEntry } = await import("./library");
+    for (const e of await listEntries("blocks")) if (e.name.startsWith("Selftest")) await deleteEntry("blocks", e.id);
+    await open();
+    click("Stamp", dialog());
+    await wait(300);
+    type(dialog().querySelector<HTMLInputElement>("input:not([type])"), "Accra Community Library");
+    type(dialog().querySelector<HTMLInputElement>(".sig-name input"), "Selftest stamp");
+    await wait(400);
+    if (new URLSearchParams(location.search).get("save") === "0") return console.log("[selftest] align", JSON.stringify({ stamp: true }));
+    click("Save block", dialog());
+    await wait(600);
+    click("Address", dialog());
+    await wait(300);
+    type(dialog().querySelector("textarea"), "Accra Community Library\n12 Independence Avenue\nAccra, Ghana");
+    type(dialog().querySelector<HTMLInputElement>(".sig-name input"), "Selftest address");
+    await wait(300);
+    click("Save block", dialog());
+    await wait(800);
+    const cards = () => [...dialog().querySelectorAll<HTMLButtonElement>(".mine-open")];
+    const listed = cards().map((b) => b.title);
+    click("Centre", dialog());
+    await wait(200);
+    cards().find((b) => b.title === "Insert Selftest address")?.click();
+    await wait(400);
+    await open();
+    choose(dialog().querySelector("select"), "header");
+    click("Right", dialog());
+    await wait(200);
+    cards().find((b) => b.title === "Insert Selftest stamp")?.click();
+    await wait(600);
+    const centred: string[] = [];
+    view.state.doc.forEach((n) => { if (centred.length < 4 && (n.attrs.props as { align?: string })?.align === "center") centred.push(n.textContent); });
+    type Story = { blocks: { props: { align?: string }; content: { type: string; float?: unknown }[] }[] };
+    const h = (view.state.doc.attrs.section as { headers?: { default?: Story } } | null)?.headers?.default?.blocks;
+    const header = h?.map((b) => `${b.props.align}:${b.content.map((i) => (i.float ? "float" : i.type)).join(",")}`);
+    for (const e of await listEntries("blocks")) if (e.name.startsWith("Selftest")) await deleteEntry("blocks", e.id);
+    console.log("[selftest] align", JSON.stringify({ listed, centred, header }));
+  })();
 }

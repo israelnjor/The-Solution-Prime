@@ -1,9 +1,10 @@
 import { type Template, TEMPLATES } from "@prime/editor";
 import { isDesktop } from "./platform";
 import { RecentList } from "./RecentList";
+import { MyTemplates } from "./MyTemplates";
 
 /** File → New: pick a starting point. */
-export function TemplatePicker({ onPick, onOpenRecent, onClose }: { onPick(t: Template): void; onOpenRecent(path: string): void; onClose(): void }) {
+export function TemplatePicker({ onPick, onOpenRecent, onClose, templatesVersion = 0 }: { onPick(t: Template): void; onOpenRecent(path: string): void; onClose(): void; templatesVersion?: number }) {
   return (
     <div className="hf-overlay" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }} onClick={onClose}>
       <div className="hf-dialog templates" role="dialog" aria-label="New document" onClick={(e) => e.stopPropagation()}>
@@ -19,6 +20,8 @@ export function TemplatePicker({ onPick, onOpenRecent, onClose }: { onPick(t: Te
             </button>
           ))}
         </div>
+        <h4>My templates</h4>
+        <MyTemplates onPick={onPick} refresh={templatesVersion} />
         {isDesktop && (
           <>
             <h4>Recent</h4>

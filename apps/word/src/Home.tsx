@@ -2,6 +2,7 @@ import { type Template, TEMPLATES } from "@prime/editor";
 import { useEffect, useRef } from "react";
 import { isDesktop } from "./platform";
 import { RecentList } from "./RecentList";
+import { MyTemplates } from "./MyTemplates";
 import type { Snapshot } from "./recovery";
 
 const greeting = () => {
@@ -13,7 +14,7 @@ const greeting = () => {
  * The home screen: shown when Prime Word starts without a document, and from the Prime Word button.
  * New (templates), Open, recent documents, and unsaved work to recover.
  */
-export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf }: {
+export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf, onLetterhead, templatesVersion }: {
   recovery: Snapshot[];
   onPick(t: Template): void;
   onOpen(): void;
@@ -23,6 +24,8 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
   /** Back to the open document (absent when there is none to go back to). */
   onClose?(): void;
   onConvertPdf(): void;
+  onLetterhead(): void;
+  templatesVersion: number;
 }) {
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => { first.current?.focus(); }, []);
@@ -67,6 +70,14 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
               </button>
             ))}
           </div>
+        </section>
+
+        <section aria-label="My templates">
+          <div className="home-row">
+            <h2>My templates</h2>
+            <button onClick={onLetterhead}>Design a letterhead…</button>
+          </div>
+          <MyTemplates onPick={onPick} refresh={templatesVersion} />
         </section>
 
         <section aria-label="Convert PDF" className="home-convert">

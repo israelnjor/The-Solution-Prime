@@ -124,6 +124,8 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
       return ["td", attrs, 0];
     },
     image: (node) => {
+      // A floating picture is drawn by the layout (Print Layout) or below its paragraph (Web Layout).
+      if (node.attrs.float) return ["span", { class: "pw-float-anchor", "data-pw-image": json(node.attrs) }];
       const res = doc.images[node.attrs.imageId];
       return ["img", {
         src: res ? dataUrl(res.contentType, res.data) : "",
@@ -203,10 +205,11 @@ function floatCanvas(floats: FloatInfo[], doc: PrimeDocument, resolver: Resolver
       : f.x.align === "right" || f.x.align === "outside" ? W - f.width : f.x.align === "center" ? (W - f.width) / 2 : 0;
     const y = ["paragraph", "line"].includes(f.y.from) ? f.y.offset ?? 0 : 0;
     const part = f.imagePart ? doc.package.parts.find((p) => p.name === f.imagePart) : undefined;
+    const res = f.imageId ? doc.images[f.imageId] : undefined;
     const el = document.createElement("span");
-    if (part) {
+    if (part || res) {
       const img = document.createElement("img");
-      img.src = dataUrl(IMAGE_TYPES[part.name.split(".").pop()!.toLowerCase()] ?? "application/octet-stream", part.data);
+      img.src = res ? dataUrl(res.contentType, res.data) : dataUrl(IMAGE_TYPES[part!.name.split(".").pop()!.toLowerCase()] ?? "application/octet-stream", part!.data);
       img.alt = "";
       img.style.cssText = "width:100%;height:100%";
       el.appendChild(img);
@@ -294,7 +297,10 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
             style: css + (rp.shading ? `;background:#${rp.shading}` : ""), "data-style": rp.styleId, ...(classes ? { class: classes } : {}),
           }));
           const floats: FloatInfo[] = [];
-          child.forEach((n) => { if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float); });
+          child.forEach((n) => {
+            if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float);
+            if (n.type.name === "image" && n.attrs.float) floats.push({ ...n.attrs.float, kind: "picture", width: n.attrs.width, height: n.attrs.height, imageId: n.attrs.imageId });
+          });
           if (floats.length) {
             const key = `floats-${floats.map((f) => `${f.x.offset}:${f.y.offset}:${f.width}:${f.height}`).join("|")}`;
             decorations.push(Decoration.widget(at + child.nodeSize, () => floatCanvas(floats, doc, resolver), { side: -1, key }));

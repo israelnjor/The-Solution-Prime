@@ -331,3 +331,68 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 }
 .pw-editor p.pw-leader-hyphen .pw-tab { background: linear-gradient(90deg, currentColor 50%, transparent 50%) left calc(100% - 0.35em) / 5px 1px repeat-x; }
 .pw-editor p.pw-leader-underscore .pw-tab, .pw-editor p.pw-leader-heavy .pw-tab { border-bottom: 1px solid currentColor; }
+/* Crop & Rotate. */
+.picedit-stage { position: relative; margin: 6px auto; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+.picedit-stage canvas { display: block; }
+.picedit-frame { position: absolute; border: 2px solid #2b579a; box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.45); cursor: move; }
+.picedit-handle { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid #2b579a; }
+.picedit-handle.h-n { top: -7px; left: calc(50% - 7px); cursor: ns-resize; }
+.picedit-handle.h-s { bottom: -7px; left: calc(50% - 7px); cursor: ns-resize; }
+.picedit-handle.h-e { right: -7px; top: calc(50% - 7px); cursor: ew-resize; }
+.picedit-handle.h-w { left: -7px; top: calc(50% - 7px); cursor: ew-resize; }
+.picedit-handle.h-nw { left: -7px; top: -7px; cursor: nwse-resize; }
+.picedit-handle.h-ne { right: -7px; top: -7px; cursor: nesw-resize; }
+.picedit-handle.h-sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.picedit-handle.h-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.picedit-stage { overflow: hidden; }
+.picedit-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.picedit-tools .hint, .group .hint { color: var(--muted); font-size: 12px; }
+/* Drag handle beside the block under the pointer (blocks.ts). */
+.pw-block-handle {
+  display: none; position: absolute; z-index: 5; width: 16px; height: 20px; line-height: 20px; text-align: center;
+  color: #8a94a6; cursor: grab; border-radius: 3px; user-select: none; font-size: 14px;
+}
+.pw-block-handle:hover { background: #e9edf3; color: #2b579a; }
+.pw-flow, .zoomed > .pw-editor { position: relative; }
+/* My templates and the letterhead designer. */
+.template-card.mine { position: relative; padding: 0; }
+.template-card.mine .mine-open { display: grid; gap: 4px; justify-items: center; padding: 10px; border: none; background: none; cursor: pointer; font: inherit; text-align: center; width: 100%; }
+.template-card.mine .mine-delete { position: absolute; top: 4px; right: 6px; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+.page-thumb { display: block; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); }
+.hf-dialog.letterhead { width: min(860px, 96vw); }
+.letterhead-grid { display: grid; grid-template-columns: 1fr 320px; gap: 18px; align-items: start; }
+.letterhead-form { display: grid; gap: 8px; }
+.letterhead-form label { display: grid; gap: 3px; font-size: 13px; }
+.letterhead-form input:not([type="radio"]):not([type="checkbox"]):not([type="color"]), .letterhead-form textarea, .letterhead-form select { font: inherit; padding: 5px 7px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.letterhead-form .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border: none; padding: 0; margin: 0; }
+.letterhead-form legend { font-size: 13px; margin-right: 8px; float: left; }
+.letterhead-form .choice { display: inline-flex; align-items: center; gap: 6px; }
+.letterhead-preview { margin: 0; display: grid; justify-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+/* Signatures. */
+.hf-dialog.signatures { width: min(720px, 96vw); }
+.sig-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 10px 0; }
+.sig-card { position: relative; border: 1px solid var(--chrome-border); border-radius: 8px; }
+.sig-open { display: grid; gap: 6px; justify-items: center; width: 100%; padding: 12px; border: none; background: none; cursor: pointer; font: inherit; }
+.sig-open img { max-width: 100%; height: 60px; object-fit: contain; }
+.sig-maker { display: grid; gap: 10px; }
+.sig-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sig-controls input:not([type="range"]), .sig-controls select, .sig-name input { font: inherit; padding: 5px 7px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.sig-pad { width: 100%; height: 160px; border: 1px dashed #9aa5b5; border-radius: 6px; background: #fff; touch-action: none; cursor: crosshair; }
+.sig-preview { width: 100%; height: 150px; border-radius: 6px; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+.sig-warning { color: #8a5300; margin: 0; }
+.sig-name { margin-right: auto; display: inline-flex; gap: 6px; align-items: center; }
+.signatures .hint { color: var(--muted); font-size: 12px; margin: 0; }
+/* Blocks. */
+.hf-dialog.blocks { width: min(820px, 96vw); }
+.blocks-place { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.blocks-place select { font: inherit; padding: 4px 6px; }
+.blocks-align { display: inline-flex; border: 1px solid var(--chrome-border); border-radius: 6px; overflow: hidden; }
+.blocks-align button { border: none; background: none; padding: 5px 12px; font: inherit; cursor: pointer; }
+.blocks-align button.on { background: var(--accent, #2b579a); color: #fff; }
+.blocks-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; max-height: 52vh; overflow: auto; }
+.blocks-new { margin-right: auto; display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.blocks-maker { display: grid; grid-template-columns: 1fr auto; gap: 12px 18px; align-items: start; }
+.blocks-maker > .hf-actions, .blocks-maker > .hint { grid-column: 1 / -1; }
+.stamp-preview { width: 220px; height: auto; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 16px 16px; border-radius: 6px; }
+.blocks .hint { color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) { .blocks-maker { grid-template-columns: 1fr; } }

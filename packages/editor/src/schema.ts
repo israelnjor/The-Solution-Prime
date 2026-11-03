@@ -136,7 +136,8 @@ export function createSchema(render?: Render): Schema {
       },
       image: {
         group: "inline", inline: true, atom: true, draggable: true,
-        attrs: { ...props, imageId: {}, width: {}, height: {}, name: { default: null }, description: { default: null } },
+        // `float`: wrap and position of a floating picture (FloatInfo); null: in line with the text.
+        attrs: { ...props, imageId: {}, width: {}, height: {}, name: { default: null }, description: { default: null }, float: { default: null } },
         toDOM: (n) => render?.image(n) ?? ["img", { "data-pw-image": json(n.attrs) }],
         parseDOM: [
           { tag: "img[data-pw-image]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-image") },

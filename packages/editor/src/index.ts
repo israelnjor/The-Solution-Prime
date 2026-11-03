@@ -4,7 +4,10 @@ export { createRender, paragraphStyles, runCss } from "./render.js";
 export { isActive, paragraphProp, setParagraph, toggleRun, wordCount } from "./commands.js";
 export { blankDocument } from "./blank.js";
 export { resolvePageStarts, type ResolvedStart } from "./pages.js";
-export { deleteFloat, floatAt, floatEditing, setFloatBox, withBox, type FloatBox } from "./floats.js";
+export {
+  deleteFloat, floatAt, floatEditing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
+  setPictureWrap, withBox, type FloatBox,
+} from "./floats.js";
 export { PAGE_GAP, pagination, paginationKey, type PagedOptions, mark, timed } from "./paged.js";
 export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
 export { changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, toggleList } from "./lists.js";
@@ -22,3 +25,6 @@ export {
   acceptOrReject, addComment, anchoredComments, type Change, changeAt, changes, type Comment, deleteComment, gotoChange,
   readComments, reviewKey, reviewPlugin,
 } from "./review.js";
+export { blockHandle, moveBlock } from "./blocks.js";
+export { letterheadDocument, letterheadStories, type LetterheadSpec } from "./letterhead.js";
+export { addressBlock, insertPart, type Part, type PartAlign, type PartPlace, partFromSelection, picturePart, signatureBlock, type SignatureBlockSpec } from "./parts.js";

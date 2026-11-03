@@ -218,6 +218,7 @@ const MIN_WRAP = 36;
 /** Floating objects in a paragraph's content (inside links, fields and other containers too). */
 function floatsIn(items: Inline[]): FloatInfo[] {
   return items.flatMap((i) => i.type === "runPreserved" ? (i.float ? [i.float] : [])
+    : i.type === "image" ? (i.float ? [{ ...i.float, kind: "picture" as const, width: i.width, height: i.height, imageId: i.imageId }] : [])
     : "content" in i && Array.isArray(i.content) ? floatsIn(i.content as Inline[]) : []);
 }
 
@@ -231,7 +232,10 @@ interface CellBox {
   vMerge?: "restart" | "continue";
   /** Content height of the cell (for merged cells: across all the rows it spans). */
   height: number;
-  lines: { line: MLine; dy: number }[];
+  /** dx: offset from the cell's (or story's) left edge, for lines in a table nested in it. */
+  lines: { line: MLine; dy: number; dx?: number }[];
+  /** Shading and borders of tables nested in it, relative to its left edge and top. */
+  rects?: Rect[];
   /** Paragraph anchors (text) with their offset from the cell top. */
   markers: [string, number][];
   /** Floating objects anchored in the cell's paragraphs: their paragraph's top, path in the cell, index. */
@@ -255,7 +259,7 @@ interface TableBox {
 type Box = ParaBox | TableBox;
 
 /** Stacked content of a cell or a header/footer. */
-type StoryBox = Pick<CellBox, "height" | "lines" | "markers" | "floats">;
+type StoryBox = Pick<CellBox, "height" | "lines" | "markers" | "floats" | "rects">;
 
 type Atom = { offset: number } & (
   // `breakAfter`: the line may break after this piece although no space follows (after a hyphen).
@@ -391,7 +395,8 @@ export class LayoutEngine {
         }
         pos += size(i);
         if (i.type === "image") {
-          out.push({ kind: "image", width: i.width, height: i.height, src: { imageId: i.imageId }, offset });
+          // A floating picture takes no room in the line: it is placed with its paragraph (placeFloat).
+          if (!i.float) out.push({ kind: "image", width: i.width, height: i.height, src: { imageId: i.imageId }, offset });
           continue;
         }
         if (i.type === "break") { out.push({ kind: i.kind === "page" ? "page" : "br", offset }); continue; }
@@ -802,6 +807,22 @@ export class LayoutEngine {
       if (c.box.height > have) heights[last] += c.box.height - have;
     }));
 
+    // Vertical alignment in the cell (w:vAlign center / bottom): the content moves down in its row.
+    measured.forEach((cells, r) => {
+      t.rows[r].cells.forEach((cell, k) => {
+        const c = cells[k];
+        const v = cell.props.vAlign;
+        if (!c || c.vMerge || (v !== "center" && v !== "bottom")) return;
+        const room = heights[r] - ROW_BORDER - c.box.height;
+        if (room <= 0.01) return;
+        const shift = v === "center" ? room / 2 : room;
+        c.box.lines = c.box.lines.map((l) => ({ ...l, dy: l.dy + shift }));
+        c.box.markers = c.box.markers.map(([a, dy]) => [a, dy + shift]);
+        if (c.box.rects) c.box.rects = c.box.rects.map((x) => ({ ...x, y: x.y + shift }));
+        if (c.box.floats) c.box.floats = c.box.floats.map((f) => ({ ...f, dy: f.dy + shift }));
+      });
+    });
+
     const rows = t.rows.map((row, r): RowBox => ({
       index: r,
       height: heights[r],
@@ -826,15 +847,40 @@ export class LayoutEngine {
     const lines: CellBox["lines"] = [];
     const markers: CellBox["markers"] = [];
     const floats: NonNullable<CellBox["floats"]> = [];
+    const rects: Rect[] = [];
     let y = 0;
     let prevAfter = 0;
     for (const box of this.measureBlocks(blocks, width, tableStyle)) {
       if (box.kind === "table") {
-        y += box.rows.reduce((s, r) => s + r.height, 0);
+        // A table in a header, footer or cell (letterheads: logo beside the details): its cells' text,
+        // shading and borders, at their offsets.
+        for (const row of box.rows) {
+          for (const c of row.cells) {
+            if (c.fill || c.borders) {
+              rects.push({
+                x: c.dx - CELL_MARGIN, y, width: c.width, height: row.height,
+                ...(c.fill ? { fill: c.fill } : {}),
+                ...(c.borders ? { sides: { top: c.vMerge !== "continue", bottom: c.vMerge !== "restart", left: true, right: true } } : {}),
+              });
+            }
+            for (const r of c.rects ?? []) rects.push({ ...r, x: r.x + c.dx, y: r.y + y });
+            for (const l of c.lines) lines.push({ line: l.line, dy: y + l.dy, dx: c.dx + (l.dx ?? 0) });
+            for (const [anchor, dy] of c.markers) markers.push([anchor, y + dy]);
+          }
+          y += row.height;
+        }
         prevAfter = 0;
         continue;
       }
-      y += Math.max(box.rp.spaceBefore - prevAfter, 0) + box.rp.borderTop;
+      y += Math.max(box.rp.spaceBefore - prevAfter, 0);
+      // Paragraph borders (a letterhead's rule, a boxed note in a cell), as on the page.
+      const bd = box.rp.borders;
+      const stroke = (b: { width: number; color?: string }) => ({ width: b.width, color: b.color });
+      const spanX = box.rp.left - (bd.left ? bd.left.space + bd.left.width / 2 : 0);
+      const spanW = width - box.rp.left - box.rp.right + (bd.left ? bd.left.space + bd.left.width / 2 : 0) + (bd.right ? bd.right.space + bd.right.width / 2 : 0);
+      if (bd.top) rects.push({ x: spanX, y: y + bd.top.width / 2, width: spanW, height: 0, sides: { top: true, bottom: false, left: false, right: false }, stroke: stroke(bd.top) });
+      const paraTop = y;
+      y += box.rp.borderTop;
       prevAfter = box.rp.spaceAfter;
       markers.push([box.anchor, y]);
       box.floats.forEach((float, index) => floats.push({ float, dy: y, path: box.path, index }));
@@ -842,9 +888,15 @@ export class LayoutEngine {
         lines.push({ line, dy: y });
         y += line.height;
       }
+      if (bd.left) rects.push({ x: box.rp.left - bd.left.space - bd.left.width / 2, y: paraTop, width: 0, height: y - paraTop, sides: { top: false, bottom: false, left: true, right: false }, stroke: stroke(bd.left) });
+      if (bd.right) rects.push({ x: width - box.rp.right + bd.right.space + bd.right.width / 2, y: paraTop, width: 0, height: y - paraTop, sides: { top: false, bottom: false, left: true, right: false }, stroke: stroke(bd.right) });
+      if (box.rp.borderLine) {
+        const b = box.rp.borderLine;
+        rects.push({ x: spanX, y: y + b.space + b.width / 2, width: spanW, height: 0, sides: { top: true, bottom: false, left: false, right: false }, stroke: { color: b.color, width: b.width } });
+      }
       y += box.rp.spaceAfter + box.rp.borderBottom;
     }
-    return { height: y, lines, markers, ...(floats.length ? { floats } : {}) };
+    return { height: y, lines, markers, ...(floats.length ? { floats } : {}), ...(rects.length ? { rects } : {}) };
   }
 
   /**
@@ -934,8 +986,14 @@ export class LayoutEngine {
       page = { number: pages.length + 1, section: index, width: w, height: h, lines: [], rects: [], bodyTop: top, bodyBottom: bottom, bodyLeft: left, bodyRight: w - (mg.right ?? 72) };
       pages.push(page);
       pageOpen = pages.length > 1;
-      for (const l of header.lines) put(l.line, left, (mg.header ?? 36) + l.dy, { story: "header" });
-      for (const l of footer.lines) put(l.line, left, h - (mg.footer ?? 36) - footer.height + l.dy, { story: "footer" });
+      const headerTop = mg.header ?? 36;
+      const footerTop = h - (mg.footer ?? 36) - footer.height;
+      for (const [story, box, at] of [["header", header, headerTop], ["footer", footer, footerTop]] as const) {
+        for (const r of box.rects ?? []) page.rects.push({ ...r, x: left + r.x, y: at + r.y });
+        for (const l of box.lines) put(l.line, left + (l.dx ?? 0), at + l.dy, { story });
+        // Floating pictures in the header or footer (logos, letterhead artwork): part of it, not the text.
+        for (const cf of box.floats ?? []) placeFloat(cf.float, at + cf.dy, [], cf.index, undefined, story);
+      }
       y = top;
       prev = undefined;
       exclusions = [];
@@ -990,7 +1048,7 @@ export class LayoutEngine {
      * (as "float" lines) and returns the area text must wrap around, if any.
      */
     const placeFloat = (f: FloatInfo, paraTop: number, path: number[], index: number,
-      column: [number, number] = [page.bodyLeft, page.bodyRight]): Exclusion | undefined => {
+      column: [number, number] = [page.bodyLeft, page.bodyRight], story?: "header" | "footer"): Exclusion | undefined => {
       const h = f.x.from;
       // In a table cell (Word's "layout in cell"), the column is the cell.
       const hArea = h === "page" ? [0, page.width]
@@ -1011,13 +1069,14 @@ export class LayoutEngine {
       const x = at(f.x, hArea, f.width);
       const fy = at(f.y, vArea, height);
       const from = page.lines.length;
-      if (f.kind === "picture" && f.imagePart) {
-        page.lines.push({ story: "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [],
-          images: [{ part: f.imagePart, x, y: fy, width: f.width, height }] });
+      const source = f.imagePart ? { part: f.imagePart } : f.imageId ? { imageId: f.imageId } : undefined;
+      if (f.kind === "picture" && source) {
+        page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [],
+          images: [{ ...source, x, y: fy, width: f.width, height }] });
       }
-      if (content) for (const l of content.lines) put(l.line, x + insets.left, fy + insets.top + l.dy, { story: "float" });
+      if (content) for (const l of content.lines) put(l.line, x + insets.left + (l.dx ?? 0), fy + insets.top + l.dy, { story: story ?? "float" });
       if (f.kind === "ink" && f.ink) {
-        page.lines.push({ story: "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
+        page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
           strokes: f.ink.strokes.map((s) => ({ points: s.map((v, i) => (i % 2 ? fy + v * height : x + v * f.width)), width: f.ink!.width, color: f.ink!.color })) });
       }
       // The same, relative to the anchor paragraph and the object's box, for the editor.
@@ -1027,9 +1086,12 @@ export class LayoutEngine {
         images: l.images.map((i) => ({ ...i, x: i.x - x, y: i.y - fy })),
         rules: l.rules.map((r) => ({ ...r, x1: r.x1 - x, x2: r.x2 - x, y1: r.y1 - fy, y2: r.y2 - fy })),
       });
+      // Header and footer objects are drawn with the header or footer (not editable from the body), and
+      // body text does not wrap around them.
+      if (story) return undefined;
       floats.push({
         page: page.number, path, index, x: x - column[0], y: fy - paraTop, width: f.width, height,
-        ...(f.kind === "picture" && f.imagePart ? { image: { part: f.imagePart } } : {}),
+        ...(f.kind === "picture" && source ? { image: source } : {}),
         ...(f.kind === "ink" && f.ink ? { ink: f.ink } : {}),
         lines: f.kind === "textbox" ? page.lines.slice(from).map(shift) : [],
       });
@@ -1237,7 +1299,8 @@ export class LayoutEngine {
             });
           }
           for (const [anchor, dy] of c.markers) mark(anchor, y + dy);
-          for (const l of c.lines) put(l.line, left + c.dx, y + l.dy);
+          for (const r of c.rects ?? []) page.rects.push({ ...r, x: left + c.dx + r.x, y: y + r.y });
+          for (const l of c.lines) put(l.line, left + c.dx + (l.dx ?? 0), y + l.dy);
           // Floating objects in the cell (signatures, logos): placed in the cell; text does not wrap.
           for (const cf of c.floats ?? []) {
             placeFloat(cf.float, y + cf.dy, [...tablePath, row.index, ci, ...cf.path], cf.index, [left + c.dx, left + c.dx + c.width - 2 * CELL_MARGIN]);

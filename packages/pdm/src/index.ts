@@ -117,6 +117,8 @@ export interface ImageInline {
   name?: string;
   description?: string;
   props?: RunProps;
+  /** A floating picture (wrap, position): written as wp:anchor. Absent: in line with text. */
+  float?: FloatInfo;
 }
 
 export interface LinkInline {
@@ -182,8 +184,9 @@ export interface FloatInfo {
   behind?: boolean;
   /** Distance between the object and wrapped text, in pt. */
   dist: { top: number; bottom: number; left: number; right: number };
-  /** Picture: its image part in the package (e.g. "word/media/image3.png"). */
+  /** Picture: its image part in the package (e.g. "word/media/image3.png"), or its image resource. */
   imagePart?: string;
+  imageId?: string;
   /** Text box: its content and inner margins (pt). */
   blocks?: Block[];
   insets?: { top: number; bottom: number; left: number; right: number };
