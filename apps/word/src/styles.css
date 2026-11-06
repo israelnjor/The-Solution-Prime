@@ -102,7 +102,7 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .pw-table { border-collapse: collapse; table-layout: fixed; margin-left: -5.4pt; }
 /* Word's 5.4pt cell margins, less half of each 0.5pt border (which CSS takes from the cell; Word does not). */
 .pw-table td { padding: 0 5.15pt; vertical-align: top; border: 0.5pt dotted #c8c8c8; }
-.pw-table.pw-borders td { border: 0.5pt solid #000; }
+/* Cell borders come from the table, its style and the cell (resolved per side, as in the layout). */
 .pw-hidden { display: none; }
 .pw-chip { display: inline-block; padding: 0 3px; border-radius: 3px; background: #eef2f8; color: #5a6b85; font-size: 0.85em; cursor: default; }
 .pw-chip-block { margin: 4pt 0; padding: 4px 8px; border: 1px dashed #b8c4d6; border-radius: 4px; color: #5a6b85; background: #f6f8fb; font-size: 10pt; }
@@ -535,3 +535,16 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .eq-preview.display { justify-content: center; }
 .eq-error { color: #a33; font-size: 12px; margin: 4px 0; }
 .equation-dialog .hint { color: var(--muted); font-size: 12px; margin: 4px 0; }
+
+/* Tables: resizing columns, the style list, the sort dialog. */
+.pw-editor .ProseMirror.pw-col-resize, .pw-editor .ProseMirror.pw-col-resize * { cursor: col-resize !important; }
+.pw-col-guide { position: fixed; top: 0; bottom: 0; width: 0; border-left: 1px dashed #2b579a; pointer-events: none; z-index: 80; }
+.toolbar .table-style-select { width: 170px; }
+.hf-dialog.sort-dialog { width: min(420px, 96vw); }
+.sort-dialog label { display: grid; gap: 3px; font-size: 12px; margin-bottom: 8px; }
+.sort-dialog label.choice { display: flex; }
+.sort-dialog select { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+
+/* Lines as tall as Word makes them (see paragraphStyles): the paragraph's line height is its common
+   text's; runs add no height of their own, except taller runs (pw-tall), which grow their line. */
+.pw-editor p :is(span, a):not(.pw-page-gap):not(.pw-math):not(.pw-chip):not(.pw-tall) { line-height: 0; }

@@ -37,3 +37,4 @@ export { captions, fields, type FieldAt, gotoBookmark, headings, insertCaption, 
 export { deleteNote, gotoNoteRef, insertNote, type NoteEntry, noteAt, noteList, setNoteText } from "./notes.js";
 export { bibliographyBlocks, citationText, type CitationStyle, citedTags, insertBibliography, insertCitation, newTag, type Person, readSources, referenceInlines, type Source, type SourceType, writeSources } from "./citations.js";
 export { insertEquation, latexToOmml, ommlToLatex } from "./equations.js";
+export { autofitWindow, type BorderChoice, type CellRange, columnResizing, distributeColumns, isHeaderRow, mergeCells, type Pen, selectedCells, setCellAlign, setCellBorders, setCellShading, setColumnWidths, setTableStyle, sortTable, type SortOptions, splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows } from "./tableedit.js";

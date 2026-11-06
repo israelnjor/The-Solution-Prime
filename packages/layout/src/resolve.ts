@@ -58,6 +58,8 @@ export interface ResolvedParagraph {
   mark: ResolvedRun;
   /** Table style in effect when the paragraph is inside a table cell. */
   tableStyle?: string;
+  /** Text formatting from the table style's conditional formats (the header row's bold…), for its runs. */
+  cond?: RunProps;
   /** Background colour (w:shd fill), RRGGBB. */
   shading?: string;
   /** Custom tab stops, left to right: position in pt from the text column's left edge. */
@@ -261,9 +263,11 @@ export class Resolver {
    * Effective run formatting inside a paragraph of the given style. Precedence (ECMA-376 §17.7.2):
    * defaults -> table style -> paragraph style -> character style -> direct.
    */
-  run(paragraphStyle: string, props: RunProps | undefined, tableStyle?: string): ResolvedRun {
+  run(paragraphStyle: string, props: RunProps | undefined, tableStyle?: string, cond?: RunProps): ResolvedRun {
     let r: RunProps = mergeRun({}, this.doc.styles.defaults.run);
     for (const s of this.chain(tableStyle)) r = mergeRun(r, s.run);
+    // A table style's conditional formats (header row, banded rows…) sit at the table style's level.
+    r = mergeRun(r, cond);
     for (const s of this.chain(paragraphStyle)) r = mergeRun(r, s.run);
     if (props?.style) for (const s of this.chain(props.style)) r = mergeRun(r, s.run);
     return this.toRun(mergeRun(r, props));
@@ -273,7 +277,7 @@ export class Resolver {
    * Effective paragraph formatting. `countLists`: advance list numbering (a document-order pass);
    * pass false to style a single paragraph without disturbing the counters.
    */
-  paragraph(p: Paragraph, tableStyle?: string, countLists = true): ResolvedParagraph {
+  paragraph(p: Paragraph, tableStyle?: string, countLists = true, cond?: RunProps): ResolvedParagraph {
     const styleId = p.props.style ?? this.defaultParagraph ?? "";
     let props: ParagraphProps = mergePara({}, this.doc.styles.defaults.paragraph);
     for (const s of this.chain(tableStyle)) props = mergePara(props, s.paragraph);
@@ -338,9 +342,10 @@ export class Resolver {
       borderTop: borders.top ? borders.top.width + borders.top.space : 0,
       borders,
       listLabel: label,
-      labelRun: level && label !== undefined ? this.run(styleId, mergeRun(p.props.markRun ?? {}, level.run), tableStyle) : undefined,
-      mark: this.run(styleId, p.props.markRun, tableStyle),
+      labelRun: level && label !== undefined ? this.run(styleId, mergeRun(p.props.markRun ?? {}, level.run), tableStyle, cond) : undefined,
+      mark: this.run(styleId, p.props.markRun, tableStyle, cond),
       tableStyle,
+      ...(cond ? { cond } : {}),
       ...(shading && shading !== "FFFFFF" ? { shading } : {}),
       tabs,
     };

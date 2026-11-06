@@ -9,6 +9,7 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import * as pmView from "prosemirror-view";
 import type { EditorView } from "prosemirror-view";
 import type { Slice } from "prosemirror-model";
+import { sheetTop } from "./PageSheets";
 
 // ProseMirror's clipboard serializer (exported, though not in this version's type definitions).
 const serializeForClipboard = (pmView as unknown as {
@@ -85,13 +86,25 @@ export function spellSelfTest(view: EditorView) {
  * waits for the work that follows a pause (pagination, spelling). Reports keystroke times and every
  * main-thread task over 50 ms (a "long task" — the moments typing would feel stuck).
  */
-export function perfSelfTest(view: EditorView, count = 40) {
+export function perfSelfTest(first: EditorView, count = 40) {
+  // The current editor (a long document may be rebuilt once its fonts arrive, after this starts).
+  const views = { get current() { return (globalThis as { primeView?: EditorView }).primeView ?? first; } };
   const long: number[] = [];
   const observer = new PerformanceObserver((list) => { for (const e of list.getEntries()) long.push(Math.round(e.duration)); });
   try { observer.observe({ type: "longtask", buffered: false }); } catch { /* not supported */ }
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   void (async () => {
-    await wait(3000); // let the initial layout and spelling settle
+    // Let the initial layout and spelling settle (?settle=ms for very long documents).
+    await wait(Number(new URLSearchParams(location.search).get("settle")) || 3000);
+    const view = views.current;
+    // What opening the document cost (layout, fitting, drawing…), before any typing.
+    const opening: Record<string, [number, number]> = {};
+    for (const e of performance.getEntriesByType("measure")) {
+      if (!e.name.startsWith("pw:") || e.name.startsWith("pw:correction") || e.name.startsWith("pw:round")) continue;
+      const o = (opening[e.name.slice(3)] ??= [0, 0]);
+      o[0] += Math.round(e.duration); o[1]++;
+    }
+    console.log("[selftest] opening (ms, count)", JSON.stringify({ blocks: view.state.doc.childCount, sinceStart: Math.round(performance.now()), ...opening }));
     long.length = 0;
     // Somewhere in the middle of the document, like an author editing an existing chapter.
     let target = Math.floor(view.state.doc.content.size / 2);
@@ -141,36 +154,77 @@ export function perfSelfTest(view: EditorView, count = 40) {
  * body area (as the first page's content does). Reports the largest error in CSS pixels.
  */
 export function alignmentReport() {
-  const sheets = Array.from(document.querySelectorAll(".pw-sheet"));
+  // Sheets are drawn only near the screen: their places are worked out (sheetTop) for every page.
+  const box = document.querySelector<HTMLElement>(".pw-sheets");
   const flow = document.querySelector(".pw-flow");
-  if (!sheets.length || !flow) return { checked: 0 };
-  const bodyOffset = flow.getBoundingClientRect().top - sheets[0].getBoundingClientRect().top;
+  if (!box || !flow) return { checked: 0 };
+  const pages = Number(box.dataset.count);
+  const bodyOffset = flow.getBoundingClientRect().top - sheetTop(1)!;
   let checked = 0;
   let worst = 0;
   let off = 0;
   const bad: [number, number][] = [];
   for (const gap of Array.from(document.querySelectorAll<HTMLElement>(".pw-page-gap"))) {
-    const sheet = sheets[Number(gap.dataset.page) - 1];
-    if (!sheet) continue;
-    const error = Math.abs(gap.getBoundingClientRect().bottom - (sheet.getBoundingClientRect().top + bodyOffset));
+    const page = Number(gap.dataset.page);
+    if (!(page >= 1 && page <= pages)) continue;
+    const top = sheetTop(page)!;
+    const error = Math.abs(gap.getBoundingClientRect().bottom - (top + bodyOffset));
     checked++;
     worst = Math.max(worst, error);
-    if (error > 1) { off++; bad.push([Number(gap.dataset.page), Math.round(gap.getBoundingClientRect().bottom - (sheet.getBoundingClientRect().top + bodyOffset))]); }
+    if (error > 1) { off++; bad.push([page, Math.round(gap.getBoundingClientRect().bottom - (top + bodyOffset))]); }
   }
   const corrected = performance.getEntriesByType("measure").filter((e) => e.name.startsWith("pw:correction")).map((e) => e.name.slice(14));
   const corrections = corrected.length;
   console.log("[selftest] corrected", corrected.length, JSON.stringify(corrected.slice(-8)));
   // How far each page's content ends from its body bottom (the top of the mask below it), in px:
-  // positive = the screen ran longer than the layout there.
-  const masks = Array.from(document.querySelectorAll(".pw-mask"));
+  // positive = the screen ran longer than the layout there. (Masks are drawn near the screen only.)
   const ends = Array.from(document.querySelectorAll<HTMLElement>(".pw-page-gap")).map((g) => {
-    const top = g.getBoundingClientRect().top;
-    const mask = masks.map((m) => m.getBoundingClientRect().top).filter((t) => t <= top + 200).pop();
-    return mask === undefined ? null : [Number(g.dataset.page) - 1, Math.round(top - mask)];
-  });
+    const mask = document.querySelector(`.pw-mask[data-page="${g.dataset.page}"]`);
+    return mask ? [Number(g.dataset.page) - 1, Math.round(g.getBoundingClientRect().top - mask.getBoundingClientRect().top)] : null;
+  }).filter(Boolean);
   console.log("[selftest] page ends", JSON.stringify(ends));
   const rounds = performance.getEntriesByType("measure").filter((e) => e.name.startsWith("pw:round")).map((e) => Number(e.name.slice(9)));
-  return { corrections, rounds, pages: sheets.length, checked, worstPx: Math.round(worst * 10) / 10, offByMoreThan1px: off, firstOff: bad.slice(0, 8), masked: Array.from(document.querySelectorAll('.pw-mask')).length, unmasked: sheets.length - 1 - document.querySelectorAll(".pw-mask").length };
+  const masked = Number(box.dataset.masked);
+  return { corrections, rounds, pages, checked, worstPx: Math.round(worst * 10) / 10, offByMoreThan1px: off, firstOff: bad.slice(0, 8), masked, unmasked: pages - 1 - masked };
+}
+
+/**
+ * Page alignment as the reader sees it: scrolls to every `step`-th page (?step=, default 5), lets the
+ * browser draw it (long documents skip drawing what is off screen) and refit, and checks the breaks
+ * on screen. Reports the worst error and the pages off by more than 1 px.
+ */
+export function alignScanSelfTest() {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const params = new URLSearchParams(location.search);
+  void (async () => {
+    await wait(Number(params.get("settle")) || 3000);
+    const box = document.querySelector<HTMLElement>(".pw-sheets");
+    const flow = document.querySelector(".pw-flow");
+    const scroller = document.querySelector(".canvas");
+    if (!box || !flow || !scroller) return console.log("[selftest] align", JSON.stringify({ error: "no pages" }));
+    const pages = Number(box.dataset.count);
+    const step = Number(params.get("step")) || 5;
+    const bodyOffset = flow.getBoundingClientRect().top - sheetTop(1)!;
+    let checked = 0;
+    let worst = 0;
+    const off: [number, number][] = [];
+    const t0 = performance.now();
+    for (let n = 2; n <= pages; n += step) {
+      scroller.scrollTop += sheetTop(n)! - scroller.getBoundingClientRect().top - 40;
+      await wait(400); // drawn, and refitted (a block coming into view is fitted again after 150 ms)
+      const view = scroller.getBoundingClientRect();
+      for (const gap of Array.from(document.querySelectorAll<HTMLElement>(".pw-page-gap"))) {
+        const r = gap.getBoundingClientRect();
+        if (r.bottom < view.top || r.top > view.bottom) continue;
+        const page = Number(gap.dataset.page);
+        const error = r.bottom - (sheetTop(page)! + bodyOffset);
+        checked++;
+        worst = Math.max(worst, Math.abs(error));
+        if (Math.abs(error) > 1) off.push([page, Math.round(error)]);
+      }
+    }
+    console.log("[selftest] align", JSON.stringify({ pages, step, checked, worstPx: Math.round(worst * 10) / 10, offByMoreThan1px: off.length, firstOff: off.slice(0, 10), ms: Math.round(performance.now() - t0) }));
+  })();
 }
 
 export function alignSelfTest() {
@@ -185,9 +239,14 @@ export function scrollSelfTest() {
     const at = new URLSearchParams(location.search).get("at");
     const target = at ? [...document.querySelectorAll(".ProseMirror p")].find((p) => p.textContent?.includes(at)) : undefined;
     if (target) target.scrollIntoView({ block: "start" });
-    else document.querySelectorAll(".pw-sheet")[n - 1]?.scrollIntoView({ block: "start" });
+    else {
+      const scroller = document.querySelector(".canvas");
+      const y = sheetTop(n);
+      if (scroller && y !== undefined) scroller.scrollTop += y - scroller.getBoundingClientRect().top;
+    }
     // Debug aid: what sits around the page (spacers and wrap room), relative to the page's sheet.
-    const sheet = document.querySelectorAll(".pw-sheet")[n - 1]?.getBoundingClientRect();
+    const at0 = sheetTop(n);
+    const sheet = at0 === undefined ? undefined : { top: at0 };
     if (sheet) {
       const rel = (el: Element) => Math.round(el.getBoundingClientRect().top - sheet.top);
       const near = (el: Element) => Math.abs(rel(el)) < 2400;
@@ -271,7 +330,7 @@ export function linesSelfTest(view: EditorView, base: () => PrimeDocument, measu
     heights.sort((a, b) => b[0] - a[0]);
     console.log("[selftest] heights", JSON.stringify(heights.slice(0, 8).map((h) => h[1])));
     // Paragraph tops on their page, screen against engine (pt from the page top), where they drift.
-    const sheets = [...document.querySelectorAll(".pw-sheet")].map((e) => e.getBoundingClientRect().top);
+    const sheets = Array.from({ length: Number(document.querySelector<HTMLElement>(".pw-sheets")?.dataset.count ?? 0) }, (_, i) => sheetTop(i + 1)!);
     const drift: string[] = [];
     let last = 0;
     let n = 0;
@@ -1003,5 +1062,176 @@ export function equationSelfTest(view: EditorView) {
     out.after = equations().length - before;
     out.updated = equations().some((x) => x.includes("<m:t>E=mc</m:t>") || (x.includes(">E=") && x.includes("m:sSup")));
     console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/**
+ * Tables through the UI: insert, fill, merge the title row, a style with a total row, borders,
+ * shading, a column dragged wider, sorting, and text to table (?shot=1 stops before sorting, for a screenshot).
+ */
+export function tablesSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const click = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => (b.textContent?.trim() ?? "").startsWith(label))?.click();
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    const { insertTable } = await import("@prime/editor");
+    await wait(1500);
+    // An empty paragraph at the end, with a table in it.
+    view.dispatch(view.state.tr.insert(view.state.doc.content.size, view.state.schema.nodes.paragraph.create()));
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+    insertTable(() => ({ sections: [{ props: {}, blocks: [] }] }) as never, 5, 3)(view.state, view.dispatch);
+    let tablePos = -1;
+    view.state.doc.forEach((n, pos) => { if (n.type.name === "table") tablePos = pos; });
+    const table = () => view.state.doc.nodeAt(tablePos)!;
+    const cellPos = (r: number, k: number) => { let p = tablePos + 1; for (let i = 0; i < r; i++) p += table().child(i).nodeSize; p += 1; for (let i = 0; i < k; i++) p += table().child(r).child(i).nodeSize; return p; };
+    const data = [["Results", "", ""], ["Region", "Rainfall", "Yield"], ["Accra", "810", "1.9"], ["Ashanti", "1420", "2.6"], ["Total", "2230", "4.5"]];
+    for (let r = data.length - 1; r >= 0; r--) for (let k = 2; k >= 0; k--) if (data[r][k]) view.dispatch(view.state.tr.insertText(data[r][k], cellPos(r, k) + 2));
+    const select = (r1: number, k1: number, r2: number, k2: number) => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, cellPos(r1, k1) + 2, cellPos(r2, k2) + 2)));
+    view.focus();
+    select(0, 0, 0, 2);
+    await wait(100);
+    out.tabs = [...document.querySelectorAll("nav button.contextual")].map((b) => b.textContent);
+    click("Table Layout", document.querySelector("nav")!); await wait(100);
+    click("Merge Cells"); await wait(150);
+    out.titleCells = table().child(0).childCount;
+    select(2, 1, 2, 1);
+    click("Table Design", document.querySelector("nav")!); await wait(100);
+    choose(document.querySelector<HTMLSelectElement>(".table-style-select"), "GridTable4-Accent1"); await wait(150);
+    [...document.querySelectorAll<HTMLLabelElement>(".toolbar label.choice")].find((l) => l.textContent?.includes("Total Row"))?.querySelector("input")?.click();
+    await wait(150);
+    out.style = table().attrs.props.style;
+    out.look = (table().attrs.props.extra ?? []).find((x: { name: string }) => x.name === "w:tblLook")?.xml.match(/w:lastRow="(\d)"/)?.[1];
+    select(2, 1, 3, 2);
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Borders"]'), "outside"); await wait(150);
+    click("Shading", document.querySelector('[aria-label="Shading"]')!); await wait(150);
+    out.shaded = table().child(2).child(1).attrs.props.shading?.fill;
+    out.borders = (table().child(2).child(1).attrs.props.extra ?? []).find((x: { name: string }) => x.name === "w:tcBorders")?.xml.match(/<w:(top|left)\b/g);
+    // Drag the border between columns 1 and 2 to the right by 60px.
+    await wait(400);
+    const td = (view.nodeDOM(cellPos(2, 0)) as HTMLElement);
+    const r = td.getBoundingClientRect();
+    const before = (table().attrs.grid as number[]).map((w) => Math.round(w));
+    td.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: r.right - 1, clientY: r.top + 5 }));
+    td.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: r.right - 1, clientY: r.top + 5 }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: r.right + 59, clientY: r.top + 5 }));
+    window.dispatchEvent(new MouseEvent("mouseup", { clientX: r.right + 59, clientY: r.top + 5 }));
+    await wait(200);
+    out.columns = { before, after: (table().attrs.grid as number[]).map((w) => Math.round(w)) };
+    if (new URLSearchParams(location.search).get("shot")) return console.log("[selftest] align", JSON.stringify(out));
+    // Sort by rainfall, largest first (title and heading rows stay).
+    select(2, 1, 2, 1);
+    click("Table Layout", document.querySelector("nav")!); await wait(100);
+    select(0, 0, 1, 0); click("Repeat Header Rows"); await wait(100);
+    select(2, 1, 2, 1);
+    click("Sort"); await wait(200);
+    choose(document.querySelectorAll<HTMLSelectElement>(".sort-dialog select")[0], "1");
+    choose(document.querySelectorAll<HTMLSelectElement>(".sort-dialog select")[1], "number");
+    choose(document.querySelectorAll<HTMLSelectElement>(".sort-dialog select")[2], "d");
+    await wait(50);
+    click("OK", document.querySelector(".sort-dialog")!); await wait(200);
+    out.sorted = Array.from({ length: table().childCount }, (_, i) => table().child(i).firstChild!.textContent);
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/**
+ * Diagnosis (Web Layout): for consecutive top-level paragraphs on the same page of the layout, the
+ * screen's distance between them against the layout's. Lists the paragraphs where the two differ most.
+ */
+export function driftSelfTest(view: EditorView, base: () => import("@prime/pdm").PrimeDocument, measurer: import("@prime/layout").Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  void (async () => {
+    const { fromProseMirror } = await import("@prime/editor");
+    const { layoutDocument } = await import("@prime/layout");
+    await wait(Number(new URLSearchParams(location.search).get("settle")) || 4000);
+    const v = (globalThis as { primeView?: EditorView }).primeView ?? view;
+    if (new URLSearchParams(location.search).get("resize")) { document.fonts.dispatchEvent(new Event("loadingdone")); await wait(500); }
+    const result = layoutDocument(fromProseMirror(v.state.doc, base()), measurer);
+    // Layout: each top-level block's page and top (from pageStarts and lines is hard; use paragraphs in order).
+    const tops: { page: number; y: number }[] = result.paragraphs.map((p) => ({ page: p.page, y: p.y }));
+    const box = v.dom.getBoundingClientRect();
+    const zoom = box.width / parseFloat(getComputedStyle(v.dom).width);
+    const blocks: { node: import("prosemirror-model").Node; el: HTMLElement }[] = [];
+    v.state.doc.forEach((n, pos) => { const el = v.nodeDOM(pos); if (el instanceof HTMLElement && n.type.name === "paragraph") blocks.push({ node: n, el }); });
+    // Paragraphs in tables are in result.paragraphs too: keep only top-level ones (match by order of top-level paragraphs).
+    let k = 0;
+    const layoutOf: { page: number; y: number }[] = [];
+    v.state.doc.forEach((n) => {
+      if (n.type.name === "paragraph") layoutOf.push(tops[k]);
+      let count = 0;
+      n.descendants((c) => { if (c.type.name === "paragraph") count++; return true; });
+      k += n.type.name === "paragraph" ? 1 : count;
+    });
+    const diffs: { i: number; screen: number; layout: number; text: string; props: string; html: string }[] = [];
+    for (let i = 0; i + 1 < blocks.length; i++) {
+      const a = layoutOf[i], b = layoutOf[i + 1];
+      if (!a || !b || a.page !== b.page) continue;
+      // Only neighbours on screen too (no page gap between them).
+      if (blocks[i].el.nextElementSibling !== blocks[i + 1].el) continue;
+      const screen = ((blocks[i + 1].el.getBoundingClientRect().top - blocks[i].el.getBoundingClientRect().top) / zoom) * 0.75;
+      const layout = b.y - a.y;
+      if (Math.abs(screen - layout) > 0.5) {
+        diffs.push({ i, screen: +screen.toFixed(1), layout: +layout.toFixed(1), text: blocks[i].node.textContent.slice(0, 60),
+          props: JSON.stringify(blocks[i].node.attrs.props).slice(0, 160), html: blocks[i].el.outerHTML.slice(0, 300) });
+      }
+    }
+    const total = diffs.reduce((s, d) => s + (d.screen - d.layout), 0);
+    const buckets: Record<string, number> = {};
+    for (const d of diffs) { const k = String(Math.round(d.screen - d.layout)); buckets[k] = (buckets[k] ?? 0) + 1; }
+    const small = diffs.filter((d) => Math.abs(d.screen - d.layout) < 3).slice(0, 4).map(({ html: _h, ...d }) => d);
+    console.log("[selftest] buckets", JSON.stringify({ buckets, small }));
+    diffs.sort((x, y) => Math.abs(y.screen - y.layout) - Math.abs(x.screen - x.layout));
+    console.log("[selftest] drift", JSON.stringify({ compared: blocks.length, differing: diffs.length, totalPt: +total.toFixed(1), worst: diffs.slice(0, 6).map(({ html: _h, ...d }) => d) }));
+    // The worst paragraphs line by line: the words on each screen line, and the layout's lines.
+    for (const d of diffs.slice(0, 3)) {
+      const el = blocks[d.i].el;
+      const lines: string[] = [];
+      let lastTop = NaN;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode() as Text | null; t; t = walker.nextNode() as Text | null) {
+        for (const m of t.data.matchAll(/\S+/g)) {
+          const r = document.createRange();
+          r.setStart(t, m.index!);
+          r.setEnd(t, m.index! + m[0].length);
+          const top = Math.round(r.getBoundingClientRect().top);
+          if (top !== lastTop) { lines.push(""); lastTop = top; }
+          lines[lines.length - 1] += m[0] + " ";
+        }
+      }
+      const a2 = layoutOf[d.i];
+      const b2 = layoutOf[d.i + 1];
+      const page = result.pages[a2.page - 1];
+      const layoutLines = page.lines.filter((l) => !l.story && l.y >= a2.y - 0.5 && l.y < b2.y - 0.5).map((l) => l.segments.map((g) => g.text).join("").trim());
+      console.log("[selftest] lines", JSON.stringify({ i: d.i, screen: lines.map((l) => l.trim()), layout: layoutLines }));
+      // Where each word of the first line starts (pt from the column's left), on screen and in the layout.
+      const col = v.dom.getBoundingClientRect().left;
+      const xs: string[] = [];
+      const w2 = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let firstTop = NaN;
+      let lineNo = 0;
+      const want = Number(new URLSearchParams(location.search).get("line")) || 1;
+      for (let t = w2.nextNode() as Text | null; t; t = w2.nextNode() as Text | null) {
+        for (const m of t.data.matchAll(/\S+/g)) {
+          const r = document.createRange();
+          r.setStart(t, m.index!);
+          r.setEnd(t, m.index! + m[0].length);
+          const rr = r.getBoundingClientRect();
+          if (Number.isNaN(firstTop) || Math.abs(rr.top - firstTop) > 2) { firstTop = rr.top; lineNo++; }
+          if (lineNo !== want) continue;
+          xs.push(`${m[0]}@${(((rr.left - col) / zoom) * 0.75).toFixed(1)}`);
+        }
+      }
+      const first = page.lines.filter((l) => !l.story && l.y >= a2.y - 0.5)[want - 1];
+      const lx = (first?.segments ?? []).filter((g) => g.text.trim()).map((g) => `${g.text}@${(g.x - page.bodyLeft).toFixed(1)}`);
+      const tabs = [...el.querySelectorAll<HTMLElement>(".pw-tab")].map((t) => t.style.width || "(unsized)");
+      console.log("[selftest] xs", JSON.stringify({ i: d.i, screen: xs.slice(0, 30), layout: lx.slice(0, 30), tabs }));
+    }
+    console.log("[selftest] align", JSON.stringify({ done: true }));
   })();
 }

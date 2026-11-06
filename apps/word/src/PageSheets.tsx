@@ -1,6 +1,6 @@
 import type { LayoutResult, Page, PlacedImage } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
-import { memo, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 
 /** Clicking a footnote or endnote on the page opens the Notes pane. */
 export const NOTES_EVENT = "prime-word:notes";
@@ -53,11 +53,32 @@ function Chrome({ page, total, doc, top }: { page: Page; total: number; doc: Pri
   );
 }
 
+/** Pages drawn beyond the visible ones, above and below (scrolling a little shows no blank page). */
+const AROUND = 2;
+
+/**
+ * Where page `page`'s sheet starts on screen (client y), drawn or not: sheets are spaced evenly.
+ * (Only the sheets near the visible pages are drawn: see PageSheets.)
+ */
+export function sheetTop(page: number): number | undefined {
+  const box = document.querySelector<HTMLElement>(".pw-sheets");
+  if (!box) return undefined;
+  const pitch = Number(box.dataset.pitch);
+  const total = Number(box.dataset.count) * pitch - Number(box.dataset.gap);
+  const r = box.getBoundingClientRect();
+  return r.top + ((page - 1) * pitch * r.height) / total;
+}
+
 /**
  * Print Layout, in four layers (back to front): page sheets; the editor, starting at the first
  * page's body area, with page-gap spacers moving content onto the following sheets; margin masks,
  * which hide what runs through the space between pages (e.g. table borders); headers and footers.
  * A mask is dropped where the screen's content overflowed a page, so text is never hidden.
+ *
+ * Only the sheets, masks and headers and footers of the pages on screen (and AROUND either side) are
+ * drawn, as Word draws only what is on screen: each is a positioned box the browser composites on
+ * every frame, and all of a 855-page book's (some 3,400) cost ~60 ms a frame while typing. The editor
+ * itself stays whole; the drawn range follows scrolling.
  */
 export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow, children }: {
   layout?: LayoutResult; doc: PrimeDocument; gap: number; overflow: Set<number>; children: ReactNode;
@@ -71,11 +92,38 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
   const pitch = height + gap;
   const count = Math.max(1, pages.length);
   const mixed = pages.some((p) => p.width !== width || p.height !== height);
+  const box = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<[number, number]>([0, AROUND * 2]);
+  useEffect(() => {
+    const el = box.current;
+    const scroller = el?.closest(".canvas");
+    if (!el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      const view = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+      const perPage = (pitch * r.height) / (count * pitch - gap); // px
+      if (!perPage) return;
+      const first = Math.max(0, Math.floor((view.top - r.top) / perPage) - AROUND);
+      const last = Math.min(count - 1, Math.floor((view.bottom - r.top) / perPage) + AROUND);
+      setShown((old) => (old[0] === first && old[1] === last ? old : [first, last]));
+    };
+    update();
+    const target = scroller ?? window;
+    target.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    // Zooming changes the sheets' size without scrolling.
+    const resize = new ResizeObserver(update);
+    resize.observe(el);
+    return () => { target.removeEventListener("scroll", update); window.removeEventListener("resize", update); resize.disconnect(); };
+  }, [count, pitch, gap]);
+  const [from, to] = shown;
+  const near = (i: number) => i >= from && i <= to;
   return (
-    <div className="pw-sheets" style={{ width: `${width}pt`, height: `${count * pitch - gap}pt` }}>
+    <div ref={box} className="pw-sheets" data-pitch={pitch} data-count={count} data-gap={gap} data-masked={Math.max(0, pages.length - 1 - overflow.size)}
+      style={{ width: `${width}pt`, height: `${count * pitch - gap}pt` }}>
       {mixed && <div className="pw-notice">This document has sections with different page sizes; all pages are shown at the first page's size.</div>}
-      {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="pw-sheet" style={{ top: `${i * pitch}pt`, width: `${width}pt`, height: `${height}pt` }} />
+      {Array.from({ length: count }, (_, i) => near(i) && (
+        <div key={i} className="pw-sheet" data-page={i + 1} style={{ top: `${i * pitch}pt`, width: `${width}pt`, height: `${height}pt` }} />
       ))}
       <div className="pw-flow" style={{
         top: `${first?.bodyTop ?? margins.top ?? 72}pt`,
@@ -85,11 +133,11 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
         {children}
       </div>
       {pages.slice(1).map((next, i) => {
-        if (overflow.has(next.number)) return null;
+        if (overflow.has(next.number) || !(near(i) || near(i + 1))) return null;
         const prev = pages[i];
         const from = i * pitch + prev.bodyBottom;
         return (
-          <div key={`m${next.number}`} className="pw-mask" style={{ top: `${from}pt`, height: `${(i + 1) * pitch + next.bodyTop - from}pt` }}>
+          <div key={`m${next.number}`} className="pw-mask" data-page={next.number} style={{ top: `${from}pt`, height: `${(i + 1) * pitch + next.bodyTop - from}pt` }}>
             <div className="pw-mask-page" style={{ height: `${height - prev.bodyBottom}pt` }} />
             <div className="pw-mask-gap" style={{ height: `${gap}pt` }} />
             <div className="pw-mask-page" style={{ height: `${next.bodyTop}pt` }} />
@@ -97,7 +145,7 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
         );
       })}
       <div className="pw-chrome">
-        {pages.map((p, i) => <Chrome key={i} page={p} total={pages.length} doc={doc} top={i * pitch} />)}
+        {pages.map((p, i) => near(i) && <Chrome key={i} page={p} total={pages.length} doc={doc} top={i * pitch} />)}
       </div>
     </div>
   );

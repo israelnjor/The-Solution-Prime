@@ -696,8 +696,9 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
 
   /** A picture in a paragraph of its own, aligned as it sits between `from` and `to`. */
   function pictureParagraph(pic: Picture, from: number, to: number): Paragraph {
-    const id = `media/import${Object.keys(doc.images).length + 1}.png`;
-    doc.images[id] = { contentType: "image/png", extension: "png", data: base64(pic.png) };
+    const extension = pic.contentType === "image/jpeg" ? "jpeg" : "png";
+    const id = `media/import${Object.keys(doc.images).length + 1}.${extension}`;
+    doc.images[id] = { contentType: pic.contentType, extension, data: base64(pic.data) };
     const center = pic.x + pic.w / 2;
     const align = Math.abs(center - (from + to) / 2) < 12 && pic.x > from + 12 ? "center" : pic.x > from + 24 && Math.abs(pic.x + pic.w - to) < 6 ? "right" : undefined;
     return { type: "paragraph", props: align ? { align } : {}, content: [{ type: "image", imageId: id, width: round(pic.w, 0.1), height: round(pic.h, 0.1) }] };

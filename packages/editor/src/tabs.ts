@@ -7,7 +7,7 @@
 import { Resolver, type TabStop } from "@prime/layout";
 import type { Paragraph, ParagraphProps, PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
-import { type Command, Plugin } from "prosemirror-state";
+import { type Command, Plugin, PluginKey } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
 const DEFAULT_TAB = 36;
@@ -33,6 +33,10 @@ function sizeTabs(view: EditorView, node: Node, p: HTMLElement, resolver: Resolv
   const zoom = cssWidth ? box.width / cssWidth : 1;
   const cs = getComputedStyle(container);
   const left = container.getBoundingClientRect().left + (parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth || "0")) * zoom;
+  // Sizing a tab can move the ones after it onto another line, where they need another width: size
+  // them again until none changes (a few passes at most).
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
   for (let i = 0; i < tabs.length; i++) {
     const tab = tabs[i];
     const start = (tab.getBoundingClientRect().left - left) / zoom / PX; // pt from the column's left edge
@@ -49,27 +53,61 @@ function sizeTabs(view: EditorView, node: Node, p: HTMLElement, resolver: Resolv
     } else end = stop ? stop.pos : (Math.floor(start / DEFAULT_TAB + 1e-6) + 1) * DEFAULT_TAB;
     const width = Math.max(0, end - start);
     const leader = stop?.leader && LEADERS.includes(stop.leader) ? `pw-leader-${stop.leader}` : "";
-    tab.style.cssText = `display:inline-block;width:${width.toFixed(2)}pt;overflow:hidden;vertical-align:baseline`;
+    if (Math.abs(width - (parseFloat(tab.style.width) || -1)) <= 0.2 && tab.style.display === "inline-block") continue;
+    // No overflow:hidden: it would move the box's baseline to its bottom edge and make every line
+    // with a tab taller than the layout's (the tab character inside draws nothing anyway).
+    tab.style.cssText = `display:inline-block;width:${width.toFixed(2)}pt;vertical-align:baseline`;
     tab.className = `pw-tab${leader ? ` ${leader}` : ""}`;
+    changed = true;
+  }
+    if (!changed) break;
   }
 }
 
 /** Tab stops on screen, for the paragraphs that have tabs (each again only when it changes). */
 export function tabStops(doc: () => PrimeDocument): Plugin {
-  return new Plugin({
+  // Where the document changed since the tabs were last sized (positions in the current document):
+  // typing looks at those paragraphs only, not the whole document.
+  const key = new PluginKey<[number, number][]>("tabStops");
+  return new Plugin<[number, number][]>({
+    key,
+    state: {
+      init: () => [],
+      // The ranges of the latest change only: the view sizes them straight after each transaction.
+      apply(tr, ranges) {
+        if (!tr.docChanged) return ranges;
+        const out: [number, number][] = [];
+        tr.mapping.maps.forEach((m, i) => m.forEach((_a, _b, from, to) => {
+          const rest = tr.mapping.slice(i + 1);
+          out.push([rest.map(from, -1), rest.map(to, 1)]);
+        }));
+        return out;
+      },
+    },
     view(view) {
       let done = new WeakSet<Node>();
       let resolver = new Resolver(doc());
+      let seen = key.getState(view.state);
+      const size = (node: Node, pos: number) => {
+        if (node.type.name !== "paragraph") return true;
+        if (done.has(node) || !hasTab(node)) return false;
+        done.add(node);
+        const p = view.nodeDOM(pos);
+        if (p instanceof HTMLElement) sizeTabs(view, node, p, resolver);
+        return false;
+      };
       const run = (all: boolean) => {
-        if (all) { done = new WeakSet(); resolver = new Resolver(doc()); }
-        view.state.doc.descendants((node, pos) => {
-          if (node.type.name !== "paragraph") return true;
-          if (done.has(node) || !hasTab(node)) return false;
-          done.add(node);
-          const p = view.nodeDOM(pos);
-          if (p instanceof HTMLElement) sizeTabs(view, node, p, resolver);
-          return false;
-        });
+        if (all) {
+          done = new WeakSet();
+          resolver = new Resolver(doc());
+          view.state.doc.descendants(size);
+          return;
+        }
+        const ranges = key.getState(view.state) ?? [];
+        if (ranges === seen) return;
+        seen = ranges;
+        const max = view.state.doc.content.size;
+        for (const [a, b] of ranges) view.state.doc.nodesBetween(Math.max(0, Math.min(a, max)), Math.max(0, Math.min(b, max)), size);
       };
       // After the first drawing (fonts and styles applied).
       const first = setTimeout(() => run(true), 0);

@@ -419,6 +419,8 @@ export function updateFields(doc: () => PrimeDocument, pages: Pages = {}): Comma
  * file opened elsewhere shows the right pages without updating. Works on the document model.
  */
 export function refreshPageRefs(doc: PrimeDocument, pages: Pages): void {
+  // The model's blocks are shared with the editor's conversion cache: change a copy of them.
+  doc.sections = structuredClone(doc.sections);
   const visit = (items: Inline[]) => {
     let open: { instr: string; result: boolean; ref?: string }[] = [];
     for (let i = 0; i < items.length; i++) {

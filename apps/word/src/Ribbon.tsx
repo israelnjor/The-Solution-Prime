@@ -4,6 +4,8 @@ import {
   setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
   setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
   changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign, type CitationStyle, insertCitation, readSources,
+  autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
+  splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
@@ -23,7 +25,7 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "file" | "home" | "insert" | "layout" | "references" | "review" | "view" | "table" | "picture";
+type Tab = "file" | "home" | "insert" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture";
 /** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+S, Alt+R, Alt+W. */
 const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", layout: "P", references: "S", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
@@ -87,7 +89,16 @@ export interface RibbonProps {
   onCitationStyle(style: CitationStyle): void;
   onSources(startNew: boolean): void;
   onBibliography(): void;
+  onSortTable(): void;
 }
+
+const BORDER_CHOICES: [BorderChoice, string][] = [
+  ["all", "All Borders"], ["outside", "Outside Borders"], ["inside", "Inside Borders"], ["top", "Top Border"], ["bottom", "Bottom Border"],
+  ["left", "Left Border"], ["right", "Right Border"], ["insideH", "Inside Horizontal"], ["insideV", "Inside Vertical"], ["none", "No Border"],
+];
+const LOOK_OPTIONS: [keyof TableLook, string][] = [
+  ["firstRow", "Header Row"], ["lastRow", "Total Row"], ["bandedRows", "Banded Rows"], ["firstColumn", "First Column"], ["lastColumn", "Last Column"], ["bandedColumns", "Banded Columns"],
+];
 
 const CASES: [CaseMode, string][] = [["sentence", "Sentence case."], ["lower", "lowercase"], ["upper", "UPPERCASE"], ["title", "Capitalize Each Word"], ["toggle", "tOGGLE cASE"]];
 
@@ -112,7 +123,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -128,6 +139,9 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const [popover, setPopover] = useState<"link" | "table" | "margins" | null>(null);
+  /** The pen for table borders (Table Design): width in pt and colour. */
+  const [pen, setPen] = useState({ width: 0.5, color: "000000" });
+  const [shade, setShade] = useState("D9E2F3");
   const [custom, setCustom] = useState({ top: 2.54, bottom: 2.54, left: 2.54, right: 2.54 });
   const [linkUrl, setLinkUrl] = useState("");
   const [tableSize, setTableSize] = useState({ rows: 3, cols: 3 });
@@ -145,7 +159,13 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
   const fonts = [...new Set([...FONTS, ...(effective ? [effective.font] : [])])].sort();
   const tableActive = !!state && inTable(state);
   const picture = state ? pictureAt(state) : undefined;
-  const activeTab = (tab === "table" && !tableActive) || (tab === "picture" && !picture) ? "home" : tab;
+  const activeTab = ((tab === "table" || tab === "tableDesign") && !tableActive) || (tab === "picture" && !picture) ? "home" : tab;
+  const look = state && tableActive ? tableLookAt(state) : undefined;
+  const currentTableStyle = tableActive && state ? (() => {
+    for (let d = state.selection.$from.depth; d > 0; d--) if (state.selection.$from.node(d).type.name === "table") return state.selection.$from.node(d).attrs.props.style as string | undefined;
+    return undefined;
+  })() : undefined;
+  const columnWidth = state ? (() => { const p = pageSetup(state); return (p.pageWidth ?? 612) - (p.margins?.left ?? 72) - (p.margins?.right ?? 72); })() : 468;
   // Selecting a picture shows its tab (as Word does); leaving it returns to where you were.
   const pictureKey = picture ? `${picture.pos}` : "";
   useEffect(() => {
@@ -172,7 +192,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
           <button key={t} role="tab" aria-selected={activeTab === t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}
             title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
-        {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table</button>}
+        {tableActive && <button className={`contextual ${activeTab === "tableDesign" ? "on" : ""}`} onClick={() => setTab("tableDesign")}>Table Design</button>}
+        {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table Layout</button>}
         {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>Picture</button>}
         <span className="spacer" />
         <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
@@ -292,6 +313,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </div>
             <div className="group popover-anchor">
               <button onClick={() => setPopover(popover === "table" ? null : "table")} title="Insert a table">Table</button>
+              <button onClick={run(textToTable(docRef))} title="Turn the selected lines (separated by tabs) into a table">Text to Table</button>
               {popover === "table" && (
                 <div className="popover">
                   <label>Rows <input type="number" min={1} max={100} value={tableSize.rows} onChange={(e) => setTableSize((s) => ({ ...s, rows: Number(e.target.value) }))} /></label>
@@ -497,6 +519,39 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
           </>
         )}
 
+        {activeTab === "tableDesign" && look && (
+          <>
+            <div className="group" aria-label="Table Style Options">
+              {LOOK_OPTIONS.map(([k, label]) => (
+                <label key={k} className="choice"><input type="checkbox" checked={look[k]} onChange={(e) => run(setTableStyle(docRef, undefined, { ...look, [k]: e.target.checked }))()} /> {label}</label>
+              ))}
+            </div>
+            <div className="group" aria-label="Table Styles">
+              <select value={currentTableStyle ?? ""} onChange={(e) => run(setTableStyle(docRef, e.target.value, look))()} title="Table style" aria-label="Table style" className="table-style-select">
+                {!TABLE_STYLES.some((s) => s.id === currentTableStyle) && <option value={currentTableStyle ?? ""}>{currentTableStyle ? displayName(doc.styles.styles.find((s) => s.id === currentTableStyle)?.name ?? currentTableStyle) : "(no style)"}</option>}
+                {TABLE_STYLES.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="group" aria-label="Borders">
+              <select value={pen.width} onChange={(e) => setPen((p) => ({ ...p, width: Number(e.target.value) }))} title="Pen weight" aria-label="Pen weight">
+                {[0.25, 0.5, 0.75, 1, 1.5, 2.25, 3].map((w) => <option key={w} value={w}>{w} pt</option>)}
+              </select>
+              <label className="color" title="Pen colour" aria-label="Pen colour"><span style={{ borderBottom: `3px solid #${pen.color}` }}>✎</span>
+                <input type="color" value={`#${pen.color.toLowerCase()}`} onChange={(e) => setPen((p) => ({ ...p, color: e.target.value.slice(1).toUpperCase() }))} /></label>
+              <select value="" onChange={(e) => { if (e.target.value) run(setCellBorders(e.target.value as BorderChoice, { width: pen.width, color: pen.color }))(); }} title="Borders of the selected cells" aria-label="Borders" className="border-select">
+                <option value="">Borders</option>
+                {BORDER_CHOICES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div className="group" aria-label="Shading">
+              <label className="color" title="Shading colour" aria-label="Shading colour"><span style={{ background: `#${shade}`, padding: "0 4px" }}>▦</span>
+                <input type="color" value={`#${shade.toLowerCase()}`} onChange={(e) => { const c = e.target.value.slice(1).toUpperCase(); setShade(c); run(setCellShading(c))(); }} /></label>
+              <button onClick={run(setCellShading(shade))} title="Shade the selected cells">Shading</button>
+              <button onClick={run(setCellShading(undefined))} title="Remove the shading of the selected cells">No Colour</button>
+            </div>
+          </>
+        )}
+
         {activeTab === "table" && (
           <>
             <div className="group">
@@ -511,6 +566,27 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={run(deleteRow)}>Delete Row</button>
               <button onClick={run(deleteColumn)}>Delete Column</button>
               <button onClick={run(deleteTable)}>Delete Table</button>
+            </div>
+            <div className="group" aria-label="Merge">
+              <button onClick={run(mergeCells)} title="Merge the selected cells into one">Merge Cells</button>
+              <button onClick={run(splitCell)} title="Split a merged cell back, or a cell into two columns">Split Cell</button>
+            </div>
+            <div className="group" aria-label="Cell Size">
+              <button onClick={run(distributeColumns)} title="Make all columns the same width">Distribute Columns</button>
+              <button onClick={run(autofitWindow(columnWidth))} title="Make the table as wide as the page's text">AutoFit Window</button>
+            </div>
+            <div className="group" aria-label="Alignment">
+              <select value="" onChange={(e) => { const [v, h] = e.target.value.split(" "); if (v) run(setCellAlign(v as "top", h as "left"))(); }} title="Cell alignment" aria-label="Cell alignment" className="cell-align-select">
+                <option value="">Align</option>
+                {(["top", "center", "bottom"] as const).flatMap((v) => (["left", "center", "right"] as const).map((h) => (
+                  <option key={`${v}${h}`} value={`${v} ${h}`}>{`${v === "center" ? "Middle" : v[0].toUpperCase() + v.slice(1)} ${h === "center" ? "centre" : h}`}</option>
+                )))}
+              </select>
+            </div>
+            <div className="group" aria-label="Data">
+              <button className={state && isHeaderRow(state) ? "on" : ""} aria-pressed={!!(state && isHeaderRow(state))} onClick={run(toggleHeaderRows)} title="Repeat the selected top rows on every page the table runs onto">Repeat Header Rows</button>
+              <button onClick={onSortTable} title="Sort the rows by a column">Sort…</button>
+              <button onClick={run(tableToText())} title="Turn the table into text, cells separated by tabs">Convert to Text</button>
             </div>
           </>
         )}

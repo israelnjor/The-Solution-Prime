@@ -23,10 +23,47 @@ const files = () => {
   return { cMapUrl: `${base}cmaps/`, standardFontDataUrl: `${base}standard_fonts/`, wasmUrl: `${base}wasm/`, iccUrl: `${base}iccs/` };
 };
 
+/** Pictures are kept at 200 dpi at most, at the size they are shown on the page. */
+const PICTURE_DPI = 200;
+
+/**
+ * Pictures from a PDF, as small as they can be without losing what is in them: photographs (many
+ * colours, nothing see-through) as JPEG, drawings and screenshots as PNG; anything sharper than
+ * 200 dpi at its printed size scaled down. A 480-page book's pictures went from 68 MB to a fraction.
+ */
+async function encodePicture(rgba: Uint8Array, width: number, height: number, shown: { w: number; h: number }) {
+  if (typeof OffscreenCanvas === "undefined") return undefined;
+  // Many distinct colours (in a sample of the pixels) and no transparency: a photograph.
+  let opaque = true;
+  const colours = new Set<number>();
+  const step = Math.max(1, Math.floor((width * height) / 4096));
+  for (let p = 0; p < width * height; p += step) {
+    const i = p * 4;
+    if (rgba[i + 3] !== 255) opaque = false;
+    colours.add(((rgba[i] >> 3) << 10) | ((rgba[i + 1] >> 3) << 5) | (rgba[i + 2] >> 3));
+  }
+  const photo = opaque && colours.size > 600;
+  const scale = Math.min(1, ((shown.w / 72) * PICTURE_DPI) / width, ((shown.h / 72) * PICTURE_DPI) / height);
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  const source = new OffscreenCanvas(width, height);
+  source.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+  let canvas = source;
+  if (w !== width || h !== height) {
+    canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(source, 0, 0, w, h);
+  }
+  const type = photo ? "image/jpeg" : "image/png";
+  const blob = await canvas.convertToBlob(photo ? { type, quality: 0.85 } : { type });
+  return { data: new Uint8Array(await blob.arrayBuffer()), contentType: type as "image/png" | "image/jpeg" };
+}
+
 export async function convertPdfFile(bytes: Uint8Array, onPage?: (done: number, total: number) => void): Promise<ConversionResult> {
   const [{ convertPdf }, lib] = await Promise.all([import("@prime/pdf-import"), pdfjs()]);
   // pdf.js takes ownership of the buffer it is given: pass a copy, the caller keeps the original.
-  return convertPdf(bytes.slice(), lib, files(), onPage);
+  return convertPdf(bytes.slice(), lib, { ...files(), encodePicture }, onPage);
 }
 
 /** The original PDF, for drawing its pages. */

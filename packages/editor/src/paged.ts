@@ -203,14 +203,89 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
 }
 
 /**
- * Where the break for a page should move when the screen's content overflows that page: before the
- * first row or top-level block (after the page's own start) that crosses the bottom of the body.
+ * How much space the paragraph at `pos` has before it (in CSS px) beyond the space after the block
+ * above (the two collapse): what a page break before it takes away (`.pw-page-gap + p`).
  */
-function earlierBreak(view: EditorView, limit: number, after: number, before: number,
-  top: (el: Element) => number, bottom: (el: Element) => number): { kind: "row" | "block"; pos: number; top: number } | undefined {
+function spaceBefore(view: EditorView, pos: number): number {
+  const el = view.nodeDOM(pos) as HTMLElement | null;
+  if (!el || el.tagName !== "P") return 0;
+  const css = (v: string) => (v.endsWith("pt") ? (parseFloat(v) * 96) / 72 : parseFloat(v) || 0);
+  let prev = el.previousElementSibling;
+  while (prev?.classList.contains("pw-page-gap")) prev = prev.previousElementSibling;
+  const after = prev ? parseFloat(getComputedStyle(prev).marginBottom) || 0 : 0;
+  return Math.max(0, css(el.style.marginTop) - after);
+}
+
+/**
+ * The start of the first line of paragraph `el` that crosses the bottom of the body (`limit`), when
+ * it is not the paragraph's first line and starts after the page's own start (`after`): a break there
+ * moves only the lines that do not fit, as the layout splits paragraphs. Moving the whole paragraph
+ * left much of the page empty and pushed that much more onto every page after it, so a long book
+ * corrected nearly every page, round after round. `planned` turns a screen y into the planned
+ * position fit works in.
+ */
+function lineBreak(view: EditorView, el: Element, limit: number, after: number, planned: (clientY: number) => number):
+  { kind: "inline"; pos: number; top: number } | undefined {
+  if (el.tagName !== "P") return undefined;
+  // The paragraph's lines, from its text (spacers and pictures' boxes aside).
+  const lines: { top: number; bottom: number; left: number; y: number }[] = [];
+  const range = document.createRange();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!n.textContent || n.parentElement?.closest(".pw-page-gap, .pw-wrap, .pw-float-anchor")) continue;
+    range.selectNodeContents(n);
+    for (const r of Array.from(range.getClientRects())) {
+      if (!r.height) continue;
+      const top = planned(r.top);
+      const bottom = planned(r.bottom);
+      const line = lines.find((l) => top < l.bottom - 1 && bottom > l.top + 1);
+      if (line) {
+        line.top = Math.min(line.top, top);
+        line.bottom = Math.max(line.bottom, bottom);
+        if (r.left < line.left) { line.left = r.left; line.y = (r.top + r.bottom) / 2; }
+      } else lines.push({ top, bottom, left: r.left, y: (r.top + r.bottom) / 2 });
+    }
+  }
+  lines.sort((a, b) => a.top - b.top);
+  const i = lines.findIndex((l) => l.bottom > limit);
+  if (i < 1 || lines[i].top <= after + 1) return undefined;
+  // The line's first character: in the first text node with text on that line or later, found by
+  // binary search over its characters (from the DOM: hit-testing works only on screen).
+  const from = lines[i].top - 1;
+  const charTop = (n: globalThis.Node, k: number) => { range.setStart(n, k); range.setEnd(n, k + 1); const r = range.getClientRects()[0]; return r ? planned(r.top + r.height / 2) : -Infinity; };
+  walker.currentNode = el;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const len = n.textContent?.length ?? 0;
+    if (!len || n.parentElement?.closest(".pw-page-gap, .pw-wrap, .pw-float-anchor")) continue;
+    if (charTop(n, len - 1) < from) continue; // all of it is on earlier lines
+    let lo = 0;
+    let hi = len - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (charTop(n, mid) >= from) hi = mid;
+      else lo = mid + 1;
+    }
+    let pos: number;
+    try { pos = view.posAtDOM(n, lo); } catch { return undefined; }
+    const $pos = view.state.doc.resolve(pos);
+    // The break must fall inside this paragraph, after its start.
+    if (!$pos.parent.isTextblock || $pos.parentOffset === 0) return undefined;
+    // The line box starts halfway between the text of the line before and its own.
+    return { kind: "inline", pos, top: (lines[i - 1].bottom + lines[i].top) / 2 };
+  }
+  return undefined;
+}
+
+/**
+ * Where the break for a page should move when the screen's content overflows that page: before the
+ * first row, top-level block or (in a paragraph) line, after the page's own start, that crosses the
+ * bottom of the body.
+ */
+function earlierBreak(view: EditorView, blocks: Element[], limit: number, after: number, before: number,
+  top: (el: Element) => number, bottom: (el: Element) => number, planned: (clientY: number) => number):
+  { kind: "row" | "block" | "inline"; pos: number; top: number } | undefined {
   // Only the blocks on this page (found by binary search: blocks are in screen order), and the rows of
   // its tables — scanning the whole document for every page made long documents slow.
-  const blocks = Array.from(view.dom.children).filter((el) => !el.classList.contains("pw-page-gap"));
   let lo = 0;
   let hi = blocks.length;
   while (lo < hi) {
@@ -221,11 +296,19 @@ function earlierBreak(view: EditorView, limit: number, after: number, before: nu
   const near: Element[] = [];
   // From the block that starts before the page (a table continuing onto it) to the page's end.
   for (let i = Math.max(0, lo - 1); i < blocks.length && top(blocks[i]) < before; i++) near.push(blocks[i]);
-  const rows = near.flatMap((el) => Array.from(el.querySelectorAll("tr")));
-  const candidates = [...rows, ...near]
-    .filter((el) => top(el) > after + 1 && top(el) < before && bottom(el) > limit)
+  const fits = (el: Element) => top(el) > after + 1 && top(el) < before && bottom(el) > limit;
+  const rows = near.flatMap((el) => Array.from(el.querySelectorAll("tr"))).filter(fits);
+  // A paragraph that crosses the bottom, even one continued from the page before.
+  const split = near.find((el) => el.tagName === "P" && top(el) < limit && bottom(el) > limit);
+  // A table that crosses the bottom breaks before its crossing row, not before the whole table
+  // (moving a whole table for a row that ran 2px over left most of a page empty, and every page
+  // after it then overflowed in turn); only a table whose first row crosses moves as a whole.
+  const candidates = [...rows, ...near.filter((el) => fits(el) && !rows.some((r) => el.contains(r)))]
     .sort((a, b) => top(a) - top(b));
   for (const el of candidates) {
+    if (split && top(split) < top(el)) break; // the paragraph comes first
+    const line = el === split ? lineBreak(view, el, limit, after, planned) : undefined;
+    if (line) return line;
     const $pos = view.state.doc.resolve(view.posAtDOM(el, 0));
     for (let d = $pos.depth; d > 0; d--) {
       const name = $pos.node(d).type.name;
@@ -233,13 +316,15 @@ function earlierBreak(view: EditorView, limit: number, after: number, before: nu
       if (el.tagName !== "TR" && d === 1) return { kind: "block", pos: $pos.before(1), top: top(el) };
     }
   }
-  return undefined;
+  return split ? lineBreak(view, split, limit, after, planned) : undefined;
 }
 
 export function pagination(opts: PagedOptions): Plugin {
   let layout: LayoutResult | undefined;
   /** The page starts currently drawn (from the layout, possibly moved earlier by `fit`). */
   let starts: ResolvedStart[] = [];
+  /** The page starts as the last layout gave them (before corrections), kept on their text like `starts`. */
+  let raw: ResolvedStart[] = [];
   /** Where text wraps around floating objects, and the objects themselves (from the layout). */
   let wraps: ReturnType<typeof resolveWraps> = [];
   let floats: ResolvedFloat[] = [];
@@ -274,8 +359,14 @@ export function pagination(opts: PagedOptions): Plugin {
     // (Unrounded CSS width: offsetWidth is a whole number, and its rounding error grows down the document.)
     const cssWidth = parseFloat(getComputedStyle(view.dom).width);
     const zoom = cssWidth ? box.width / cssWidth : 1;
-    const top = (el: Element) => (el.getBoundingClientRect().top - box.top) / zoom;
-    const bottom = (el: Element) => (el.getBoundingClientRect().bottom - box.top) / zoom;
+    // Nothing moves during this pass (sizes are written at its end): each element is measured once.
+    // (Hundreds of corrections in a long book measured every block again for each one: seconds.)
+    const rects = new Map<Element, DOMRect>();
+    const rect = (el: Element) => { let r = rects.get(el); if (!r) rects.set(el, (r = el.getBoundingClientRect())); return r; };
+    const top = (el: Element) => (rect(el).top - box.top) / zoom;
+    const bottom = (el: Element) => (rect(el).bottom - box.top) / zoom;
+    let blocks: Element[] | undefined;
+    const topLevel = () => (blocks ??= Array.from(view.dom.children).filter((el) => !el.classList.contains("pw-page-gap")));
     const bodyTopAt = (page: number) => (page - 1) * pitch + ((layout!.pages[page - 1]?.bodyTop ?? first.bodyTop) - first.bodyTop) * PX;
     const overflow = new Set<number>();
     const items = Array.from(view.dom.querySelectorAll<HTMLElement>(".pw-page-gap, .pw-page-row"));
@@ -292,6 +383,7 @@ export function pagination(opts: PagedOptions): Plugin {
     // Positions as they will be once the planned sizes apply (valid up to the next spacer).
     const plannedTop = (el: Element) => { const t = top(el); return t + shift + extra(t); };
     const plannedBottom = (el: Element) => bottom(el) + shift + extra(top(el));
+    const plannedY = (clientY: number) => { const t = (clientY - box.top) / zoom; return t + shift + extra(t); };
     for (let i = 0; i < items.length; i++) {
       const el = items[i];
       const page = Number(el.dataset.page);
@@ -306,7 +398,12 @@ export function pagination(opts: PagedOptions): Plugin {
       if (natural > limit) {
         if (rounds < 10 && !unfixable.has(page)) {
           // Only content after the previous page's start may move to this page.
-          const moved = timed("fit.earlierBreak", () => earlierBreak(view, limit, Math.max(previousEnd, bodyTopAt(page - 1)), natural, plannedTop, plannedBottom));
+          const found = timed("fit.earlierBreak", () => earlierBreak(view, topLevel(), limit, Math.max(previousEnd, bodyTopAt(page - 1)), natural, plannedTop, plannedBottom, plannedY));
+          // A correction moves the break earlier: finding the break it already has (a line that ends a
+          // fraction of a pixel low) changes nothing, and counted as a correction round after round.
+          const now = starts.find((s) => s.page === page);
+          const moved = found && (!now || found.pos < now.pos) ? found : undefined;
+          if (!moved && natural - limit < 3) { sizes.set(key, size); shift += size - current; previousEnd = natural + size; lastMove = undefined; if (Math.abs(size - current) > 0.5) off = true; continue; }
           if (moved) {
             moves++;
             mark(`correction p${page} +${Math.round(natural - limit)}px`);
@@ -314,11 +411,17 @@ export function pagination(opts: PagedOptions): Plugin {
             // The spacer moves up to the new break: content from there moves by its new size, and
             // content after the old break no longer has the old spacer's size.
             const movedSize = Math.max(0, bodyTopAt(page) - moved.top);
+            // A paragraph that starts a page has no space before it (styles.css): the one that started
+            // it gets its space back, pushing what follows down (a long book's headings made the next
+            // pages overflow again, round after round), and a new one loses its space, so its spacer
+            // grows by that much for the paragraph to land at the top.
+            const regained = now?.kind === "block" ? spaceBefore(view, now.pos) : 0;
+            const lost = moved.kind === "block" ? spaceBefore(view, moved.pos) : 0;
             sizes.delete(key);
-            sizes.set(`${moved.kind === "row" ? "row" : "gap"}-${page}`, movedSize);
-            shift += movedSize - current;
+            sizes.set(`${moved.kind === "row" ? "row" : "gap"}-${page}`, movedSize + lost);
+            shift += movedSize - current + regained;
             previousEnd = moved.top + movedSize;
-            lastMove = { at: tops[i], size: current };
+            lastMove = { at: tops[i], size: current - regained };
             continue;
           }
           unfixable.add(page);
@@ -340,12 +443,52 @@ export function pagination(opts: PagedOptions): Plugin {
       return;
     }
     if (off || sizes.size !== applied.size) timed("fit.write", () => write(sheet, sizes));
+    rects.clear(); // the page now has the new sizes: measure again from here
     // Verify: every spacer should now end at its page's body top.
     if (off && pass < 2) {
       const wrong = items.some((el) => Math.abs(top(el) + (sizes.get(`${el.classList.contains("pw-page-row") ? "row" : "gap"}-${el.dataset.page}`) ?? 0) - bodyTopAt(Number(el.dataset.page))) > 1);
       if (wrong) return fit(view, sheet, pass + 1);
     }
     opts.onFit?.(overflow);
+  };
+
+  /**
+   * Fitting after an edit at `from`: pages before it are untouched, and everything after the first
+   * spacer that follows it keeps its place once that one spacer takes up the difference, so only that
+   * spacer is measured and resized (measuring all of them after every keystroke cost ~30 ms in a
+   * 944-page book). Returns false when that is not enough — the edited page now overflows — and a
+   * full fit must run.
+   */
+  const fastFit = (view: EditorView, sheet: HTMLStyleElement, from: number): boolean => {
+    if (!layout?.pages.length) return true;
+    const first = layout.pages[0];
+    const pitch = (first.height + PAGE_GAP) * PX;
+    const items = view.dom.querySelectorAll<HTMLElement>(".pw-page-gap, .pw-page-row");
+    // The first spacer after the edit (spacers are in document order).
+    let lo = 0;
+    let hi = items.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      let pos: number;
+      try { pos = view.posAtDOM(items[mid], 0); } catch { return false; }
+      if (pos <= from) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo >= items.length) return true; // the last page: nothing below it to place
+    const el = items[lo];
+    const page = Number(el.dataset.page);
+    const key = `${el.classList.contains("pw-page-row") ? "row" : "gap"}-${page}`;
+    const box = view.dom.getBoundingClientRect();
+    const cssWidth = parseFloat(getComputedStyle(view.dom).width);
+    const zoom = cssWidth ? box.width / cssWidth : 1;
+    const natural = (el.getBoundingClientRect().top - box.top) / zoom;
+    const previous = layout.pages[page - 2];
+    const limit = previous ? (page - 2) * pitch + (previous.bodyBottom - first.bodyTop) * PX + 1 : Infinity;
+    if (natural > limit) return false;
+    const bodyTop = (page - 1) * pitch + ((layout.pages[page - 1]?.bodyTop ?? first.bodyTop) - first.bodyTop) * PX;
+    const size = Math.max(0, bodyTop - natural);
+    if (Math.abs(size - (applied.get(key) ?? 0)) > 0.5) write(sheet, new Map(applied).set(key, size));
+    return true;
   };
 
   const write = (sheet: HTMLStyleElement, sizes: Map<string, number>) => {
@@ -365,10 +508,13 @@ export function pagination(opts: PagedOptions): Plugin {
     state: {
       init: () => ({ decorations: DecorationSet.empty }),
       apply(tr, old) {
-        const starts = tr.getMeta(paginationKey) as ResolvedStart[] | undefined;
-        if (starts) return { decorations: decorations(tr.doc, starts, wraps, floats, opts.base()) };
+        const drawn = tr.getMeta(paginationKey) as ResolvedStart[] | undefined;
+        if (drawn) return { decorations: decorations(tr.doc, drawn, wraps, floats, opts.base()) };
         if (!tr.docChanged) return old;
-        // Keep wrap points on their text until the next layout replaces them.
+        // Keep page starts and wrap points on their text until the next layout replaces them (a
+        // correction made before then must not put a break where the text was before an edit).
+        starts = starts.map((p) => ({ ...p, pos: tr.mapping.map(p.pos) }));
+        raw = raw.map((p) => ({ ...p, pos: tr.mapping.map(p.pos) }));
         wraps = wraps.map((w) => ({ ...w, pos: tr.mapping.map(w.pos) }));
         floats = floats.map((f) => ({ ...f, pos: tr.mapping.map(f.pos) }));
         return { decorations: old.decorations.map(tr.mapping, tr.doc) };
@@ -385,21 +531,62 @@ export function pagination(opts: PagedOptions): Plugin {
       document.head.appendChild(sheet);
       // A timeout, not requestAnimationFrame: frames do not run in hidden or headless windows, and
       // reading positions forces layout anyway.
-      const refit = () => {
+      // The next layout waits for a pause in typing: `delay` ms with no edit and none of our own work.
+      // (A long fit blocks the page; when it ended, the layout's timer had already run out and fired
+      // before the next keystroke could put it off, so a long document laid itself out again and
+      // again mid-sentence.) The pause also grows with what the last layout cost, up to 2 s.
+      let lastEdit = 0;
+      let busyUntil = 0;
+      let cost = 0;
+      const pause = () => Math.max(opts.delay ?? 250, Math.min(2000, cost));
+      const schedule = () => {
+        clearTimeout(timer);
+        const due = Math.max(lastEdit, busyUntil) + pause() - performance.now();
+        timer = setTimeout(() => (Math.max(lastEdit, busyUntil) + pause() - performance.now() > 1 ? schedule() : relayout()), Math.max(0, due));
+      };
+      // What the next fit must cover: everything, or (after an edit) only what follows a position.
+      let want: number | "full" | undefined;
+      const refit = (from?: number) => {
         clearTimeout(fitTimer);
-        fitTimer = setTimeout(() => timed("fit", () => fit(view, sheet)), 0);
+        want = from === undefined || want === "full" ? "full" : Math.min(want ?? from, from);
+        fitTimer = setTimeout(() => {
+          const w = want;
+          want = undefined;
+          timed("fit", () => { if (w === "full" || w === undefined || !fastFit(view, sheet, w)) fit(view, sheet); });
+          busyUntil = performance.now();
+        }, 0);
       };
       const relayout = () => {
+        const began = performance.now();
+        queueMicrotask(() => { cost = performance.now() - began; busyUntil = performance.now(); });
         const doc = timed("toModel", () => fromProseMirror(view.state.doc, opts.base()));
         const result = timed("layout", () => layoutDocument(doc, opts.measurer));
         layout = result;
         timed("onLayout", () => opts.onLayout?.(result));
-        starts = timed("pageStarts", () => resolvePageStarts(view.state.doc, result.pageStarts));
-        wraps = resolveWraps(view.state.doc, result.wraps);
-        floats = resolveFloats(view.state.doc, result.floats);
-        rounds = 0;
+        const next = timed("pageStarts", () => resolvePageStarts(view.state.doc, result.pageStarts));
+        const nextWraps = resolveWraps(view.state.doc, result.wraps);
+        const nextFloats = resolveFloats(view.state.doc, result.floats);
+        // Corrections stand where the layout did not change: a page whose start and whose previous
+        // page's start are where the last layout put them keeps its correction (an edit in chapter 10
+        // leaves chapter 1's pages alone; starting all corrections again after every pause made a long
+        // book correct hundreds of breaks each time). If nothing changed, nothing is drawn again.
+        const id = (p: ResolvedStart | undefined) => (p ? `${p.kind}:${p.pos}` : "");
+        const was = new Map(raw.map((p) => [p.page, id(p)]));
+        const nextAt = new Map(next.map((p) => [p.page, id(p)]));
+        const fixed = new Map(starts.map((p) => [p.page, p]));
+        const kept = (page: number) => (was.get(page) ?? "") === (nextAt.get(page) ?? "");
+        const merged = next.map((p) => (kept(p.page) && kept(p.page - 1) && fixed.get(p.page)) || p);
+        const same = merged.length === starts.length && merged.every((p, i) => id(p) === id(starts[i]) && p.page === starts[i].page)
+          && JSON.stringify(nextWraps) === JSON.stringify(wraps) && JSON.stringify(nextFloats) === JSON.stringify(floats);
+        raw = next;
+        wraps = nextWraps;
+        floats = nextFloats;
+        rounds = 0; // the loop guard counts per layout
         unfixable = new Set();
-        timed("drawBreaks", () => view.dispatch(view.state.tr.setMeta(paginationKey, starts).setMeta("addToHistory", false)));
+        if (!same) {
+          starts = merged;
+          timed("drawBreaks", () => view.dispatch(view.state.tr.setMeta(paginationKey, starts).setMeta("addToHistory", false)));
+        }
         refit();
       };
       timer = setTimeout(relayout, 0);
@@ -409,10 +596,14 @@ export function pagination(opts: PagedOptions): Plugin {
       return {
         update(v, prev) {
           if (v.state.doc !== prev.doc) {
-            clearTimeout(timer);
-            timer = setTimeout(relayout, opts.delay ?? 250);
+            lastEdit = performance.now();
+            schedule();
           }
-          if (v.state.doc !== prev.doc || paginationKey.getState(v.state) !== paginationKey.getState(prev)) refit();
+          if (v.state.doc !== prev.doc) {
+            // An edit moves only what follows it (see fastFit).
+            const from = prev.doc.content.findDiffStart(v.state.doc.content);
+            if (from !== null) refit(from);
+          } else if (paginationKey.getState(v.state) !== paginationKey.getState(prev)) refit();
         },
         destroy() {
           clearTimeout(timer);

@@ -6,3 +6,4 @@ export type { FontKey, FontMetrics, Measurer } from "./measure.js";
 export { Resolver, type ResolvedParagraph, type ResolvedRun, type TabStop } from "./resolve.js";
 export { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 export { extractFont } from "./fontfile.js";
+export { type Border, type CellLook, cellLooks, parseBorders, type Sides } from "./tables.js";

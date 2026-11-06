@@ -6,8 +6,8 @@
  * decorations. Runs render their own direct formatting; everything else is inherited via CSS.
  * Equations are drawn as SVG by the math typesetter.
  */
-import { MathTypesetter, type Measurer, type ResolvedRun, Resolver } from "@prime/layout";
-import { type FloatInfo, type Paragraph, type PrimeDocument, paragraphText, type TextInline } from "@prime/pdm";
+import { type CellLook, cellLooks, MathTypesetter, type Measurer, type ResolvedRun, Resolver } from "@prime/layout";
+import { type FloatInfo, type Paragraph, type PrimeDocument, paragraphText, type RunProps, type Table, type TextInline } from "@prime/pdm";
 import { DOMSerializer, type Node } from "prosemirror-model";
 import { Plugin, PluginKey, type Transaction } from "prosemirror-state";
 import { AddMarkStep, RemoveMarkStep, ReplaceStep } from "prosemirror-transform";
@@ -30,6 +30,8 @@ export function runCss(r: Partial<ResolvedRun>): string {
   const css: string[] = [];
   if (r.font) css.push(`font-family:"${r.font}"`);
   if (r.size !== undefined) css.push(`font-size:${pt(r.vertAlign ? r.size * 0.65 : r.size)}`);
+  // Superscript or subscript with its size from a style: 65% of the text around it (as the layout draws it).
+  else if (r.vertAlign) css.push("font-size:65%");
   if (r.bold !== undefined) css.push(`font-weight:${r.bold ? 700 : 400}`);
   if (r.italic !== undefined) css.push(`font-style:${r.italic ? "italic" : "normal"}`);
   if (r.color) css.push(`color:#${r.color}`);
@@ -40,7 +42,11 @@ export function runCss(r: Partial<ResolvedRun>): string {
     if (u && /thick|Heavy/.test(u)) css.push("text-decoration-thickness:2px");
   }
   if (r.highlight) css.push(`background:${HIGHLIGHT[r.highlight] ?? "transparent"}`);
-  if (r.vertAlign) css.push(`vertical-align:${r.vertAlign === "superscript" ? "super" : "sub"}`);
+  // Raised or lowered by the layout's amounts (a third of the full size up, 0.14 down: in the run's own
+  // 65% size, 0.51em and 0.215em). Runs have no line height of their own (styles.css), so this does
+  // not make the line taller; position:relative did the same but made each run a layer of its own,
+  // which the browser composites on every frame (a thousand in a long book).
+  if (r.vertAlign) css.push(`vertical-align:${r.vertAlign === "superscript" ? "0.51em" : "-0.215em"}`);
   if (r.caps) css.push("text-transform:uppercase");
   if (r.charSpacing) css.push(`letter-spacing:${pt(r.charSpacing)}`);
   if (r.hidden) css.push("display:none");
@@ -94,13 +100,6 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
     return wrap;
   };
 
-  const tableHasBorders = (props: { style?: string; extra?: { name: string; xml: string }[] }) => {
-    const style = resolver.tableStyle(props.style);
-    const xml = [...(props.extra ?? []), ...doc.styles.styles.filter((s) => s.id === style).flatMap((s) => s.table?.extra ?? [])]
-      .find((x) => x.name === "w:tblBorders")?.xml;
-    return !!xml && /w:val="(?!none|nil)[^"]+"/.test(xml);
-  };
-
   return {
     paragraph: () => ["p", 0],
     run: (mark) => runCss(resolver.direct(mark.attrs.props)),
@@ -109,7 +108,7 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
       const props = node.attrs.props;
       const align = props.align === "center" ? "margin-left:auto;margin-right:auto" : props.align === "right" ? "margin-left:auto" : "";
       return ["table", {
-        class: tableHasBorders(props) ? "pw-table pw-borders" : "pw-table", style: `width:${pt(grid.reduce((a, b) => a + b, 0))};${align}`,
+        class: "pw-table", style: `width:${pt(grid.reduce((a, b) => a + b, 0))};${align}`,
         "data-pw-props": json(props), "data-pw-grid": json(grid),
       },
         ["colgroup", ...grid.map((w) => ["col", { style: `width:${pt(w)}` }])], ["tbody", 0]];
@@ -253,6 +252,101 @@ function floatCanvas(floats: FloatInfo[], doc: PrimeDocument, resolver: Resolver
   return canvas;
 }
 
+/** A table node's structure and formatting, as the layout's cell resolver reads it (no content needed). */
+function tableModel(node: Node): Table {
+  const rows: Table["rows"] = [];
+  node.forEach((row) => {
+    const cells: Table["rows"][number]["cells"] = [];
+    row.forEach((cell) => cells.push({ props: cell.attrs.props, blocks: [] }));
+    rows.push({ props: row.attrs.props, cells });
+  });
+  return { type: "table", props: node.attrs.props, grid: node.attrs.grid, rows };
+}
+
+/** A cell's resolved borders and shading as CSS (sides without a border keep the editor's light gridlines). */
+function cellCss(look: CellLook): string {
+  const css: string[] = [];
+  for (const side of ["top", "bottom", "left", "right"] as const) {
+    const b = look.borders[side];
+    if (b) css.push(`border-${side}:${pt(b.width)} ${b.style.startsWith("double") ? "double" : b.style.startsWith("dot") ? "dotted" : b.style.startsWith("dash") ? "dashed" : "solid"} #${b.color ?? "000000"}`);
+  }
+  if (look.fill) css.push(`background:#${look.fill}`);
+  return css.join(";");
+}
+
+/**
+ * ProseMirror's DecorationSet.forChild, made fast for long documents. For every top-level node on
+ * every update it scans all top-level decorations (the page gaps: hundreds) for inline ones, and the
+ * list of children that have decorations (paragraphs with spelling marks: thousands) for its own —
+ * 7,500 paragraphs × both lists made each keystroke in a 480-page book cost ~15 ms. This finds the
+ * child by binary search (the list is sorted by position) and skips the scan when the set has no
+ * inline decorations; with inline ones it does exactly what ProseMirror does. (prosemirror-view is
+ * pinned to an exact version; the fields used here are that version's.)
+ */
+{
+  type Set = { local: Decoration[]; children: (number | DecorationSet)[] };
+  const proto = DecorationSet.prototype as unknown as { forChild(offset: number, node: Node): DecorationSet };
+  const original = proto.forChild;
+  const hasInline = new WeakMap<object, boolean>();
+  proto.forChild = function (this: DecorationSet & Set, offset: number, node: Node) {
+    if (this === DecorationSet.empty || node.isLeaf || !Array.isArray(this.local) || !Array.isArray(this.children)) return original.call(this, offset, node);
+    let inline = hasInline.get(this);
+    // Decoration.inline: a getter in this version's code, not in its type definitions.
+    if (inline === undefined) hasInline.set(this, (inline = this.local.some((d) => (d as unknown as { inline: boolean }).inline)));
+    if (inline) return original.call(this, offset, node);
+    const ch = this.children;
+    let lo = 0;
+    let hi = ch.length / 3;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((ch[mid * 3] as number) < offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo * 3 < ch.length && ch[lo * 3] === offset ? (ch[lo * 3 + 2] as DecorationSet) : DecorationSet.empty;
+  };
+}
+
+/**
+ * ProseMirror's DecorationSet.create, made linear at the top level. It gives each top-level node its
+ * decorations by scanning every decoration once per node: 9,778 paragraphs × thousands of spelling
+ * marks (or page gaps, or line heights) cost about a second each time a set was rebuilt in a 944-page
+ * book. This sorts the decorations once and walks the nodes and decorations together, handing each
+ * node its own (built by ProseMirror itself, positions relative to the node, as ProseMirror does);
+ * the rest stay at the top, sorted and checked as ProseMirror does. Same sets as the original.
+ */
+{
+  type Ctor = new (local: Decoration[], children: (number | DecorationSet)[]) => DecorationSet;
+  type Span = Decoration & { copy(from: number, to: number): Decoration; type: { valid(node: Node, span: Decoration): boolean } };
+  const original = DecorationSet.create;
+  DecorationSet.create = function (doc: Node, decorations: Decoration[]): DecorationSet {
+    if (decorations.length < 64 || doc.childCount < 64) return original.call(DecorationSet, doc, decorations);
+    const spans = (decorations as Span[]).slice().sort((a, b) => a.from - b.from || a.to - b.to);
+    const locals: Decoration[] = [];
+    const children: (number | DecorationSet)[] = [];
+    let i = 0;
+    doc.forEach((child, start) => {
+      const end = start + child.nodeSize;
+      // Those that start before this node (or at its start) are not inside it.
+      while (i < spans.length && spans[i].from <= start) locals.push(spans[i++]);
+      if (child.isLeaf) return;
+      const inside: Decoration[] = [];
+      while (i < spans.length && spans[i].from < end) {
+        const s = spans[i++];
+        if (s.to < end) inside.push(s.copy(s.from - start - 1, s.to - start - 1));
+        else locals.push(s); // crosses the node's end
+      }
+      if (inside.length) {
+        const sub = original.call(DecorationSet, child, inside);
+        if (sub !== DecorationSet.empty) children.push(start, end, sub);
+      }
+    });
+    while (i < spans.length) locals.push(spans[i++]);
+    locals.sort((a, b) => a.from - b.from || a.to - b.to);
+    const valid = (locals as Span[]).filter((s) => s.type.valid(doc, s));
+    return valid.length || children.length ? new (DecorationSet as unknown as Ctor)(valid, children) : DecorationSet.empty;
+  } as typeof DecorationSet.create;
+}
+
 /** The property names in a CSS declaration list (as ProseMirror itself reads decoration styles). */
 const CSS_PROPERTY = /\s*([\w\-\xa1-￿]+)\s*:(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\(.*?\)|[^;])*/g;
 
@@ -305,20 +399,44 @@ class ParagraphView {
 }
 
 export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin {
+  /**
+   * The line heights of a paragraph's text runs: the most common (by characters), which sets the
+   * paragraph's line height, and each run's own with its offset. Word makes a line as tall as the text on
+   * it (the paragraph mark counts only when there is none); on screen runs add no height of their own
+   * (styles.css), and runs taller than the common text carry theirs in a decoration (pw-tall), so only
+   * the lines they are on grow — as in the layout.
+   */
+  const runHeights = (node: Node, rp: ReturnType<Resolver["paragraph"]>, resolver: Resolver, tableStyle?: string, cond?: RunProps) => {
+    const runs: { offset: number; size: number; height: number }[] = [];
+    const weight = new Map<number, number>();
+    node.forEach((child, offset) => {
+      if (!child.isText) return;
+      const props = child.marks.find((m) => m.type.name === "run")?.attrs.props;
+      const r = resolver.run(rp.styleId, props, tableStyle, cond);
+      if (r.hidden) return;
+      const height = measurer.metrics({ family: r.font, bold: r.bold, italic: r.italic }).lineHeight * (r.vertAlign ? r.size * 0.65 : r.size);
+      runs.push({ offset, size: child.nodeSize, height });
+      const k = Math.round(height * 100) / 100;
+      weight.set(k, (weight.get(k) ?? 0) + child.nodeSize);
+    });
+    const common = [...weight].sort((x, y) => y[1] - x[1])[0]?.[0];
+    return { common, runs };
+  };
+
   const build = (pm: Node): StylesState => {
     const looks = new WeakMap<Node, Look>();
     const resolver = new Resolver(doc);
     // A second resolver to look at the next paragraph (the first counts list numbers in order).
     const peek = new Resolver(doc);
     const decorations: Decoration[] = [];
-    const visit = (node: Node, pos: number, tableStyle?: string) => {
+    const visit = (node: Node, pos: number, tableStyle?: string, cond?: RunProps) => {
       let prev: { styleId: string; contextual: boolean } | undefined;
       node.forEach((child, offset, index) => {
         const at = pos + offset;
         if (child.type.name !== "paragraph") prev = undefined;
         if (child.type.name === "paragraph") {
           const p: Paragraph = { type: "paragraph", props: child.attrs.props, content: [] };
-          const rp = resolver.paragraph(p, tableStyle);
+          const rp = resolver.paragraph(p, tableStyle, true, cond);
           // Contextual spacing: no space between paragraphs of the same style that both ask for it.
           const next = node.maybeChild(index + 1);
           const nrp = next?.type.name === "paragraph" ? peek.paragraph({ type: "paragraph", props: next.attrs.props, content: [] }, tableStyle) : undefined;
@@ -329,9 +447,17 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
           // the paragraph's base font and line height. The style's own font can differ (e.g. a large
           // Title style with 16pt text), and a mismatched base font would stretch every line.
           const run = rp.mark;
-          const lineHeight = rp.lineRule === "exact" ? rp.line / 20
-            : rp.lineRule === "atLeast" ? Math.max(rp.line / 20, measurer.metrics({ family: run.font, bold: run.bold, italic: run.italic }).lineHeight * run.size)
-            : measurer.metrics({ family: run.font, bold: run.bold, italic: run.italic }).lineHeight * run.size * (rp.line / 240);
+          const heights = runHeights(child, rp, resolver, tableStyle, cond);
+          const single = heights.common ?? measurer.metrics({ family: run.font, bold: run.bold, italic: run.italic }).lineHeight * run.size;
+          const lineOf = (h: number) => (rp.lineRule === "exact" ? rp.line / 20 : rp.lineRule === "atLeast" ? Math.max(rp.line / 20, h) : h * (rp.line / 240));
+          const lineHeight = lineOf(single);
+          // Taller runs: their lines grow to their height (an exact line height never grows).
+          if (rp.lineRule !== "exact") {
+            for (const r of heights.runs) {
+              if (r.height <= single + 0.05) continue;
+              decorations.push(Decoration.inline(at + 1 + r.offset, at + 1 + r.offset + r.size, { class: "pw-tall", style: `line-height:${pt(lineOf(r.height))}` }));
+            }
+          }
           const css = [
             runCss(run),
             `margin:${pt(joinBefore ? 0 : rp.spaceBefore)} ${pt(rp.right)} ${pt(joinAfter ? 0 : rp.spaceAfter)} ${pt(rp.left)}`,
@@ -376,9 +502,21 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
             }, { side: -1, key: `label-${label}-${width}-${runCss(lr)}` })); // no position: typing must not redraw every label after it
           }
         } else if (child.type.name === "table") {
-          visit(child, at + 1, resolver.tableStyle(child.attrs.props.style));
+          // Each cell's borders, shading and header/band text formatting, as the layout resolves them.
+          const style = resolver.tableStyle(child.attrs.props.style);
+          const looks = cellLooks(doc, tableModel(child), style);
+          child.forEach((row, rowOffset, r) => {
+            const rowAt = at + 1 + rowOffset;
+            row.forEach((cell, cellOffset, k) => {
+              const cellAt = rowAt + 1 + cellOffset;
+              const look = looks[r]?.[k];
+              const css = look ? cellCss(look) : "";
+              if (css) decorations.push(Decoration.node(cellAt, cellAt + cell.nodeSize, { style: css }));
+              visit(cell, cellAt + 1, style, look?.run);
+            });
+          });
         } else if (child.childCount) {
-          visit(child, at + 1, tableStyle);
+          visit(child, at + 1, tableStyle, cond);
         }
       });
     };

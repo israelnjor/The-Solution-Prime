@@ -4,7 +4,7 @@ import {
   insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
-  pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
+  pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
 } from "@prime/editor";
 import { layoutDocument, type LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
@@ -29,6 +29,7 @@ import { NOTES_EVENT, PageSheets } from "./PageSheets";
 import { NotesPane } from "./NotesPane";
 import { SourcesDialog } from "./SourcesDialog";
 import { EquationDialog } from "./EquationDialog";
+import { SortDialog } from "./SortDialog";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
@@ -84,9 +85,20 @@ if (SELFTEST) (globalThis as { primeTiming?: boolean }).primeTiming = true;
 
 /** Word count, remembered per document version (the status bar asks on every render). */
 const wordCounts = new WeakMap<object, number>();
+/**
+ * Words in the document, counted per top-level block and cached by block: typing changes one block,
+ * so a keystroke recounts that block only (a 480-page document has some 7,500 of them).
+ */
 function countWords(doc: Parameters<typeof wordCount>[0]): number {
   let n = wordCounts.get(doc);
-  if (n === undefined) wordCounts.set(doc, (n = wordCount(doc)));
+  if (n !== undefined) return n;
+  n = 0;
+  doc.forEach((block) => {
+    let c = wordCounts.get(block);
+    if (c === undefined) wordCounts.set(block, (c = wordCount(block)));
+    n! += c;
+  });
+  wordCounts.set(doc, n);
   return n;
 }
 
@@ -119,7 +131,7 @@ export function App() {
   const [notesPane, setNotesPane] = useState<{ focus?: { kind: "footnote" | "endnote"; id: string } }>();
   const newNote = (kind: "footnote" | "endnote"): Command => (state, dispatch) =>
     insertNote(() => fileRef.current.base, kind, (id) => setNotesPane({ focus: { kind, id } }))(state, dispatch);
-  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock" | "caption" | "crossref" | "sources" | "newSource" | "equation">();
+  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock" | "caption" | "crossref" | "sources" | "newSource" | "equation" | "sort">();
   /** Pages of the bookmarks in the last layout (contents, cross-references). */
   const pagesRef = useRef<Record<string, number>>({});
   const [menu, setMenu] = useState<{ x: number; y: number }>();
@@ -156,6 +168,7 @@ export function App() {
   const [recovery, setRecovery] = useState<Snapshot[]>([]);
   const [notice, setNotice] = useState("");
   const [, refresh] = useReducer((x: number) => x + 1, 0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout>>();
   const fileRef = useRef(file);
   fileRef.current = file;
   const dirtyRef = useRef(dirty);
@@ -270,6 +283,7 @@ export function App() {
         pasteOptions(),
         showMarks(),
         tabStops(() => fileRef.current.base),
+        columnResizing(),
         reviewPlugin(),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
@@ -289,10 +303,17 @@ export function App() {
           clearTimeout(snapshotTimer.current);
           snapshotTimer.current = setTimeout(snapshot, 3000);
         }
-        refresh();
+        // Every render makes React measure the selection across the whole focused editor (to restore it
+        // afterwards): ~30 ms a render in a 944-page book. There, typing updates the ribbon and status
+        // bar once it pauses for 200 ms; everything else (and every shorter document) at once.
+        clearTimeout(refreshTimer.current);
+        if (tr.docChanged && tr.doc.content.size > 300_000) refreshTimer.current = setTimeout(refresh, 200);
+        else refresh();
       },
     });
     view.current = v;
+    // Self-tests use the editor that is current (it is rebuilt when fonts arrive).
+    if (SELFTEST) (globalThis as { primeView?: EditorView }).primeView = v;
     v.focus();
     refresh();
     return () => v.destroy();
@@ -443,7 +464,7 @@ export function App() {
       // Dev self-test: what the editor shows once the converted document is laid out.
       setTimeout(() => console.info(`[selftest] align ${JSON.stringify({
         converted: pdfName, blocks: doc.sections[0].blocks.length, warnings,
-        sheets: document.querySelectorAll(".pw-sheet").length,
+        sheets: Number(document.querySelector<HTMLElement>(".pw-sheets")?.dataset.count ?? 0),
         tables: document.querySelectorAll(".ProseMirror table").length,
         text: document.querySelector(".ProseMirror")?.textContent?.slice(0, 160),
       })}`), 3000);
@@ -600,7 +621,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, driftSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -608,6 +629,7 @@ export function App() {
       if (test === "spell") spellSelfTest(v);
       if (test === "perf") perfSelfTest(v);
       if (test === "align") alignSelfTest();
+      if (test === "alignscan") alignScanSelfTest();
       if (test === "scroll") scrollSelfTest();
       if (test === "floatdrag") floatDragSelfTest();
       if (test === "review") reviewSelfTest(v);
@@ -625,6 +647,8 @@ export function App() {
       if (test === "notes") notesSelfTest(v);
       if (test === "citations") citationsSelfTest(v);
       if (test === "equation") equationSelfTest(v);
+      if (test === "tables") tablesSelfTest(v);
+      if (test === "drift" && measurerRef.current) driftSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "lines" && measurerRef.current) linesSelfTest(v, () => fileRef.current.base, measurerRef.current);
     });
   }, [layout, layoutOf, file.base]);
@@ -714,6 +738,7 @@ export function App() {
         onNote={(kind) => { if (v) { newNote(kind)(v.state, v.dispatch); } }}
         onShowNotes={() => setNotesPane((p) => (p ? undefined : {}))}
         onSources={(startNew) => setDialog(startNew ? "newSource" : "sources")}
+        onSortTable={() => setDialog("sort")}
         onBibliography={() => { if (v) { insertBibliography(baseOf)(v.state, v.dispatch); v.focus(); } }}
         onCitationStyle={(style) => {
           if (!v) return;
@@ -861,6 +886,7 @@ export function App() {
       {dialog === "datetime" && v && <DateTimeDialog view={v} onClose={() => setDialog(undefined)} />}
       {dialog === "caption" && v && <CaptionDialog view={v} doc={baseOf} onClose={() => setDialog(undefined)} />}
       {dialog === "crossref" && v && <CrossRefDialog view={v} doc={baseOf} pages={pagesRef.current} onClose={() => setDialog(undefined)} />}
+      {dialog === "sort" && v && <SortDialog view={v} onClose={() => setDialog(undefined)} />}
       {dialog === "equation" && v && measurerRef.current && <EquationDialog view={v} doc={file.base} measurer={measurerRef.current} onClose={() => setDialog(undefined)} />}
       {(dialog === "sources" || dialog === "newSource") && v && (
         <SourcesDialog view={v} doc={baseOf} startNew={dialog === "newSource"} onClose={() => setDialog(undefined)}

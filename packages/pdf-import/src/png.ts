@@ -1,4 +1,7 @@
-/** A minimal PNG encoder (8-bit RGBA, no filtering) for pictures taken out of PDFs. */
+/**
+ * A small PNG encoder for pictures taken out of PDFs: greyscale, RGB or RGBA (the smallest that holds
+ * the picture), each row with the PNG filter that suits it best (the usual "minimum sum" choice).
+ */
 import { zlibSync } from "fflate";
 
 const CRC = (() => {
@@ -27,17 +30,58 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
   return out;
 }
 
+const paeth = (a: number, b: number, c: number) => {
+  const p = a + b - c;
+  const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+};
+
 export function encodePng(rgba: Uint8Array, width: number, height: number): Uint8Array {
-  const raw = new Uint8Array((width * 4 + 1) * height);
+  // The fewest channels that hold the picture: grey, RGB, or RGBA when anything is see-through.
+  let opaque = true;
+  let grey = true;
+  for (let i = 0; i < rgba.length && (opaque || grey); i += 4) {
+    if (rgba[i + 3] !== 255) opaque = false;
+    if (rgba[i] !== rgba[i + 1] || rgba[i] !== rgba[i + 2]) grey = false;
+  }
+  const channels = !opaque ? 4 : grey ? 1 : 3;
+  const colourType = channels === 4 ? 6 : channels === 3 ? 2 : 0;
+  const stride = width * channels;
+  const pixels = new Uint8Array(stride * height);
+  for (let p = 0, q = 0; p < width * height; p++) {
+    const i = p * 4;
+    if (channels === 1) pixels[q++] = rgba[i];
+    else { pixels[q++] = rgba[i]; pixels[q++] = rgba[i + 1]; pixels[q++] = rgba[i + 2]; if (channels === 4) pixels[q++] = rgba[i + 3]; }
+  }
+  // Each row filtered (None, Sub, Up, Average, Paeth): the one with the smallest sum of values.
+  const raw = new Uint8Array((stride + 1) * height);
+  const candidate = new Uint8Array(stride);
+  const best = new Uint8Array(stride);
   for (let y = 0; y < height; y++) {
-    raw[y * (width * 4 + 1)] = 0; // filter: none
-    raw.set(rgba.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
+    const row = pixels.subarray(y * stride, (y + 1) * stride);
+    const up = y > 0 ? pixels.subarray((y - 1) * stride, y * stride) : undefined;
+    let bestSum = Infinity;
+    let bestType = 0;
+    for (let type = 0; type < 5; type++) {
+      let sum = 0;
+      for (let x = 0; x < stride; x++) {
+        const a = x >= channels ? row[x - channels] : 0;
+        const b = up ? up[x] : 0;
+        const c = up && x >= channels ? up[x - channels] : 0;
+        const v = type === 0 ? row[x] : type === 1 ? row[x] - a : type === 2 ? row[x] - b : type === 3 ? row[x] - ((a + b) >> 1) : row[x] - paeth(a, b, c);
+        candidate[x] = v & 255;
+        sum += candidate[x] < 128 ? candidate[x] : 256 - candidate[x];
+      }
+      if (sum < bestSum) { bestSum = sum; bestType = type; best.set(candidate); }
+    }
+    raw[y * (stride + 1)] = bestType;
+    raw.set(best, y * (stride + 1) + 1);
   }
   const header = new Uint8Array(13);
   const v = new DataView(header.buffer);
   v.setUint32(0, width);
   v.setUint32(4, height);
-  header.set([8, 6, 0, 0, 0], 8); // 8-bit, RGBA, deflate, no filter, no interlace
+  header.set([8, colourType, 0, 0, 0], 8); // 8 bits per channel, deflate, adaptive filtering, no interlace
   const parts = [Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", zlibSync(raw, { level: 6 })), chunk("IEND", new Uint8Array(0))];
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;

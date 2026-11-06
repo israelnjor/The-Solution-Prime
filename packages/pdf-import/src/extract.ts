@@ -48,8 +48,18 @@ export interface Picture {
   y: number;
   w: number;
   h: number;
-  png: Uint8Array;
+  /** The encoded picture (PNG or JPEG). */
+  data: Uint8Array;
+  contentType: "image/png" | "image/jpeg";
 }
+
+/**
+ * Encodes a picture taken out of a PDF (RGBA pixels, and the size it is shown at, in pt). The app
+ * passes one that writes photographs as JPEG and scales large pictures down; without one, pictures
+ * are written as PNG.
+ */
+export type PictureEncoder = (rgba: Uint8Array, width: number, height: number, shown: { w: number; h: number }) =>
+  Promise<{ data: Uint8Array; contentType: "image/png" | "image/jpeg" } | undefined>;
 
 export interface PageContent {
   number: number;
@@ -151,6 +161,8 @@ export interface PdfJsFiles {
   standardFontDataUrl?: string;
   wasmUrl?: string;
   iccUrl?: string;
+  /** How pictures are encoded (default: PNG). */
+  encodePicture?: PictureEncoder;
 }
 
 /** Page content of every page. */
@@ -159,6 +171,9 @@ export async function extractPages(data: Uint8Array, pdfjs: PdfJs, files: PdfJsF
   // fontExtraProperties: keeps font names (bold and italic come from them).
   const task = pdfjs.getDocument({
     data, verbosity: 0, fontExtraProperties: true, disableFontFace: true,
+    // Pictures as pixel data everywhere (in a browser pdf.js would otherwise hand over bitmaps it may
+    // release before we read them): converting needs their pixels.
+    isOffscreenCanvasSupported: false, isImageDecoderSupported: false,
     ...(files.cMapUrl ? { cMapUrl: files.cMapUrl, cMapPacked: true } : {}),
     ...(files.standardFontDataUrl ? { standardFontDataUrl: files.standardFontDataUrl } : {}),
     ...(files.wasmUrl ? { wasmUrl: files.wasmUrl } : {}),
@@ -168,7 +183,7 @@ export async function extractPages(data: Uint8Array, pdfjs: PdfJs, files: PdfJsF
   const pages: PageContent[] = [];
   try {
     for (let n = 1; n <= doc.numPages; n++) {
-      pages.push(await extractPage(await doc.getPage(n), n, pdfjs));
+      pages.push(await extractPage(await doc.getPage(n), n, pdfjs, files.encodePicture));
       onPage?.(n, doc.numPages);
     }
   } finally {
@@ -177,7 +192,7 @@ export async function extractPages(data: Uint8Array, pdfjs: PdfJs, files: PdfJsF
   return pages;
 }
 
-async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: number, pdfjs: PdfJs): Promise<PageContent> {
+async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: number, pdfjs: PdfJs, encode?: PictureEncoder): Promise<PageContent> {
   const vp = page.getViewport({ scale: 1 });
   const H = vp.height;
   // The viewport maps PDF space (y up, page box origin) to ours (y down, top-left).
@@ -328,8 +343,12 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
           const objs = id.startsWith("g_") ? page.commonObjs : page.objs;
           objs.get(id, resolve);
         });
-        const png = imagePng(img as ImageLike);
-        if (png) pictures.push({ ...box, png });
+        const pixels = imageRgba(img as ImageLike);
+        if (pixels) {
+          const encoded = (encode && await encode(pixels.rgba, pixels.width, pixels.height, { w: box.w, h: box.h }))
+            ?? { data: encodePng(pixels.rgba, pixels.width, pixels.height), contentType: "image/png" as const };
+          pictures.push({ ...box, ...encoded });
+        }
         break;
       }
       default:
@@ -434,10 +453,23 @@ interface ImageLike {
   height: number;
   kind?: number;
   data?: Uint8ClampedArray | Uint8Array;
+  /** In a browser, pdf.js hands over decoded pictures as bitmaps instead of pixel data. */
+  bitmap?: CanvasImageSource & { width: number; height: number };
 }
 
-/** pdf.js decoded image data (1-bit gray, RGB or RGBA) as PNG. */
-function imagePng(img: ImageLike | undefined): Uint8Array | undefined {
+/** pdf.js decoded image data (1-bit gray, RGB or RGBA) as RGBA pixels. */
+function imageRgba(img: ImageLike | undefined): { rgba: Uint8Array; width: number; height: number } | undefined {
+  if (img?.bitmap && !img.data && typeof OffscreenCanvas !== "undefined") {
+    // A bitmap (pdf.js in a browser): its pixels, read back through a canvas.
+    const { width, height } = img.bitmap;
+    if (!width || !height) return undefined;
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.drawImage(img.bitmap, 0, 0);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    return { rgba: new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength), width, height };
+  }
   if (!img?.data || !img.width || !img.height) return undefined;
   const { width, height, kind, data } = img;
   const rgba = new Uint8Array(width * height * 4);
@@ -453,5 +485,5 @@ function imagePng(img: ImageLike | undefined): Uint8Array | undefined {
   } else if (data.length === width * height * 4) {
     rgba.set(data);
   } else return undefined;
-  return encodePng(rgba, width, height);
+  return { rgba, width, height };
 }

@@ -56,7 +56,8 @@ export interface Misspelling {
 const WORD = /\p{L}[\p{L}'’]*\p{L}|\p{L}/gu;
 
 /** Misspelled words in the document (skipping acronyms, words with digits, web and e-mail addresses). */
-export function findMisspellings(doc: Node, speller: Speller, ignored: Set<string>, cache: Map<string, boolean>): Misspelling[] {
+export function findMisspellings(doc: Node, speller: Speller, ignored: Set<string>, cache: Map<string, boolean>,
+  paragraphs?: WeakMap<Node, Misspelling[]>): Misspelling[] {
   const out: Misspelling[] = [];
   const correct = (w: string) => {
     let ok = cache.get(w);
@@ -68,6 +69,13 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
   };
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
+    // A paragraph checked before and unchanged since (the same node): its results, moved to where it is now.
+    const known = paragraphs?.get(node);
+    if (known) {
+      for (const m of known) out.push({ from: pos + m.from, to: pos + m.to, word: m.word });
+      return false;
+    }
+    const first = out.length;
     let text = "";
     const at: number[] = [];
     // Text not to check: links and fields (addresses, references), and web/e-mail addresses typed as text.
@@ -94,6 +102,7 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
       if (correct(word) || correct(word.toLowerCase())) continue;
       out.push({ from: at[m.index!], to: at[m.index! + raw.length - 1] + 1, word });
     }
+    paragraphs?.set(node, out.slice(first).map((m) => ({ from: m.from - pos, to: m.to - pos, word: m.word })));
     return false;
   });
   return out;
@@ -109,10 +118,12 @@ export const spellKey = new PluginKey<SpellState>("spelling");
 /** Underlines misspellings; re-checks the document shortly after each change. */
 export function spellPlugin(getSpeller: () => Speller | undefined, ignored: Set<string>): Plugin<SpellState> {
   const cache = new Map<string, boolean>();
+  // Each paragraph's misspellings (relative to it), until the dictionary or the ignored words change.
+  let paragraphs = new WeakMap<Node, Misspelling[]>();
   const build = (doc: Node): SpellState => {
     const speller = getSpeller();
     if (!speller) return { issues: [], decorations: DecorationSet.empty };
-    const issues = timed("spelling", () => findMisspellings(doc, speller, ignored, cache));
+    const issues = timed("spelling", () => findMisspellings(doc, speller, ignored, cache, paragraphs));
     return { issues, decorations: DecorationSet.create(doc, issues.map((i) => Decoration.inline(i.from, i.to, { class: "pw-misspelled" }))) };
   };
   return new Plugin<SpellState>({
@@ -120,7 +131,9 @@ export function spellPlugin(getSpeller: () => Speller | undefined, ignored: Set<
     state: {
       init: (_, state) => build(state.doc),
       apply(tr, old) {
-        if (tr.getMeta(spellKey) === "recheck") { cache.clear(); return build(tr.doc); }
+        // A full re-check (a new dictionary, a word ignored or added); after typing, only what changed.
+        if (tr.getMeta(spellKey) === "recheck") { cache.clear(); paragraphs = new WeakMap(); return build(tr.doc); }
+        if (tr.getMeta(spellKey) === "update") return build(tr.doc);
         if (!tr.docChanged) return old;
         // Keep underlines in place while typing; the full re-check follows when typing pauses.
         return { issues: old.issues, decorations: old.decorations.map(tr.mapping, tr.doc) };
@@ -133,7 +146,7 @@ export function spellPlugin(getSpeller: () => Speller | undefined, ignored: Set<
         update(v, prev) {
           if (v.state.doc === prev.doc) return;
           clearTimeout(timer);
-          timer = setTimeout(() => recheck(v), 400);
+          timer = setTimeout(() => v.dispatch(v.state.tr.setMeta(spellKey, "update").setMeta("addToHistory", false)), 400);
         },
         destroy() { clearTimeout(timer); },
       };

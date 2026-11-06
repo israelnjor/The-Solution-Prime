@@ -9,12 +9,13 @@
  * Not yet: custom tab stops, floating objects, footnotes, columns, hyphenation.
  */
 import {
-  type Block, type FloatInfo, type Inline, type Paragraph, type PrimeDocument, type Relationship, type Section, type Story, type Table,
+  type Block, type FloatInfo, type Inline, type Paragraph, type PrimeDocument, type RunProps, type Relationship, type Section, type Story, type Table,
   paragraphText,
 } from "@prime/pdm";
 import { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 import type { FontKey, Measurer } from "./measure.js";
 import { type ResolvedParagraph, type ResolvedRun, Resolver, roman } from "./resolve.js";
+import { cellLooks, type Sides } from "./tables.js";
 
 const MARKER = /\[[A-Z]-\d{3}\]/g;
 const DEFAULT_TAB = 36;
@@ -235,7 +236,8 @@ interface CellBox {
   /** Cell width including its margins. */
   width: number;
   fill?: string;
-  borders: boolean;
+  /** Visible borders, side by side (from the table, its style and the cell). */
+  borders: Sides;
   /** Vertical merge role, to omit the borders inside a merged cell. */
   vMerge?: "restart" | "continue";
   /** Content height of the cell (for merged cells: across all the rows it spans). */
@@ -322,6 +324,35 @@ function unsymbol(text: string, run: ResolvedRun): { text: string; run: Resolved
   return { text: out, run: { ...run, font: SYMBOL_FALLBACK } };
 }
 
+/**
+ * A cell's shading and borders as page rectangles, at x, y (the cell's outer box). Shading goes beneath
+ * everything (a later row's fill must not cover the line above it), lines on top.
+ */
+/**
+ * Measured lines of paragraphs, kept from one layout to the next (per measurer: new fonts mean a new
+ * one). Measuring is nearly all of a layout's time, and typing changes one paragraph.
+ */
+const measuredLines = new WeakMap<Measurer, WeakMap<Paragraph, { key: string; lines: MLine[] }>>();
+
+/** A short fingerprint of a string (FNV-1a). */
+function fingerprint(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36) + text.length.toString(36);
+}
+
+function cellRects(c: CellBox, x: number, y: number, height: number, into: Rect[]) {
+  if (c.fill) into.unshift({ x, y, width: c.width, height, fill: c.fill });
+  const out = into;
+  const none = { top: false, bottom: false, left: false, right: false };
+  for (const side of ["top", "bottom", "left", "right"] as const) {
+    const b = c.borders[side];
+    // Inside a vertically merged cell there is no line between its rows.
+    if (!b || (side === "top" && c.vMerge === "continue") || (side === "bottom" && c.vMerge === "restart")) continue;
+    out.push({ x, y, width: c.width, height, sides: { ...none, [side]: true }, stroke: { width: b.width, ...(b.color ? { color: b.color } : {}) } });
+  }
+}
+
 /** Segment styling taken from a run. */
 const look = (r: ResolvedRun): Partial<Segment> => {
   const out: Partial<Segment> = {};
@@ -349,6 +380,9 @@ export class LayoutEngine {
   /** While a note's text is measured: its number, shown by its own mark (w:footnoteRef). */
   private noteMark = "";
 
+  /** What every paragraph's lines depend on besides the paragraph: styles, lists, compatibility mode. */
+  private cacheKey: string;
+
   constructor(private doc: PrimeDocument, private m: Measurer) {
     const count = { footnote: 0, endnote: 0 };
     const visitNotes = (items: Inline[]) => {
@@ -373,6 +407,7 @@ export class LayoutEngine {
     const settings = doc.package.parts.find((p) => /word\/settings\.xml$/.test(p.name));
     const xml = settings ? new TextDecoder().decode(Uint8Array.from(atob(settings.data), (c) => c.charCodeAt(0))) : "";
     this.compat = Number(/compatibilityMode" w:uri="[^"]*" w:val="(\d+)"/.exec(xml)?.[1] ?? 12);
+    this.cacheKey = fingerprint(`${this.compat}|${JSON.stringify(doc.styles)}|${JSON.stringify(doc.lists)}`);
   }
 
   // --- paragraph measurement -----------------------------------------------------------------
@@ -463,7 +498,7 @@ export class LayoutEngine {
         if (i.type === "noteRef" || i.type === "noteMark") {
           const num = i.type === "noteRef" ? this.noteNumbers.get(`${i.kind}:${i.id}`) : this.noteMark;
           if (i.type === "noteRef" && i.kind === "footnote") out.push({ kind: "note", id: i.id, offset });
-          const base = this.resolver.run(rp.styleId, i.props, rp.tableStyle);
+          const base = this.resolver.run(rp.styleId, i.props, rp.tableStyle, rp.cond);
           if (num && !base.hidden) out.push({ kind: "word", text: num, run: { ...base, vertAlign: base.vertAlign ?? "superscript" }, offset });
           continue;
         }
@@ -472,7 +507,7 @@ export class LayoutEngine {
         // Hyperlink character style (blue, underlined) on their runs is not drawn.
         const props = i.props?.style === "Hyperlink" && /^toc ?\d$/i.test(this.resolver.styleName(rp.styleId))
           ? { ...i.props, style: undefined } : i.props;
-        const run = this.resolver.run(rp.styleId, props, rp.tableStyle);
+        const run = this.resolver.run(rp.styleId, props, rp.tableStyle, rp.cond);
         if (run.hidden) continue;
         if (i.type === "tab") { out.push({ kind: "tab", run, offset }); continue; }
         let at = offset;
@@ -773,8 +808,27 @@ export class LayoutEngine {
   }
 
   private measureParagraph(p: Paragraph, width: number, tableStyle?: string, path: number[] = []): ParaBox {
-    const rp = this.resolver.paragraph(p, tableStyle);
-    return { kind: "para", path, rp, lines: this.breakLines(p, rp, width), anchor: paragraphText(p), para: p, floats: floatsIn(p.content) };
+    const cond = tableStyle ? this.cellRun : undefined;
+    const rp = this.resolver.paragraph(p, tableStyle, true, cond);
+    // Lines depend on the paragraph (an unchanged paragraph is the same object from one layout to the
+    // next) and on these; any other change makes it a different paragraph object.
+    const key = `${this.cacheKey}|${width}|${tableStyle ?? ""}|${cond ? JSON.stringify(cond) : ""}|${rp.listLabel ?? ""}|${this.noteKey(p.content)}|${this.noteMark}`;
+    let byParagraph = measuredLines.get(this.m);
+    if (!byParagraph) measuredLines.set(this.m, (byParagraph = new WeakMap()));
+    const hit = byParagraph.get(p);
+    const lines = hit && hit.key === key ? hit.lines : this.breakLines(p, rp, width);
+    if (!hit || hit.key !== key) byParagraph.set(p, { key, lines });
+    return { kind: "para", path, rp, lines, anchor: paragraphText(p), para: p, floats: floatsIn(p.content) };
+  }
+
+  /** The numbers the paragraph's note references show (they change when a note is added before it). */
+  private noteKey(items: Inline[]): string {
+    let out = "";
+    for (const i of items) {
+      if (i.type === "noteRef") out += `${this.noteNumbers.get(`${i.kind}:${i.id}`) ?? ""},`;
+      else if ("content" in i && Array.isArray(i.content)) out += this.noteKey(i.content as Inline[]);
+    }
+    return out;
   }
 
   private stories = new Map<Story, StoryBox>();
@@ -808,26 +862,26 @@ export class LayoutEngine {
     const offset = t.props.align === "center" ? (available - total) / 2
       : t.props.align === "right" || t.props.align === "end" ? available - total
       : this.compat < 15 ? -CELL_MARGIN : 0;
-    const borders = this.hasBorders(t, tableStyle);
+    const looks = cellLooks(this.doc, t, tableStyle);
 
     // Lay out every cell, remembering the grid column it starts in (to match vertical merges).
-    const measured = t.rows.map((row) => {
+    const measured = t.rows.map((row, r) => {
       let col = 0;
-      return row.cells.map((cell) => {
+      return row.cells.map((cell, k) => {
+        const look = looks[r][k];
         const n = cell.props.span ?? 1;
         const start = col;
         col += n;
-        const fill = cell.props.shading?.fill?.toUpperCase();
         const frame = {
-          dx: offset + grid(0, start) + CELL_MARGIN, width: grid(start, n), borders, vMerge: cell.props.vMerge,
-          ...(fill && fill !== "AUTO" ? { fill } : {}),
+          dx: offset + grid(0, start) + CELL_MARGIN, width: grid(start, n), borders: look.borders, vMerge: cell.props.vMerge,
+          ...(look.fill ? { fill: look.fill } : {}),
         };
         // w:hideMark: an empty cell's paragraph mark does not count towards the row's height.
         const hidden = cell.props.extra?.some((x) => x.name === "w:hideMark") &&
           cell.blocks.every((b) => b.type === "paragraph" && b.content.length === 0);
         const box: CellBox = cell.props.vMerge === "continue" || hidden
           ? { ...frame, height: 0, lines: [], markers: [] }
-          : { ...frame, ...this.measureCell(cell.blocks, grid(start, n) - 2 * CELL_MARGIN, tableStyle) };
+          : { ...frame, ...this.withCellRun(look.run, () => this.measureCell(cell.blocks, grid(start, n) - 2 * CELL_MARGIN, tableStyle)) };
         return { start, vMerge: cell.props.vMerge, box };
       });
     });
@@ -876,13 +930,14 @@ export class LayoutEngine {
     return { kind: "table", path, rows };
   }
 
-  /** True when the table (or its style) defines visible borders. */
-  private hasBorders(t: Table, tableStyle?: string): boolean {
-    const xml = [
-      ...(t.props.extra ?? []),
-      ...this.doc.styles.styles.filter((s) => s.id === tableStyle).flatMap((s) => s.table?.extra ?? []),
-    ].find((x) => x.name === "w:tblBorders")?.xml;
-    return !!xml && /w:val="(?!none|nil)[^"]+"/.test(xml);
+  /** Text formatting a table style's conditional formats give the cell being measured. */
+  private cellRun: RunProps | undefined;
+
+  /** Measures with `run` as the cell's conditional text formatting (restored after, for nested tables). */
+  private withCellRun<T>(run: RunProps | undefined, measure: () => T): T {
+    const saved = this.cellRun;
+    this.cellRun = run;
+    try { return measure(); } finally { this.cellRun = saved; }
   }
 
   /** Stacks a cell's blocks; adjacent paragraph spacing collapses as on the page. */
@@ -899,13 +954,7 @@ export class LayoutEngine {
         // shading and borders, at their offsets.
         for (const row of box.rows) {
           for (const c of row.cells) {
-            if (c.fill || c.borders) {
-              rects.push({
-                x: c.dx - CELL_MARGIN, y, width: c.width, height: row.height,
-                ...(c.fill ? { fill: c.fill } : {}),
-                ...(c.borders ? { sides: { top: c.vMerge !== "continue", bottom: c.vMerge !== "restart", left: true, right: true } } : {}),
-              });
-            }
+            cellRects(c, c.dx - CELL_MARGIN, y, row.height, rects);
             for (const r of c.rects ?? []) rects.push({ ...r, x: r.x + c.dx, y: r.y + y });
             for (const l of c.lines) lines.push({ line: l.line, dy: y + l.dy, dx: c.dx + (l.dx ?? 0) });
             for (const [anchor, dy] of c.markers) markers.push([anchor, y + dy]);
@@ -1391,13 +1440,7 @@ export class LayoutEngine {
           pageOpen = false;
         }
         for (const [ci, c] of row.cells.entries()) {
-          if (c.fill || c.borders) {
-            page.rects.push({
-              x: left + c.dx - CELL_MARGIN, y, width: c.width, height: row.height,
-              ...(c.fill ? { fill: c.fill } : {}),
-              ...(c.borders ? { sides: { top: c.vMerge !== "continue", bottom: c.vMerge !== "restart", left: true, right: true } } : {}),
-            });
-          }
+          cellRects(c, left + c.dx - CELL_MARGIN, y, row.height, page.rects);
           for (const [anchor, dy] of c.markers) mark(anchor, y + dy);
           for (const r of c.rects ?? []) page.rects.push({ ...r, x: left + c.dx + r.x, y: y + r.y });
           for (const l of c.lines) put(l.line, left + c.dx + (l.dx ?? 0), y + l.dy);

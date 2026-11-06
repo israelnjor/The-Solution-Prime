@@ -6,7 +6,7 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-03, after Waves 0–2): about 55%
+## Where we are (2026-11-04, after Waves 0–3): about 60%
 
 | Area | Feature | Status |
 |---|---|---|
@@ -43,8 +43,8 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Record tracked changes, grammar, thesaurus, compare, read aloud, protect | ❌ |
 | **View** | Print / Web layout, zoom, ruler, formatting marks | ✅ |
 | | Read mode, outline, navigation pane, vertical ruler, multiple pages, dark mode | ❌ |
-| **Tables** | Insert, add/delete rows and columns, Tab navigation | ✅ |
-| | Merge/split cells, borders & shading, table styles, cell alignment, column resize, header row repeat, sort, text↔table | ❌ |
+| **Tables** | Insert, add/delete rows and columns, Tab navigation, merge/split cells, borders & shading per cell, table styles (Word's conditional formats: header/total row, banding, first/last column) with options, cell alignment, column resize by dragging, distribute/AutoFit, repeat header rows, sort, text↔table | ✅ |
+| | Row height, cell margins, nested-table tools, formulas, draw table | ❌ |
 | **Pictures** | Insert, inline/floating display, wrap options, drag anywhere, crop, rotate, alt text | ✅ |
 | | Picture styles, free rotation, adjustments (brightness, colour) | ❌ |
 | **Make it yours** | My templates, letterhead designer, signatures (photo/scan clean-up, draw, type), blocks (signature blocks, addresses, stamps, saved text; left/centre/right; cursor, header or footer), drag paragraphs (handle, Alt+Shift+↑/↓) | ✅ |
@@ -77,7 +77,7 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
 2. **References** ✅ (2026-11-03) (the student/academic market) — insert and update table of contents; footnotes and
    endnotes; captions and table of figures; cross-references; citations and bibliography (APA,
    Harvard, IEEE); equation editor.
-3. **Tables complete** — merge/split, borders and shading, table styles, cell alignment, column
+3. **Tables complete** ✅ (2026-11-04) — merge/split, borders and shading, table styles, cell alignment, column
    resizing, header rows, sort, text↔table, autofit.
 4. **Layout and design** — section and column breaks, columns, page borders, watermark, page colour,
    line numbers, hyphenation, create/modify styles, themes and style sets (basic), drop cap.

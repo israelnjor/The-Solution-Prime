@@ -98,12 +98,24 @@ export function fromProseMirror(pm: Node, base: PrimeDocument): PrimeDocument {
       const s = node.attrs.section;
       sections.push({ props: s.props, headers: s.headers, footers: s.footers, blocks });
       blocks = [];
-    } else blocks.push(...toBlocks(node));
+    } else blocks.push(...cachedBlocks(node));
   });
   const last = pm.attrs.section ?? { props: {}, headers: {}, footers: {} };
   sections.push({ props: last.props, headers: last.headers, footers: last.footers, blocks });
   const notes = pm.attrs.notes as PrimeDocument["notes"] | null;
   return { ...base, sections, ...(notes ? { notes } : {}) };
+}
+
+/**
+ * A top-level block in the document model, the same object for as long as the editor's node is the
+ * same (nodes are immutable): the layout then reuses the lines it measured for unchanged paragraphs.
+ * The model's blocks must therefore not be changed in place (copy them first).
+ */
+const converted = new WeakMap<Node, Block[]>();
+function cachedBlocks(node: Node): Block[] {
+  let blocks = converted.get(node);
+  if (!blocks) converted.set(node, (blocks = toBlocks(node)));
+  return blocks;
 }
 
 function toBlocks(node: Node): Block[] {

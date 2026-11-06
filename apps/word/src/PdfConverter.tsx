@@ -60,7 +60,10 @@ export function PdfConverter({ measurer, initial, onOpenInEditor, onSave, onClos
       if (!cancelled && right.current && ours) drawLayoutPage(stage.result.doc, ours, right.current, scale);
       if (/[?&]selftest=/.test(location.search)) {
         console.info(`[selftest] align ${JSON.stringify({ review: stage.name, page, pages: stage.layout.pages.length, original: stage.original.numPages,
-          left: left.current?.width, right: right.current?.width, warnings: stage.result.warnings })}`);
+          left: left.current?.width, right: right.current?.width, warnings: stage.result.warnings,
+          pictures: Object.values(stage.result.doc.images).length,
+          jpeg: Object.values(stage.result.doc.images).filter((i) => i.contentType === "image/jpeg").length,
+          pictureMB: +(Object.values(stage.result.doc.images).reduce((n, i) => n + i.data.length * 0.75, 0) / 1e6).toFixed(1) })}`);
       }
     };
     void draw();
