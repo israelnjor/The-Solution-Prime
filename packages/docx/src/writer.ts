@@ -1,5 +1,6 @@
 /** Prime Document Model -> DOCX. Emits clean OOXML in schema order; preserved content is written back verbatim. */
 import { zipSync } from "fflate";
+import { CORE_PART, CORE_REL } from "./properties.js";
 import type { Block, FloatInfo, FloatPosition, HeaderFooterKind, Inline, Paragraph, PrimeDocument, Relationship, Section, Story, Table } from "@prime/pdm";
 import { ContentType, EMU_PER_PT, RelType, twips } from "./ooxml.js";
 import { writeCellProps, writeParagraphProps, writeRowProps, writeRunProps, writeSectionProps, writeTableProps } from "./props.js";
@@ -149,6 +150,8 @@ class Writer {
       // A document created from scratch has no package relationships to carry through.
       const root = new Rels("");
       root.add(RelType.officeDocument, main);
+      // Document properties added in Prime Word (File → Info).
+      if (this.files[CORE_PART]) root.add(CORE_REL, CORE_PART);
       this.put("_rels/.rels", encoder.encode(root.xml()));
     }
     this.put("[Content_Types].xml", encoder.encode(this.contentTypes()));

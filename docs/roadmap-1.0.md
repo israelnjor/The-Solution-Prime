@@ -27,7 +27,8 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | **Home: styles** | Apply paragraph styles | ✅ |
 | | Create / modify styles (Styles dialog), style sets, theme fonts and colours (Design tab) | ✅ |
 | **Home: editing** | Find / Replace | ✅ |
-| | Find options (formatting, wildcards), Go To, navigation pane | ❌ |
+| | Search in the navigation pane (Ctrl+F: results list, matches marked in the outline) | ✅ |
+| | Find options (formatting, wildcards), Go To | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
 | | Equations: insert and edit (LaTeX notation, live preview, saved as Word equations) | ✅ |
 | | Text boxes (shown, moved; not editable) | 🟡 |
@@ -42,9 +43,9 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | **References** | Insert/update table of contents, footnotes and endnotes (laid out at the foot of the page / after the text, editable), captions, table of figures, cross-references, citations & bibliography (APA, Harvard, IEEE; Word's own sources), Update Field (F9) | ✅ |
 | | Index, table of authorities, footnote options (numbering format, restart per page) | ❌ |
 | **Review** | Spelling, word count, comments, track changes (record insertions, deletions, paragraph breaks and formatting; show/accept/reject) | ✅ |
-| | Record tracked changes, grammar, thesaurus, compare, read aloud, protect | ❌ |
-| **View** | Print / Web layout, zoom, ruler, formatting marks | ✅ |
-| | Read mode, outline, navigation pane, vertical ruler, multiple pages, dark mode | ❌ |
+| | Grammar, thesaurus, compare, read aloud, protect | ❌ |
+| **View** | Print / Web layout, zoom, ruler, formatting marks, navigation pane (headings: jump, collapse, drag to move a section) | ✅ |
+| | Read mode, outline, vertical ruler, multiple pages, dark mode | ❌ |
 | **Tables** | Insert, add/delete rows and columns, Tab navigation, merge/split cells, borders & shading per cell, table styles (Word's conditional formats: header/total row, banding, first/last column) with options, cell alignment, column resize by dragging, distribute/AutoFit, repeat header rows, sort, text↔table | ✅ |
 | | Row height, cell margins, nested-table tools, formulas, draw table | ❌ |
 | **Pictures** | Insert, inline/floating display, wrap options, drag anywhere, crop, rotate, alt text | ✅ |
@@ -88,7 +89,7 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    hyphenation; create/modify styles, style sets, theme fonts and colours; drop cap. Each checked
    against Word (same pages and positions; Word reads ours as its own). On screen, a document shows one
    column count (its first): a section with a different count shows as one column (it prints right).
-5. **Review, view and files** — record tracked changes ✅ (2026-11-07: insertions, deletions and paragraph breaks, Word's rules: your own insertions delete outright, typing goes at the cursor; character and paragraph formatting kept as Word keeps it, "Formatted: Bold"), compare documents, navigation pane, read
+5. **Review, view and files** — record tracked changes ✅ (2026-11-07: insertions, deletions and paragraph breaks, Word's rules: your own insertions delete outright, typing goes at the cursor; character and paragraph formatting kept as Word keeps it, "Formatted: Bold"), navigation pane ✅ (2026-11-07: headings to jump to, collapse and drag; Ctrl+F search with a results list), compare documents, read
    mode, outline view, multiple pages, print dialog, document properties, password protection,
    .doc/.rtf/.odt/.txt open and save, thesaurus, read aloud, grammar (basic).
 6. **Objects** — shapes and text boxes (insert and edit), simple charts.

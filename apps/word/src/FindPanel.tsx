@@ -17,7 +17,7 @@ export function FindPanel({ view, replace, onClose }: { view: EditorView | null;
     setMessage("");
   }, [view, text, matchCase, wholeWord]);
   // Clear highlights when the panel closes.
-  useEffect(() => () => { if (view) setFindQuery({ text: "" })(view.state, view.dispatch); }, [view]);
+  useEffect(() => () => { if (view && !view.isDestroyed) setFindQuery({ text: "" })(view.state, view.dispatch); }, [view]);
 
   const fs = view ? findState(view.state) : undefined;
   const count = fs?.matches.length ?? 0;

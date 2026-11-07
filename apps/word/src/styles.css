@@ -583,3 +583,77 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 
 /* A column break typed in the text, inside text columns on screen: the text after it starts the next column. */
 .pw-editor.paged .ProseMirror.pw-columns .pw-column-break { display: flow-root; height: 0; margin: 0; border: 0; break-before: column; }
+
+/* Navigation pane (View → Navigation Pane, Ctrl+F): headings and search results, on the left. */
+.app.with-nav .canvas { margin-left: 270px; }
+.nav-pane {
+  position: fixed; left: 0; top: 150px; bottom: 32px; width: 270px; z-index: 30; display: grid; grid-template-rows: auto auto auto 1fr;
+  background: #fafbfd; border-right: 1px solid var(--chrome-border); padding: 10px 10px 0; gap: 8px;
+}
+.nav-pane header { display: flex; justify-content: space-between; align-items: center; }
+.nav-search { display: flex; gap: 4px; }
+.nav-search input { flex: 1; min-width: 0; font: inherit; padding: 5px 7px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.nav-search button { padding: 2px 6px; font-size: 11px; }
+.nav-tabs { display: flex; gap: 2px; align-items: center; border-bottom: 1px solid var(--chrome-border); }
+.nav-tabs button { border: none; background: none; padding: 5px 8px; border-bottom: 2px solid transparent; border-radius: 0; }
+.nav-tabs button.on { border-bottom-color: #2b579a; color: #2b579a; font-weight: 600; }
+.nav-tabs .link { margin-left: auto; font-size: 12px; }
+.nav-outline, .nav-results ul { list-style: none; margin: 0; padding: 0 0 12px; overflow: auto; min-height: 0; }
+.nav-results { overflow: auto; min-height: 0; }
+.nav-outline li { display: flex; align-items: center; border-radius: 4px; border-top: 2px solid transparent; border-bottom: 2px solid transparent; }
+.nav-outline li.current { background: #dce6f4; }
+.nav-outline li.has-results .heading { background: #fff3bf; }
+.nav-outline li.drop-before { border-top-color: #2b579a; }
+.nav-outline li.drop-after { border-bottom-color: #2b579a; }
+.nav-outline .twisty { width: 18px; flex: none; border: none; background: none; padding: 0; color: var(--muted); }
+.nav-outline .heading { flex: 1; min-width: 0; text-align: left; border: none; background: none; padding: 4px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.nav-outline .heading:hover { text-decoration: underline; }
+.nav-results li button { display: block; width: 100%; text-align: left; border: none; border-bottom: 1px solid var(--chrome-border); background: none; padding: 6px 4px; font-size: 12px; line-height: 1.35; cursor: pointer; }
+.nav-results li.current button, .nav-results li button:hover { background: #dce6f4; }
+.nav-count, .nav-empty { color: var(--muted); font-size: 12px; margin: 4px 2px; }
+@media (max-width: 900px) { .app.with-nav .canvas { margin-left: 0; } .nav-pane { box-shadow: 4px 0 12px rgb(0 0 0 / 0.12); } }
+
+/* File → Print: options beside a preview of the pages. */
+.print-dialog { display: grid; grid-template-columns: 300px 460px; gap: 20px; width: auto; max-width: 96vw; }
+.print-options { display: grid; align-content: start; gap: 12px; }
+.print-options fieldset { display: grid; gap: 8px; border: 1px solid var(--chrome-border); border-radius: 6px; padding: 10px 12px; }
+.print-options .choice input:not([type]) { margin-left: 6px; width: 120px; }
+.print-options .error { color: #b71c1c; font-size: 12px; margin: 0; }
+.print-options .hint { color: var(--muted); font-size: 12px; margin: 0; }
+.print-options .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.print-preview { display: grid; justify-items: center; align-content: start; gap: 10px; background: #e8eaee; border-radius: 6px; padding: 14px; min-height: 560px; }
+.print-preview .sheet { box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); background: #fff; }
+.print-preview .pager { display: flex; gap: 10px; align-items: center; font-size: 12px; }
+/* View → Read Mode: the pages, filling the window. */
+.read-mode { position: fixed; inset: 0; z-index: 90; display: grid; grid-template-rows: auto 1fr auto; background: #3a3d42; color: #fff; outline: none; }
+.read-mode header { display: flex; align-items: center; gap: 16px; padding: 8px 14px; background: #2b2d31; }
+.read-mode header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.read-mode .read-pages { color: #c9ccd1; font-size: 13px; }
+.read-mode .read-tools { margin-left: auto; display: flex; gap: 6px; }
+.read-mode button { background: #45484e; color: #fff; border: 1px solid #5b5f66; border-radius: 4px; padding: 4px 10px; }
+.read-mode button.on { background: #2b579a; border-color: #2b579a; }
+.read-mode button:disabled { opacity: 0.4; }
+.read-area { display: flex; justify-content: center; align-items: center; gap: 24px; overflow: hidden; min-height: 0; cursor: pointer; }
+.read-page { background: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / 0.5); }
+.read-mode footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px; background: #2b2d31; }
+.read-mode footer input { width: min(480px, 60vw); }
+
+/* File → Info: properties beside statistics. */
+.properties-dialog { width: min(720px, 94vw); }
+.properties-grid { display: grid; grid-template-columns: 1fr 240px; gap: 20px; }
+.properties-fields { display: grid; gap: 8px; }
+.properties-fields label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.properties-fields input, .properties-fields textarea { font: inherit; color: var(--text, #222); padding: 5px 7px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.properties-stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 12px; align-content: start; background: #f4f6fa; border-radius: 6px; padding: 10px 12px; }
+.properties-stats dt { color: var(--muted); }
+.properties-stats dd { margin: 0; text-align: right; }
+
+/* View → Outline: paragraphs indented by outline level, Word's symbols before them. */
+.page.outline-page { width: min(1000px, 94%); padding: 32px 40px 48px 64px; min-height: 70vh; }
+.pw-outline > .pw-ol { position: relative; margin-left: var(--pw-ol-indent, 0px) !important; text-indent: 0 !important; }
+.pw-outline > .pw-ol::before { position: absolute; left: -22px; top: 0.1em; width: 16px; text-align: center; font: 13px/1.2 "Segoe UI Symbol", sans-serif; color: #6b7280; }
+.pw-outline > .pw-ol-plus::before { content: "\2295"; cursor: pointer; color: #2b579a; }
+.pw-outline > .pw-ol-minus::before { content: "\2296"; }
+.pw-outline > .pw-ol-body::before { content: "\25CB"; font-size: 9px; top: 0.45em; }
+.pw-outline > .pw-ol-folded { text-decoration: underline wavy #9aa5b8 1px; text-underline-offset: 4px; }
+.pw-outline > .pw-ol-hidden { display: none !important; }

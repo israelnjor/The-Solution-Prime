@@ -146,7 +146,8 @@ const TOC_HEADING_STYLE: Style = { id: "TOCHeading", type: "paragraph", name: "T
 // --- headings and captions -------------------------------------------------------------------
 
 /** A paragraph's outline level (0 = Heading 1), from its own formatting or its style chain. */
-function outlineLevel(doc: PrimeDocument, props: ParagraphProps): number | undefined {
+/** A paragraph's outline level (0 = Heading 1 … 8), from its own setting or its style's; undefined: body text. */
+export function outlineLevelOf(doc: PrimeDocument, props: ParagraphProps): number | undefined {
   if (props.outlineLevel !== undefined) return props.outlineLevel;
   const seen = new Set<string>();
   for (let id = props.style; id && !seen.has(id);) {
@@ -173,7 +174,7 @@ export function headings(state: EditorState | Node, doc: PrimeDocument, max = 9)
     const props = n.attrs.props as ParagraphProps;
     // Every paragraph through the resolver, in order, so list numbers count as in the document.
     const rp = resolver.paragraph({ type: "paragraph", props, content: [] } as Paragraph);
-    const level = outlineLevel(doc, props);
+    const level = outlineLevelOf(doc, props);
     const text = n.textContent.trim();
     if (level !== undefined && level < max && text && !/^TOC/i.test(props.style ?? "")) {
       out.push({ pos, node: n, level: level + 1, text: rp.listLabel ? `${rp.listLabel.trim()} ${text}` : text });

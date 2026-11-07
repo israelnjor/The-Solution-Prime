@@ -1761,3 +1761,135 @@ export function trackChangesSelfTest(view: EditorView, base: () => PrimeDocument
     console.log("[selftest] align", JSON.stringify(out));
   })();
 }
+
+/** Navigation pane: headings listed and followed; collapsing; search results; dragging a section to move it. */
+export function navPaneSelfTest(view: EditorView, base: () => PrimeDocument) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const ed = await import("@prime/editor");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "View")?.click();
+    await wait(150);
+    const box = [...document.querySelectorAll<HTMLLabelElement>("label.choice")].find((l) => l.textContent?.includes("Navigation Pane"))?.querySelector("input");
+    if (box && !box.checked) box.click();
+    await wait(600);
+    const pane = document.querySelector(".nav-pane");
+    const items = ed.outline(view.state, base());
+    const rows = () => [...document.querySelectorAll<HTMLLIElement>(".nav-outline li")];
+    out.open = !!pane;
+    out.headings = { outline: items.length, rows: rows().length, first: rows()[0]?.textContent };
+    // Click the 5th heading: the cursor goes there and the heading is near the top of the window.
+    const target = Math.min(4, items.length - 1);
+    rows()[target]?.querySelector<HTMLButtonElement>(".heading")?.click();
+    await wait(400);
+    const canvas = view.dom.closest(".canvas") as HTMLElement;
+    const top = view.coordsAtPos(items[target].pos + 1).top - canvas.getBoundingClientRect().top;
+    out.jump = { cursorIn: view.state.selection.from === items[target].pos + 1, topPx: Math.round(top), current: rows()[target]?.classList.contains("current") };
+    // Collapse a heading with subheadings.
+    const parent = rows().findIndex((r) => !r.querySelector<HTMLButtonElement>(".twisty")?.disabled);
+    const before = rows().length;
+    if (parent >= 0) rows()[parent].querySelector<HTMLButtonElement>(".twisty")!.click();
+    await wait(100);
+    out.collapse = { parent, before, after: rows().length };
+    if (parent >= 0) rows()[parent].querySelector<HTMLButtonElement>(".twisty")!.click();
+    // Search.
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Search document"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "trust");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await wait(400);
+    const all = ed.findAll(view.state.doc, { text: "trust" });
+    out.search = { matches: all.length, count: document.querySelector(".nav-count")?.textContent, listed: document.querySelectorAll(".nav-results li").length, highlighted: view.dom.querySelectorAll(".pw-find").length > 0 };
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await wait(200);
+    out.enterSelects = view.state.doc.textBetween(view.state.selection.from, view.state.selection.to);
+    [...document.querySelectorAll<HTMLButtonElement>(".nav-results li button")][2]?.click();
+    await wait(300);
+    out.resultClick = view.state.selection.from === all[2]?.from;
+    // Drag the first heading of a level below the next of the same level.
+    [...document.querySelectorAll<HTMLButtonElement>(".nav-tabs button")].find((b) => b.textContent === "Headings")?.click();
+    await wait(100);
+    const fresh = ed.outline(view.state, base());
+    const a = fresh.findIndex((h, i) => fresh.slice(i + 1).some((x) => x.level === h.level));
+    const b = fresh.findIndex((h, i) => i > a && h.level === fresh[a].level);
+    const names = () => ed.outline(view.state, base()).filter((h) => h.level === fresh[a].level).map((h) => h.text.slice(0, 25));
+    const order = names();
+    const dt = new DataTransfer();
+    const ra = rows()[a];
+    const rb = rows()[b];
+    ra.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+    const rect = rb.getBoundingClientRect();
+    rb.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt, clientY: rect.bottom - 2 }));
+    await wait(50);
+    rb.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt, clientY: rect.bottom - 2 }));
+    await wait(300);
+    const moved = names();
+    out.drag = { a, b, before: order.slice(0, 3), after: moved.slice(0, 3), blocks: view.state.doc.childCount };
+    const { undo } = await import("prosemirror-history");
+    undo(view.state, view.dispatch);
+    out.undone = names().join("|") === order.join("|");
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Print dialog (pages chosen, preview, the frame handed to the printer) and Read Mode (pages turned, one or two). */
+export function printReadSelfTest() {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const until = async (f: () => unknown, ms = 60000) => { const t = performance.now(); while (!f() && performance.now() - t < ms) await wait(100); return f(); };
+  const out: Record<string, unknown> = {};
+  const inked = (c: HTMLCanvasElement | null) => {
+    if (!c || !c.width) return 0;
+    const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+    let dark = 0;
+    for (let i = 0; i < d.length; i += 16) if (d[i] < 128) dark++;
+    return dark;
+  };
+  void (async () => {
+    const { parsePages } = await import("./PrintDialog");
+    out.parse = [parsePages("1-3, 5", 10), parsePages("8-", 10), parsePages("2,2,1", 10), parsePages("12", 10), parsePages("x", 10)];
+    await wait(2500);
+    const t0 = performance.now();
+    window.dispatchEvent(new Event("prime-word:print"));
+    await until(() => document.querySelector(".print-dialog canvas[aria-label]"));
+    out.printOpenMs = Math.round(performance.now() - t0);
+    await wait(1200);
+    out.previewInk = inked(document.querySelector(".print-dialog canvas"));
+    const custom = document.querySelector<HTMLInputElement>('input[aria-label="Pages to print"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(custom, "2-3");
+    custom.dispatchEvent(new Event("input", { bubbles: true }));
+    await wait(300);
+    out.printButton = document.querySelector<HTMLButtonElement>(".print-dialog button.primary")?.textContent;
+    // The printer window cannot open in a test: the frame's print is caught instead.
+    let printed: { sheets: number; sizes: string[] } | undefined;
+    (globalThis as { primePrintHook?: (d: Document) => void }).primePrintHook = (d) => {
+      printed = { sheets: d.querySelectorAll(".sheet img").length, sizes: [...d.querySelectorAll("style")].map((x) => x.textContent ?? "").join("").match(/size: [^;]+/g) ?? [] };
+    };
+    document.querySelector<HTMLButtonElement>(".print-dialog button.primary")!.click();
+    await until(() => printed, 30000);
+    out.printed = printed;
+    out.dialogClosed = await until(() => !document.querySelector(".print-dialog"), 5000);
+    // Read Mode.
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "View")?.click();
+    await wait(150);
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Read Mode")?.click();
+    await until(() => document.querySelectorAll(".read-mode canvas.read-page").length);
+    await wait(1500);
+    const pagesShown = () => document.querySelector(".read-pages")?.textContent;
+    const canv = () => [...document.querySelectorAll<HTMLCanvasElement>(".read-mode canvas.read-page")];
+    out.read = { shown: pagesShown(), canvases: canv().length, ink: canv().map(inked), sideBySide: canv().length === 2 && canv()[1].getBoundingClientRect().left > canv()[0].getBoundingClientRect().right };
+    const mode = document.querySelector<HTMLElement>(".read-mode")!;
+    mode.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    await wait(300);
+    out.afterRight = pagesShown();
+    [...document.querySelectorAll<HTMLButtonElement>(".read-mode button")].find((b) => b.textContent === "One Page")?.click();
+    await wait(300);
+    out.onePage = { shown: pagesShown(), canvases: canv().length };
+    mode.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    await wait(300);
+    out.end = pagesShown();
+    mode.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wait(200);
+    out.closed = !document.querySelector(".read-mode");
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}

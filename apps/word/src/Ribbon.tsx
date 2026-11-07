@@ -7,7 +7,7 @@ import {
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
   insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
-  toggleSuppressLineNumbers, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  toggleSuppressLineNumbers, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
@@ -29,7 +29,7 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "file" | "home" | "insert" | "design" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture";
+type Tab = "file" | "home" | "insert" | "design" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture" | "outlining";
 /** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+S, Alt+R, Alt+W. */
 const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", design: "G", layout: "P", references: "S", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
@@ -56,8 +56,8 @@ export interface RibbonProps {
   onFind(replace: boolean): void;
   onHeaderFooter(): void;
   onParagraph(): void;
-  mode: "print" | "web";
-  onMode(mode: "print" | "web"): void;
+  mode: "print" | "web" | "outline";
+  onMode(mode: "print" | "web" | "outline"): void;
   markup: Markup;
   onMarkup(markup: Markup): void;
   onComments(): void;
@@ -81,6 +81,11 @@ export interface RibbonProps {
   onShowMarks(): void;
   ruler: boolean;
   onRuler(): void;
+  navPane: boolean;
+  onNavPane(): void;
+  onReadMode(): void;
+  onInfo(): void;
+  onZoomFit(fit: "page" | "width"): void;
   /** References: a table of contents (levels), updating fields, captions, a table of figures, cross-references. */
   onToc(levels: number): void;
   onUpdateFields(): void;
@@ -131,7 +136,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -169,7 +174,9 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
   const fonts = [...new Set([...FONTS, ...(effective ? [effective.font] : [])])].sort();
   const tableActive = !!state && inTable(state);
   const picture = state ? pictureAt(state) : undefined;
-  const activeTab = ((tab === "table" || tab === "tableDesign") && !tableActive) || (tab === "picture" && !picture) ? "home" : tab;
+  const activeTab = ((tab === "table" || tab === "tableDesign") && !tableActive) || (tab === "picture" && !picture) ? "home" : tab === "outlining" && mode !== "outline" ? "view" : tab;
+  // Outline view opens on its Outlining tab.
+  useEffect(() => { if (mode === "outline") setTab("outlining"); }, [mode]);
   const look = state && tableActive ? tableLookAt(state) : undefined;
   const currentTableStyle = tableActive && state ? (() => {
     for (let d = state.selection.$from.depth; d > 0; d--) if (state.selection.$from.node(d).type.name === "table") return state.selection.$from.node(d).attrs.props.style as string | undefined;
@@ -205,6 +212,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         {tableActive && <button className={`contextual ${activeTab === "tableDesign" ? "on" : ""}`} onClick={() => setTab("tableDesign")}>Table Design</button>}
         {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table Layout</button>}
         {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>Picture</button>}
+        {mode === "outline" && <button className={`contextual ${activeTab === "outlining" ? "on" : ""}`} onClick={() => setTab("outlining")}>Outlining</button>}
         <span className="spacer" />
         <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
         <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")} title="One continuous column">Web Layout</button>
@@ -219,6 +227,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onOpen} title="Open a .docx (Ctrl+O)">Open</button>
               <RecentMenu onOpen={onOpenRecent} />
               <button onClick={onConvertPdf} title="Turn a PDF into an editable Word document">Convert PDF</button>
+              <button onClick={onInfo} title="Document properties (title, author, tags) and statistics">Info</button>
             </div>
             <div className="group" aria-label="Save">
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
@@ -311,7 +320,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onParagraph} title="Paragraph settings: indents, spacing, line and page breaks, tabs" aria-label="Paragraph settings" className="launcher">⋯</button>
             </div>
             <div className="group">
-              <button onClick={() => onFind(false)} title="Find (Ctrl+F)">Find</button>
+              <button onClick={() => onFind(false)} title="Find in the navigation pane (Ctrl+F)">Find</button>
               <button onClick={() => onFind(true)} title="Replace (Ctrl+H)">Replace</button>
             </div>
           </>
@@ -631,12 +640,50 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         {activeTab === "view" && (
           <>
             <div className="group" aria-label="Views">
+              <button onClick={onReadMode} title="Read the pages, one or two at a time (Esc to return)">Read Mode</button>
               <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")}>Print Layout</button>
+              <button className={mode === "outline" ? "on" : ""} onClick={() => onMode("outline")} title="The document as an outline of its headings">Outline</button>
               <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")}>Web Layout</button>
             </div>
             <div className="group" aria-label="Show">
+              <label className="choice"><input type="checkbox" checked={navPane} onChange={onNavPane} /> Navigation Pane</label>
               <label className="choice"><input type="checkbox" checked={ruler} onChange={onRuler} /> Ruler</label>
               <label className="choice"><input type="checkbox" checked={showMarks} onChange={onShowMarks} /> Formatting marks</label>
+            </div>
+            <div className="group" aria-label="Zoom">
+              <button onClick={() => onZoomFit("page")} title="Zoom so a whole page fits in the window">One Page</button>
+              <button onClick={() => onZoomFit("width")} title="Zoom so the page fills the window's width">Page Width</button>
+            </div>
+          </>
+        )}
+
+        {activeTab === "outlining" && state && (
+          <>
+            <div className="group" aria-label="Outline tools">
+              <button onClick={run(changeOutlineLevel(() => doc, 0, 1))} title="Promote to Heading 1">«</button>
+              <button onClick={run(changeOutlineLevel(() => doc, -1))} title="Promote (Alt+Shift+←)" aria-label="Promote">←</button>
+              <select value={String(outlineLevelAt(state, doc))} aria-label="Outline level" title="Outline level"
+                onChange={(e) => run(changeOutlineLevel(() => doc, 0, Number(e.target.value)))()}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((l) => <option key={l} value={l}>Level {l}</option>)}
+                <option value={BODY}>Body Text</option>
+              </select>
+              <button onClick={run(changeOutlineLevel(() => doc, 1))} title="Demote (Alt+Shift+→)" aria-label="Demote">→</button>
+              <button onClick={run(changeOutlineLevel(() => doc, 0, BODY))} title="Demote to body text">»</button>
+            </div>
+            <div className="group" aria-label="Move">
+              <button onClick={run(moveBlock(-1))} title="Move up (Alt+Shift+↑)">▲ Move Up</button>
+              <button onClick={run(moveBlock(1))} title="Move down (Alt+Shift+↓)">▼ Move Down</button>
+            </div>
+            <div className="group" aria-label="Show">
+              <label className="field">Show Level{" "}
+                <select value={String(outlineShown(state))} aria-label="Show level" onChange={(e) => run(setOutlineLevel(Number(e.target.value)))()}>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((l) => <option key={l} value={l}>Level {l}</option>)}
+                  <option value={BODY}>All Levels</option>
+                </select>
+              </label>
+            </div>
+            <div className="group">
+              <button onClick={() => onMode("print")} title="Back to Print Layout">Close Outline View</button>
             </div>
           </>
         )}

@@ -47,3 +47,5 @@ export {
 } from "./styleedit.js";
 export { type DropCapKind, dropCapOf, setDropCap } from "./dropcap.js";
 export { NO_TRACK, setTracking, trackingOn, trackTransaction } from "./trackchanges.js";
+export { moveSection, outline, outlineIndexAt, type OutlineItem } from "./navigation.js";
+export { BODY, changeOutlineLevel, outlineKey, outlineLevelAt, outlinePlugin, outlineShown, setOutlineLevel } from "./outline.js";

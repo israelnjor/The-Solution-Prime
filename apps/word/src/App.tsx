@@ -1,6 +1,6 @@
-import { readDocx, writeDocx } from "@prime/docx";
+import { type DocumentProperties, readDocx, readProperties, withProperties, writeDocx } from "@prime/docx";
 import {
-  blankDocument, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
+  blankDocument, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -32,6 +32,10 @@ import { EquationDialog } from "./EquationDialog";
 import { SortDialog } from "./SortDialog";
 import { StylesDialog } from "./StylesDialog";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
+import { openPdfForView } from "./pdfImport";
+import { PrintDialog, type ViewPdf } from "./PrintDialog";
+import { ReadMode } from "./ReadMode";
+import { PropertiesDialog } from "./PropertiesDialog";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
 import { FONTS, LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
@@ -43,6 +47,7 @@ import { Ruler } from "./Ruler";
 import { SymbolDialog } from "./SymbolDialog";
 import { CaptionDialog, CrossRefDialog } from "./ReferencesDialogs";
 import { authorName, CommentsPane } from "./CommentsPane";
+import { NavPane } from "./NavPane";
 import { Home } from "./Home";
 import type { ConversionResult } from "@prime/pdf-import";
 import { PdfConverter } from "./PdfConverter";
@@ -111,7 +116,10 @@ export function App() {
   const [showWarnings, setShowWarnings] = useState(false);
   /** Print Layout shows pages as they will print; Web Layout is one continuous column. */
   // (Dev: ?mode=web opens in Web Layout.)
-  const [mode, setMode] = useState<"print" | "web">(() => (new URLSearchParams(location.search).get("mode") === "web" ? "web" : "print"));
+  const [mode, setMode] = useState<"print" | "web" | "outline">(() => {
+    const m = new URLSearchParams(location.search).get("mode");
+    return m === "web" || m === "outline" ? m : "print";
+  });
   const [layout, setLayout] = useState<LayoutResult>();
   /** The document the current layout was made from (automation waits for the startup document's). */
   const [layoutOf, setLayoutOf] = useState<PrimeDocument>();
@@ -119,6 +127,14 @@ export function App() {
   const [startupDone, setStartupDone] = useState(!isDesktop);
   const [overflow, setOverflow] = useState<Set<number>>(new Set());
   const [find, setFind] = useState<"find" | "replace" | null>(null);
+  const [info, setInfo] = useState(false);
+  // The Print dialog or Read Mode, over the PDF of the document's pages.
+  const [pdfView, setPdfView] = useState<{ kind: "print" | "read"; pdf: ViewPdf; pages: number; current: number } | null>(null);
+  // The navigation pane: open or not (remembered), and a counter that puts the cursor in its search box (Ctrl+F).
+  const [navPane, setNavPane] = useState(() => { try { return localStorage.getItem("prime-word:navpane") === "1"; } catch { return false; } });
+  const [navSearch, setNavSearch] = useState(0);
+  const showNav = (on: boolean) => { setNavPane(on); try { localStorage.setItem("prime-word:navpane", on ? "1" : "0"); } catch { /* storage unavailable */ } };
+  const searchNav = () => { showNav(true); setNavSearch((n) => n + 1); };
   const [editingHeaderFooter, setEditingHeaderFooter] = useState(false);
   const [editingParagraph, setEditingParagraph] = useState(false);
   const [pickingTemplate, setPickingTemplate] = useState(false);
@@ -199,6 +215,16 @@ export function App() {
     if (!v) return;
     const { base, location, name } = fileRef.current;
     try {
+      // Saved as Word saves: modified now, by whom, one revision more (and created/author when new).
+      const old = readProperties(base);
+      const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      const me = authorName().trim();
+      base.package = withProperties(base, {
+        modified: now, revision: (old.revision ?? 0) + 1,
+        ...(me ? { lastModifiedBy: me } : {}),
+        ...(old.created ? {} : { created: now }),
+        ...(old.author || !me ? {} : { author: me }),
+      }).package;
       const model = fromProseMirror(v.state.doc, base);
       // Page numbers in contents and cross-references as laid out now, so other programs show them right.
       if (hasPageRefs(v.state.doc) && measurerRef.current) refreshPageRefs(model, layoutDocument(model, measurerRef.current).bookmarks);
@@ -242,12 +268,17 @@ export function App() {
           "Mod-z": undo, "Mod-y": redo, "Mod-Shift-z": redo,
           "Mod-b": toggleRun("bold"), "Mod-i": toggleRun("italic"), "Mod-u": toggleRun("underline"),
           "Mod-s": command(() => void save()),
-          "Mod-f": command(() => setFind("find")),
+          "Mod-f": command(() => searchNav()),
           "Mod-h": command(() => setFind("replace")),
           "Mod-k": command(() => window.dispatchEvent(new Event(LINK_EVENT))),
           "Mod-p": command(() => window.dispatchEvent(new Event(PRINT_EVENT))),
           "Mod-Enter": insertPageBreak,
           "Mod-Shift-Enter": insertColumnBreak,
+          // Outline view: Alt+Shift+Left / Right promote and demote (Word's keys).
+          ...(mode === "outline" ? {
+            "Alt-Shift-ArrowLeft": changeOutlineLevel(() => fileRef.current.base, -1),
+            "Alt-Shift-ArrowRight": changeOutlineLevel(() => fileRef.current.base, 1),
+          } : {}),
           "Mod-Shift-e": (st, d) => setTracking(!trackingOn(st))(st, d),
           // Word's "move paragraph up / down".
           "Alt-Shift-ArrowUp": moveBlock(-1), "Alt-Shift-ArrowDown": moveBlock(1),
@@ -289,6 +320,7 @@ export function App() {
         columnResizing(),
         reviewPlugin(),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
+        ...(mode === "outline" ? [outlinePlugin(() => fileRef.current.base)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
       ],
     });
@@ -596,14 +628,28 @@ export function App() {
     return () => window.removeEventListener(PRINT_EVENT, onPrint);
   }, []);
 
-  const print = async () => {
+  /** The pages as the PDF draws them, for the Print dialog and Read Mode. */
+  const openPages = async (kind: "print" | "read") => {
     const v = view.current;
     if (!v || !measurerRef.current) return;
     try {
-      flash("Preparing to print…");
+      flash(kind === "print" ? "Preparing to print…" : "Preparing pages…");
+      const { bytes, pages } = await makePdf(fromProseMirror(v.state.doc, fileRef.current.base), measurerRef.current);
+      const pdf = await openPdfForView(bytes);
+      setPdfView({ kind, pdf, pages, current: Math.min(pages, mode === "print" ? pageAt(v.state) : 1) });
+    } catch (e) {
+      alert(`Prime Word could not ${kind === "print" ? "print" : "show the pages"}:\n${(e as Error).message}`);
+    }
+  };
+  const print = () => openPages("print");
+  /** Print → Open as PDF: the document in the PDF viewer (as printing worked before the Print dialog). */
+  const printViaPdf = async () => {
+    const v = view.current;
+    if (!v || !measurerRef.current) return;
+    try {
       await printDocument(fromProseMirror(v.state.doc, fileRef.current.base), measurerRef.current, fileRef.current.name);
     } catch (e) {
-      alert(`Prime Word could not print:\n${(e as Error).message}`);
+      alert(`Prime Word could not open the PDF:\n${(e as Error).message}`);
     }
   };
 
@@ -627,7 +673,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest, navPaneSelfTest, printReadSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -654,6 +700,8 @@ export function App() {
       if (test === "citations") citationsSelfTest(v);
       if (test === "equation") equationSelfTest(v);
       if (test === "tables") tablesSelfTest(v);
+      if (test === "printread") printReadSelfTest();
+      if (test === "nav") navPaneSelfTest(v, () => fileRef.current.base);
       if (test === "track") trackChangesSelfTest(v, () => fileRef.current.base);
       if (test === "columns" && measurerRef.current) columnsSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "dropcap" && measurerRef.current) dropCapSelfTest(v, () => fileRef.current.base, measurerRef.current);
@@ -721,16 +769,27 @@ export function App() {
 
   const v = view.current;
   const section = v ? pageSetup(v.state) : file.base.sections[0]?.props ?? {};
+  /** View → One Page / Page Width: the zoom that fits a whole page, or the page's width, in the window. */
+  const zoomFit = (fit: "page" | "width") => {
+    const canvas = document.querySelector<HTMLElement>("main.canvas");
+    if (!canvas) return;
+    const px = 96 / 72;
+    const w = (section.pageWidth ?? 612) * px;
+    const h = (section.pageHeight ?? 792) * px;
+    const byWidth = (canvas.clientWidth - 48) / w;
+    const z = fit === "width" ? byWidth : Math.min(byWidth, (canvas.clientHeight - 32) / h);
+    setZoom(Math.max(25, Math.min(200, Math.round(z * 100))));
+  };
   const margins = section.margins ?? {};
 
   return (
     <Profiler id="app" onRender={(_id, _phase, ms) => { if (SELFTEST) performance.measure("pw:render", { start: performance.now() - ms, end: performance.now() }); }}>
-    <div className="app">
+    <div className={`app${navPane ? " with-nav" : ""}`}>
       <Ribbon
         view={v} doc={v?.state.doc.attrs.styles ? { ...file.base, styles: v.state.doc.attrs.styles } : file.base} mode={mode}
         onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)} onSave={(saveAs) => void save(saveAs)}
         onExportPdf={() => void exportToPdf()} onPrint={() => void print()}
-        onFind={(replace) => setFind(replace ? "replace" : "find")}
+        onFind={(replace) => (replace ? setFind("replace") : searchNav())}
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
         onMode={(m) => { setMode(m); if (m === "web") setLayout(undefined); }}
@@ -745,6 +804,8 @@ export function App() {
         }}
         onFontDialog={() => setDialog("font")} onSymbol={() => setDialog("symbol")} onEquation={() => setDialog("equation")} onDateTime={() => setDialog("datetime")}
         showMarks={marksOn} onShowMarks={toggleMarks}
+        onInfo={() => setInfo(true)}
+        navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
         onToc={(levels) => { if (v) { insertToc(baseOf, { levels }, pagesRef.current)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
         onTableOfFigures={() => { if (v) { insertToc(baseOf, { caption: "Figure" }, pagesRef.current, false)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
@@ -828,6 +889,10 @@ export function App() {
             <PageSheets layout={layout} doc={file.base} gap={PAGE_GAP} overflow={overflow}>
               <div ref={mount} className={`pw-editor paged pw-markup-${markup}`} />
             </PageSheets>
+          ) : mode === "outline" ? (
+            <div className="page outline-page">
+              <div ref={mount} className={`pw-editor pw-outline pw-markup-${markup}`} />
+            </div>
           ) : (
             <div className="page" style={{
               width: `${section.pageWidth ?? 612}pt`,
@@ -842,6 +907,27 @@ export function App() {
       {notesPane && v && measurerRef.current && (
         <NotesPane key={notesPane.focus ? `${notesPane.focus.kind}-${notesPane.focus.id}` : "all"} view={v} base={baseOf} measurer={measurerRef.current}
           focus={notesPane.focus} onClose={() => { setNotesPane(undefined); v.focus(); }} />
+      )}
+      {info && v && (
+        <PropertiesDialog base={fileRef.current.base} doc={v.state.doc} pages={layout?.pages.length} fileName={file.name}
+          onSave={(p: DocumentProperties) => {
+            // Kept with the document (its package), saved with it; the editor is not rebuilt.
+            fileRef.current.base.package = withProperties(fileRef.current.base, p).package;
+            setDirty(true);
+            dirtyRef.current = true;
+          }}
+          onClose={() => { setInfo(false); v.focus(); }} />
+      )}
+      {pdfView?.kind === "print" && (
+        <PrintDialog pdf={pdfView.pdf} pages={pdfView.pages} current={pdfView.current}
+          onOpenPdf={() => { setPdfView(null); void printViaPdf(); }} onClose={() => { setPdfView(null); v?.focus(); }} />
+      )}
+      {pdfView?.kind === "read" && (
+        <ReadMode pdf={pdfView.pdf} pages={pdfView.pages} start={pdfView.current} name={file.name} onClose={() => { setPdfView(null); v?.focus(); }} />
+      )}
+      {navPane && v && (
+        <NavPane view={v} base={baseOf} doc={v.state.doc} searchFocus={navSearch}
+          onAdvanced={() => setFind("find")} onClose={() => { showNav(false); v.focus(); }} />
       )}
       {comments !== "closed" && v && (
         <CommentsPane view={v} base={baseOf} writing={comments === "writing"}
