@@ -41,7 +41,7 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Wrap-text options for text boxes, arrange | ❌ |
 | **References** | Insert/update table of contents, footnotes and endnotes (laid out at the foot of the page / after the text, editable), captions, table of figures, cross-references, citations & bibliography (APA, Harvard, IEEE; Word's own sources), Update Field (F9) | ✅ |
 | | Index, table of authorities, footnote options (numbering format, restart per page) | ❌ |
-| **Review** | Spelling, word count, comments, track changes (record insertions, deletions and paragraph breaks; show/accept/reject) | ✅ |
+| **Review** | Spelling, word count, comments, track changes (record insertions, deletions, paragraph breaks and formatting; show/accept/reject) | ✅ |
 | | Record tracked changes, grammar, thesaurus, compare, read aloud, protect | ❌ |
 | **View** | Print / Web layout, zoom, ruler, formatting marks | ✅ |
 | | Read mode, outline, navigation pane, vertical ruler, multiple pages, dark mode | ❌ |
@@ -88,7 +88,7 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    hyphenation; create/modify styles, style sets, theme fonts and colours; drop cap. Each checked
    against Word (same pages and positions; Word reads ours as its own). On screen, a document shows one
    column count (its first): a section with a different count shows as one column (it prints right).
-5. **Review, view and files** — record tracked changes ✅ (2026-11-07: insertions, deletions and paragraph breaks, Word's rules: your own insertions delete outright, typing goes at the cursor; formatting changes not yet recorded), compare documents, navigation pane, read
+5. **Review, view and files** — record tracked changes ✅ (2026-11-07: insertions, deletions and paragraph breaks, Word's rules: your own insertions delete outright, typing goes at the cursor; character and paragraph formatting kept as Word keeps it, "Formatted: Bold"), compare documents, navigation pane, read
    mode, outline view, multiple pages, print dialog, document properties, password protection,
    .doc/.rtf/.odt/.txt open and save, thesaurus, read aloud, grammar (basic).
 6. **Objects** — shapes and text boxes (insert and edit), simple charts.
