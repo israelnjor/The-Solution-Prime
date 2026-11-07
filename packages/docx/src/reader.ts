@@ -150,6 +150,24 @@ class Reader {
       if (qname(e) === "w:background") doc.background = ctx.keep(e); // page colour
       else if (qname(e) !== "w:body") this.warn(`Document-level ${qname(e)} is not supported and was dropped.`);
     }
+    // Automatic hyphenation, from the settings part (which is otherwise kept as it is).
+    const settingsPart = relOf(RelType.settings);
+    const settings = settingsPart ? this.xml(settingsPart) : undefined;
+    if (settings) {
+      const setting = (name: string) => elements(settings).find((x) => qname(x) === name);
+      const on = (x: Element | undefined) => !!x && !/^(0|false|off)$/.test(attr(x, "val") ?? "");
+      const auto = setting("w:autoHyphenation");
+      if (on(auto)) {
+        const zone = Number(attr(setting("w:hyphenationZone"), "val") ?? NaN);
+        const limit = Number(attr(setting("w:consecutiveHyphenLimit"), "val") ?? NaN);
+        doc.hyphenation = {
+          auto: true,
+          ...(zone >= 0 ? { zone: zone / 20 } : {}),
+          ...(limit > 0 ? { consecutiveLimit: limit } : {}),
+          ...(on(setting("w:doNotHyphenateCaps")) ? { noCaps: true } : {}),
+        };
+      }
+    }
     const footnotes = relOf(RelType.footnotes);
     const endnotes = relOf(RelType.endnotes);
     if (footnotes || endnotes) {

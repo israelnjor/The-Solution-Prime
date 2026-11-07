@@ -43,7 +43,10 @@ export function createSchema(render?: Render): Schema {
         // The last section's properties, headers and footers (earlier sections end in section_break nodes);
         // the footnotes' and endnotes' text (PrimeDocument.notes), so editing a note can be undone.
         // The page colour (PrimeDocument.background), so changing it can be undone.
-        attrs: { section: { default: null }, notes: { default: null }, background: { default: null } },
+        // Automatic hyphenation (PrimeDocument.hyphenation), likewise.
+        attrs: { section: { default: null }, notes: { default: null }, background: { default: null }, hyphenation: { default: null },
+          // The stylesheet once a style is created or modified (it then overrides the file's), likewise.
+          styles: { default: null } },
       },
       paragraph: {
         group: "block",
@@ -130,7 +133,7 @@ export function createSchema(render?: Render): Schema {
         attrs: { ...props, kind: { default: "line" }, clear: { default: null } },
         toDOM: (n) => (n.attrs.kind === "line"
           ? ["br", { "data-pw-break": json(n.attrs) }]
-          : ["span", { class: "pw-page-break", contenteditable: "false", "data-pw-break": json(n.attrs) }]),
+          : ["span", { class: n.attrs.kind === "column" ? "pw-page-break pw-column-break" : "pw-page-break", contenteditable: "false", "data-pw-break": json(n.attrs) }]),
         parseDOM: [
           { tag: "[data-pw-break]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-break") },
           { tag: "br" },

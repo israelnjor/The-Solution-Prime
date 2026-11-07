@@ -67,19 +67,28 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
     }
     return ok;
   };
+  // A drop cap's letter belongs to the first word of the next paragraph ("P" + "rime"): read together.
+  let capLetter = "";
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
+    if (/w:dropCap="(drop|margin)"/.test(JSON.stringify(node.attrs.props?.extra ?? []))) {
+      capLetter = node.textContent;
+      return false;
+    }
+    const cap = capLetter;
+    capLetter = "";
     // A paragraph checked before and unchanged since (the same node): its results, moved to where it is now.
-    const known = paragraphs?.get(node);
+    const known = cap ? undefined : paragraphs?.get(node);
     if (known) {
       for (const m of known) out.push({ from: pos + m.from, to: pos + m.to, word: m.word });
       return false;
     }
     const first = out.length;
-    let text = "";
-    const at: number[] = [];
+    let text = cap;
+    // (The drop cap's letters map to the paragraph's start: an underline never reaches into the drop cap.)
+    const at: number[] = [...cap].map(() => pos + 1);
     // Text not to check: links and fields (addresses, references), and web/e-mail addresses typed as text.
-    const skip: boolean[] = [];
+    const skip: boolean[] = [...cap].map(() => false);
     node.forEach((child, offset) => {
       const s = child.isText ? child.text! : " ";
       const linked = child.marks.some((m) => m.type.name === "link" || m.type.name === "field");
@@ -102,7 +111,7 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
       if (correct(word) || correct(word.toLowerCase())) continue;
       out.push({ from: at[m.index!], to: at[m.index! + raw.length - 1] + 1, word });
     }
-    paragraphs?.set(node, out.slice(first).map((m) => ({ from: m.from - pos, to: m.to - pos, word: m.word })));
+    if (!cap) paragraphs?.set(node, out.slice(first).map((m) => ({ from: m.from - pos, to: m.to - pos, word: m.word })));
     return false;
   });
   return out;

@@ -1356,3 +1356,278 @@ export function designSelfTest(view: EditorView, base: () => PrimeDocument, meas
     console.log("[selftest] align", JSON.stringify(out));
   })();
 }
+
+/** Line numbers (Wave 4): Layout → Line Numbers; checks the section, the layout, the screen and suppression. */
+export function lineNumbersSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Layout")?.click();
+    await wait(150);
+    const menu = () => document.querySelector<HTMLSelectElement>('select[aria-label="Line Numbers"]');
+    choose(menu(), "continuous"); await wait(150);
+    const numbers = () => layoutDocument(fromProseMirror(view.state.doc, base()), measurer).pages.flatMap((p) => p.lines.filter((l) => l.story === "lineNumber").map((l) => Number(l.segments[0].text)));
+    out.xml = fromProseMirror(view.state.doc, base()).sections[0].props.extra?.find((x) => x.name === "w:lnNumType")?.xml;
+    out.menuShows = menu()?.value;
+    const all = numbers();
+    out.count = all.length;
+    out.continuous = all.every((n, i) => n === i + 1);
+    await wait(2500);
+    out.onScreen = [...document.querySelectorAll(".pw-chrome-text")].filter((e) => /^\d+$/.test(e.textContent ?? "")).length > 5;
+    // Suppress the first long paragraph: its lines lose their numbers.
+    let at = -1;
+    view.state.doc.forEach((n, pos) => { if (at < 0 && n.type.name === "paragraph" && n.textContent.length > 200) at = pos; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 1)));
+    choose(menu(), "suppress"); await wait(150);
+    out.suppressedFewer = all.length - numbers().length;
+    choose(menu(), "newPage"); await wait(150);
+    const pages = layoutDocument(fromProseMirror(view.state.doc, base()), measurer).pages;
+    out.restartEachPage = pages.filter((p) => p.lines.some((l) => l.story === "lineNumber")).every((p) => p.lines.find((l) => l.story === "lineNumber")!.segments[0].text === "1");
+    choose(menu(), "none"); await wait(150);
+    out.off = numbers().length === 0;
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Hyphenation (Wave 4): Layout → Hyphenation → Automatic; checks the setting, the layout, the screen and a saved file. */
+export function hyphenationSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { writeDocx, readDocx } = await import("@prime/docx");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Layout")?.click();
+    await wait(150);
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Hyphenation"]'), "auto");
+    await wait(3500); // laid out and fitted
+    const model = fromProseMirror(view.state.doc, base());
+    out.setting = model.hyphenation;
+    out.hyphenated = layoutDocument(model, measurer).hyphens.length;
+    out.softHyphens = document.querySelectorAll(".pw-shy").length;
+    // Each soft hyphen ends a line on screen: the text after it starts lower.
+    out.breaksOnScreen = [...document.querySelectorAll(".pw-shy")].filter((el) => {
+      const range = document.createRange();
+      const next = el.nextSibling ?? el.parentElement?.nextSibling;
+      if (!next) return false;
+      range.setStartAfter(el); range.setEnd(range.startContainer, range.startOffset);
+      const before = el.previousSibling ? (() => { const r = document.createRange(); r.selectNodeContents(el.previousSibling!); const rs = r.getClientRects(); return rs[rs.length - 1]; })() : undefined;
+      const after = (() => { const r = document.createRange(); r.selectNodeContents(next); return r.getClientRects()[0]; })();
+      return before && after && after.top > before.top + 2;
+    }).length;
+    out.alignment = alignmentReport();
+    out.saved = readDocx(writeDocx(model)).doc.hyphenation;
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Hyphenation"]'), "none"); await wait(2500);
+    out.offAgain = { setting: fromProseMirror(view.state.doc, base()).hyphenation ?? null, softHyphens: document.querySelectorAll(".pw-shy").length };
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Styles (Wave 4): modify Heading 1 and create a style from a paragraph, from Home → Styles…. */
+export function stylesSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const setValue = (el: HTMLInputElement | HTMLSelectElement | null | undefined, value: string, event = "change") => {
+    if (!el) return;
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event(event === "change" && el instanceof HTMLInputElement ? "input" : event, { bubbles: true }));
+  };
+  const field = (label: string) => [...document.querySelectorAll<HTMLLabelElement>(".styles-dialog label")].find((l) => l.textContent?.trim().startsWith(label))?.querySelector<HTMLInputElement | HTMLSelectElement>("input, select");
+  const click = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === text)?.click();
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    const { undo } = await import("prosemirror-history");
+    const { writeDocx, readDocx } = await import("@prime/docx");
+    await wait(1500);
+    const heading = () => { let at = -1; view.state.doc.forEach((n, pos) => { if (at < 0 && n.attrs.props?.style === "Heading1") at = pos; }); return at; };
+    const h = heading();
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, h + 1)));
+    const sizeOnScreen = () => parseFloat(getComputedStyle((view.nodeDOM(heading()) as HTMLElement).querySelector("span") ?? (view.nodeDOM(heading()) as HTMLElement)).fontSize);
+    const before = sizeOnScreen();
+    click("Styles…"); await wait(200);
+    out.opensOn = (document.querySelector<HTMLSelectElement>('select[aria-label="Style to modify"]'))?.value;
+    setValue(field("Size") as HTMLInputElement, "24"); await wait(50);
+    setValue(field("Space before (pt)") as HTMLInputElement, "30"); await wait(50);
+    click("Apply"); await wait(600);
+    const style = () => fromProseMirror(view.state.doc, base()).styles.styles.find((s) => s.id === "Heading1")!;
+    out.style = { size: style().run?.size, before: style().paragraph?.spacing?.before };
+    out.screenSize = [before, sizeOnScreen()];
+    const laid = layoutDocument(fromProseMirror(view.state.doc, base()), measurer);
+    out.laidOutSize = laid.pages.flatMap((p) => p.lines).find((l) => l.segments.some((s) => s.text.includes("summary")))?.segments.find((s) => s.text.includes("summary"))?.size;
+    undo(view.state, view.dispatch); await wait(300);
+    out.undone = style().run?.size !== 24 && sizeOnScreen() === before;
+    // A new style from a body paragraph.
+    let body = -1;
+    view.state.doc.forEach((n, pos) => { if (body < 0 && n.type.name === "paragraph" && n.textContent.length > 100) body = pos; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, body + 1)));
+    click("Styles…"); await wait(200);
+    setValue(document.querySelector<HTMLInputElement>('input[aria-label="New style name"]'), "Report Body"); await wait(50);
+    click("Create Style"); await wait(300);
+    const doc = fromProseMirror(view.state.doc, base());
+    out.created = { paragraphStyle: view.state.doc.nodeAt(body)?.attrs.props?.style, inSheet: doc.styles.styles.find((s) => s.name === "Report Body")?.id };
+    const again = readDocx(writeDocx(doc)).doc;
+    out.saved = !!again.styles.styles.find((s) => s.name === "Report Body");
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Design → Style Set, Fonts and Colors (Wave 4): each restyles the body, title and headings in one undoable step. */
+export function styleSetsSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (label: string, value: string) => {
+    const el = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { undo } = await import("prosemirror-history");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Design")?.click();
+    await wait(150);
+    const sheet = () => fromProseMirror(view.state.doc, base()).styles.styles;
+    const look = (id: string) => { const s = sheet().find((x) => x.id === id); return s && { font: s.run?.font?.ascii, size: s.run?.size, color: s.run?.color, bold: s.run?.bold }; };
+    const pagesBefore = layoutDocument(fromProseMirror(view.state.doc, base()), measurer).pages.length;
+    choose("Style Set", "Formal Report"); await wait(200);
+    out.formal = { normal: look(sheet().find((s) => s.isDefault && s.type === "paragraph")!.id), h1: look("Heading1") };
+    out.pages = [pagesBefore, layoutDocument(fromProseMirror(view.state.doc, base()), measurer).pages.length];
+    choose("Theme Fonts", "Georgia"); await wait(200);
+    out.fonts = { h1: look("Heading1")?.font, h2: look("Heading2")?.font };
+    choose("Theme Colors", "Green"); await wait(200);
+    out.colors = { h1: look("Heading1")?.color, h2: look("Heading2")?.color };
+    undo(view.state, view.dispatch); await wait(200);
+    out.undoColors = look("Heading1")?.color;
+    await wait(3000);
+    out.alignment = alignmentReport();
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Drop cap (Wave 4): Insert → Drop Cap on a paragraph; checks the frame, the layout, the screen, spelling and undoing it with "None". */
+export function dropCapSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (value: string) => {
+    const el = document.querySelector<HTMLSelectElement>('select[aria-label="Drop Cap"]');
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    await wait(1500);
+    let at = -1;
+    view.state.doc.forEach((n, pos) => { if (at < 0 && n.type.name === "paragraph" && n.textContent.length > 200) at = pos; });
+    const text = view.state.doc.nodeAt(at)!.textContent;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 5)));
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Insert")?.click();
+    await wait(150);
+    choose("drop"); await wait(300);
+    const cap = view.state.doc.nodeAt(at)!;
+    out.cap = { letter: cap.textContent, frame: JSON.stringify(cap.attrs.props.extra).includes('w:dropCap=\\"drop\\"'), size: cap.firstChild?.marks.find((m) => m.type.name === "run")?.attrs.props.size };
+    out.rest = view.state.doc.nodeAt(at + cap.nodeSize)!.textContent.slice(0, 12);
+    const laid = layoutDocument(fromProseMirror(view.state.doc, base()), measurer);
+    out.laidOut = laid.pages.flatMap((p) => p.lines).some((l) => l.segments.some((s) => s.text === cap.textContent && s.size > 30));
+    await wait(3000); // laid out, fitted and spell-checked
+    // On screen: the first three lines of the paragraph start right of the letter; the fourth does not.
+    const capEl = view.nodeDOM(at) as HTMLElement;
+    const para = capEl.nextElementSibling as HTMLElement;
+    const r = document.createRange();
+    const lefts: number[] = [];
+    const tops: number[] = [];
+    const walker = document.createTreeWalker(para, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      r.selectNodeContents(n);
+      for (const b of r.getClientRects()) if (!tops.some((t) => Math.abs(t - b.top) < 3)) { tops.push(b.top); lefts.push(b.left); }
+    }
+    const paraLeft = para.getBoundingClientRect().left;
+    out.narrowedLines = lefts.filter((l) => l > paraLeft + 10).length;
+    out.floated = getComputedStyle(capEl).float;
+    out.misspelledPrime = [...document.querySelectorAll(".pw-misspelled")].some((e) => /^rime/.test(e.textContent ?? ""));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + cap.nodeSize + 3)));
+    choose("none"); await wait(300);
+    out.restored = view.state.doc.nodeAt(at)!.textContent === text;
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Text columns (Wave 4): Layout → Columns; checks the section, the layout, the screen (text split between columns) and a saved file. */
+export function columnsSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const set = (el: HTMLInputElement | HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+  };
+  const menu = () => document.querySelector<HTMLSelectElement>('select[aria-label="Columns"]');
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { writeDocx, readDocx } = await import("@prime/docx");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Layout")?.click();
+    await wait(150);
+    set(menu(), "two"); await wait(200);
+    const model = () => fromProseMirror(view.state.doc, base());
+    out.xml = model().sections.map((s) => s.props.extra?.find((x) => x.name === "w:cols")?.xml);
+    const laid = layoutDocument(model(), measurer);
+    out.pages = laid.pages.length;
+    out.columnStarts = laid.columnStarts.length;
+    await wait(3500); // laid out, fitted
+    const root = view.dom;
+    out.screen = { columnsClass: root.classList.contains("pw-columns"), count: getComputedStyle(root).columnCount, breaks: root.querySelectorAll(".pw-col-break").length };
+    // Some paragraph has lines in both columns: its text rectangles start at two different x positions.
+    const lefts = new Set<number>();
+    let split = false;
+    for (const p of [...root.querySelectorAll(":scope > p")]) {
+      const r = document.createRange();
+      r.selectNodeContents(p);
+      const xs = new Set([...r.getClientRects()].map((b) => Math.round(b.left / 20)));
+      if (xs.size > 1) { split = true; break; }
+      for (const x of xs) lefts.add(x);
+    }
+    out.paragraphSplitBetweenColumns = split;
+    out.alignment = alignmentReport();
+    // More Columns…: three, with a line between.
+    set(menu(), "more"); await wait(150);
+    out.dialogOpen = !!document.querySelector('input[aria-label="Number of columns"]');
+    set(document.querySelector<HTMLInputElement>('input[aria-label="Number of columns"]'), "3"); await wait(50);
+    [...document.querySelectorAll<HTMLLabelElement>(".popover label.choice")].find((l) => l.textContent?.includes("Line between"))?.querySelector("input")?.click();
+    await wait(50);
+    [...document.querySelectorAll<HTMLButtonElement>(".popover button")].find((b) => b.textContent === "Apply")?.click();
+    await wait(3500);
+    out.three = { xml: model().sections[0].props.extra?.find((x) => x.name === "w:cols")?.xml, count: getComputedStyle(root).columnCount, rule: getComputedStyle(root).columnRuleStyle };
+    out.saved = readDocx(writeDocx(model())).doc.sections[0].props.extra?.find((x) => x.name === "w:cols")?.xml;
+    set(menu(), "one"); await wait(3000);
+    out.one = { pages: layoutDocument(model(), measurer).pages.length, columnsClass: root.classList.contains("pw-columns") };
+    // Columns for selected paragraphs only: two body paragraphs in the middle of the text.
+    const { TextSelection } = await import("prosemirror-state");
+    const bodies: number[] = [];
+    view.state.doc.forEach((n, pos) => { if (n.type.name === "paragraph" && n.textContent.length > 200) bodies.push(pos); });
+    const a = bodies[2];
+    const b = bodies[3] + view.state.doc.nodeAt(bodies[3])!.nodeSize - 2;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, a + 5, b)));
+    set(menu(), "two"); await wait(3500);
+    const m = model();
+    out.selection = {
+      sections: m.sections.map((x) => `${x.props.breakType ?? "nextPage"}:${/w:num="(\d+)"/.exec(x.props.extra?.find((e) => e.name === "w:cols")?.xml ?? "")?.[1] ?? 1}:${x.blocks.length}`),
+      spanned: root.querySelectorAll(":scope > .pw-span").length,
+      inColumns: [...root.children].filter((el) => el.matches("p, table") && !el.classList.contains("pw-span")).length,
+      alignment: alignmentReport(),
+    };
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}

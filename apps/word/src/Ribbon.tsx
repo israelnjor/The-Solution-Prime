@@ -6,7 +6,9 @@ import {
   changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign, type CitationStyle, insertCitation, readSources,
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
-  insertColumnBreak, insertSectionBreak, type SectionStart,
+  insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
+  toggleSuppressLineNumbers, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
@@ -92,6 +94,10 @@ export interface RibbonProps {
   onSources(startNew: boolean): void;
   onBibliography(): void;
   onSortTable(): void;
+  /** Insert → Drop Cap: dropped, in the margin, or none, for the paragraph at the cursor. */
+  onDropCap(kind: DropCapKind): void;
+  /** Home → Styles…: modify or create paragraph styles. */
+  onStyles(): void;
 }
 
 const BORDER_CHOICES: [BorderChoice, string][] = [
@@ -125,7 +131,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -140,7 +146,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const [popover, setPopover] = useState<"link" | "table" | "margins" | "watermark" | null>(null);
+  const [popover, setPopover] = useState<"link" | "table" | "margins" | "watermark" | "columns" | null>(null);
+  const [colForm, setColForm] = useState({ count: 2, space: 1.27, line: false });
   const [mark, setMark] = useState<Required<Omit<WatermarkSpec, "font">>>({ text: "DRAFT", color: "C0C0C0", layout: "diagonal", semitransparent: true });
   /** The pen for table borders (Table Design): width in pt and colour. */
   const [pen, setPen] = useState({ width: 0.5, color: "000000" });
@@ -238,6 +245,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 {!styles.some((s) => s.id === currentStyle) && <option value={currentStyle}>{currentStyle}</option>}
                 {styles.map((s) => <option key={s.id} value={s.id}>{displayName(s.name ?? s.id)}</option>)}
               </select>
+              <button onClick={onStyles} title="Modify a style, or create one from this paragraph">Styles…</button>
             </div>
             <div className="group">
               <select value={effective?.font ?? ""} onChange={(e) => run(setFont(e.target.value))()} title="Font" className="font-select">
@@ -314,6 +322,14 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group">
               <button onClick={run(insertPageBreak)} title="Page break (Ctrl+Enter)">Page Break</button>
             </div>
+            <div className="group" aria-label="Drop Cap">
+              <select value={state ? dropCapOf(state) : "none"} aria-label="Drop Cap" title="A large first letter beside the paragraph's first lines"
+                onChange={(e) => onDropCap(e.target.value as DropCapKind)}>
+                <option value="none">Drop Cap: None</option>
+                <option value="drop">Drop Cap: Dropped</option>
+                <option value="margin">Drop Cap: In Margin</option>
+              </select>
+            </div>
             <div className="group popover-anchor">
               <button onClick={() => setPopover(popover === "table" ? null : "table")} title="Insert a table">Table</button>
               <button onClick={run(textToTable(docRef))} title="Turn the selected lines (separated by tabs) into a table">Text to Table</button>
@@ -370,6 +386,23 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
           });
           return (
             <>
+              <div className="group" aria-label="Document Formatting">
+                <select value="" aria-label="Style Set" title="A coordinated look for the body text, title and headings"
+                  onChange={(e) => { if (e.target.value) run(applyStyleSet(doc, e.target.value))(); }}>
+                  <option value="">Style Set</option>
+                  {STYLE_SETS.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+                </select>
+                <select value="" aria-label="Theme Fonts" title="Heading and body fonts"
+                  onChange={(e) => { if (e.target.value) run(applyFontPair(doc, e.target.value))(); }}>
+                  <option value="">Fonts</option>
+                  {FONT_PAIRS.map((x) => <option key={x.name} value={x.name}>{x.name === x.heading ? x.name : `${x.name}: ${x.heading} / ${x.body}`}</option>)}
+                </select>
+                <select value="" aria-label="Theme Colors" title="Colours of the title and headings"
+                  onChange={(e) => { if (e.target.value) run(applyColors(doc, e.target.value))(); }}>
+                  <option value="">Colors</option>
+                  {COLOR_SETS.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+                </select>
+              </div>
               <div className="group" aria-label="Watermark">
                 <select value="" aria-label="Watermark" title="Text across every page, behind the text" onChange={(e) => {
                   const v2 = e.target.value;
@@ -455,7 +488,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                       setPopover(null);
                     }}>
                       {(["top", "bottom", "left", "right"] as const).map((k) => (
-                        <label key={k}>{k[0].toUpperCase() + k.slice(1)} <input type="number" step={0.1} min={0} max={20} value={custom[k]}
+                        <label key={k}>{k[0].toUpperCase() + k.slice(1)} <input type="number" step={0.01} min={0} max={20} value={custom[k]}
                           onChange={(e) => setCustom((c) => ({ ...c, [k]: Number(e.target.value) }))} /> cm</label>
                       ))}
                       <button className="primary" type="submit">Apply</button>
@@ -466,6 +499,43 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <div className="group">
                 <button className={!landscape ? "on" : ""} onClick={run(setPageSetup({ orientation: "portrait" }))}>Portrait</button>
                 <button className={landscape ? "on" : ""} onClick={run(setPageSetup({ orientation: "landscape" }))}>Landscape</button>
+              </div>
+              <div className="group popover-anchor" aria-label="Columns">
+                {(() => {
+                  const c = columnsOf(state);
+                  const text = setup.pageWidth - (m.left ?? 72) - (m.right ?? 72);
+                  const current = c.widths ? (c.widths[0] < c.widths[1] ? "left" : "right") : c.count <= 3 ? ["one", "two", "three"][c.count - 1] : "more";
+                  return (
+                    <select value={current} aria-label="Columns" title="Split the text into columns" onChange={(e) => {
+                      const v2 = e.target.value;
+                      if (v2 === "more") {
+                        setColForm({ count: Math.max(2, c.count), space: Math.round((c.space / CM) * 100) / 100, line: !!c.line });
+                        setPopover("columns");
+                      } else run(setColumns(columnPreset(v2 as "one", text)))();
+                    }}>
+                      <option value="one">Columns: One</option>
+                      <option value="two">Columns: Two</option>
+                      <option value="three">Columns: Three</option>
+                      <option value="left">Columns: Left</option>
+                      <option value="right">Columns: Right</option>
+                      <option value="more">{current === "more" ? `Columns: ${c.count}` : "More Columns…"}</option>
+                    </select>
+                  );
+                })()}
+                {popover === "columns" && (
+                  <form className="popover" onSubmit={(e) => {
+                    e.preventDefault();
+                    run(setColumns({ count: colForm.count, space: colForm.space * CM, line: colForm.line }))();
+                    setPopover(null);
+                  }}>
+                    <label>Number of columns <input type="number" min={1} max={12} value={colForm.count} aria-label="Number of columns"
+                      onChange={(e) => setColForm((f) => ({ ...f, count: Number(e.target.value) }))} /></label>
+                    <label>Spacing <input type="number" min={0} max={10} step={0.01} value={colForm.space} aria-label="Column spacing"
+                      onChange={(e) => setColForm((f) => ({ ...f, space: Number(e.target.value) }))} /> cm</label>
+                    <label className="choice"><input type="checkbox" checked={colForm.line} onChange={(e) => setColForm((f) => ({ ...f, line: e.target.checked }))} /> Line between</label>
+                    <button className="primary" type="submit">Apply</button>
+                  </form>
+                )}
               </div>
               <div className="group" aria-label="Breaks">
                 <select value="" title="Breaks" aria-label="Breaks" onChange={(e) => {
@@ -485,6 +555,25 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                     <option value="evenPage">Even page</option>
                     <option value="oddPage">Odd page</option>
                   </optgroup>
+                </select>
+              </div>
+              <div className="group" aria-label="Hyphenation">
+                <select value={hyphenationOn(state) ? "auto" : "none"} aria-label="Hyphenation" title="Split words at the end of lines"
+                  onChange={(e) => run(setHyphenation(e.target.value === "auto"))()}>
+                  <option value="none">Hyphenation: None</option>
+                  <option value="auto">Hyphenation: Automatic</option>
+                </select>
+              </div>
+              <div className="group" aria-label="Line Numbers">
+                <select value={lineNumbersOf(state)} aria-label="Line Numbers" title="Numbers in the margin beside each line" onChange={(e) => {
+                  if (e.target.value === "suppress") run(toggleSuppressLineNumbers)();
+                  else run(setLineNumbers(e.target.value as LineNumbering))();
+                }}>
+                  <option value="none">Line Numbers: None</option>
+                  <option value="continuous">Continuous</option>
+                  <option value="newPage">Restart Each Page</option>
+                  <option value="newSection">Restart Each Section</option>
+                  <option value="suppress">{lineNumbersSuppressed(state) ? "✓ " : ""}Suppress for Current Paragraph</option>
                 </select>
               </div>
               <div className="group">

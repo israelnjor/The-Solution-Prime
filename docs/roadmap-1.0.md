@@ -6,7 +6,7 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-04, after Waves 0–3): about 60%
+## Where we are (2026-11-07, after Waves 0–4): about 66%
 
 | Area | Feature | Status |
 |---|---|---|
@@ -25,18 +25,20 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Show ¶ marks, ruler (indents, tab stops), tab stops on screen, line and page breaks, tabs dialog | ✅ |
 | | Multilevel list library, shading, sort | ❌ |
 | **Home: styles** | Apply paragraph styles | ✅ |
-| | Create / modify styles, style gallery | ❌ |
+| | Create / modify styles (Styles dialog), style sets, theme fonts and colours (Design tab) | ✅ |
 | **Home: editing** | Find / Replace | ✅ |
 | | Find options (formatting, wildcards), Go To, navigation pane | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
 | | Equations: insert and edit (LaTeX notation, live preview, saved as Word equations) | ✅ |
 | | Text boxes (shown, moved; not editable) | 🟡 |
 | | Symbol (with ₵ and ₦), date & time (as text or a DATE field) | ✅ |
-| | Section/column breaks, shapes, charts, SmartArt, WordArt, drop cap, bookmarks, cross-references | ❌ |
-| **Design** | Themes, style sets, watermark, page colour, page borders | ❌ |
+| | Section and column breaks, drop cap | ✅ |
+| | Shapes, charts, SmartArt, WordArt | ❌ |
+| **Design** | Style sets, theme fonts and colours, watermark, page colour, page borders | ✅ |
 | **Layout** | Margins, orientation, size, indents/spacing | ✅ |
 | | Floating objects: move/resize | ✅ |
-| | Columns, line numbers, hyphenation, wrap-text options, arrange | ❌ |
+| | Columns (any number, line between, balanced), line numbers, automatic hyphenation, sections with their own page size and orientation | ✅ |
+| | Wrap-text options for text boxes, arrange | ❌ |
 | **References** | Insert/update table of contents, footnotes and endnotes (laid out at the foot of the page / after the text, editable), captions, table of figures, cross-references, citations & bibliography (APA, Harvard, IEEE; Word's own sources), Update Field (F9) | ✅ |
 | | Index, table of authorities, footnote options (numbering format, restart per page) | ❌ |
 | **Review** | Spelling, word count, comments, show/accept/reject tracked changes | ✅ |
@@ -79,11 +81,13 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    Harvard, IEEE); equation editor.
 3. **Tables complete** ✅ (2026-11-04) — merge/split, borders and shading, table styles, cell alignment, column
    resizing, header rows, sort, text↔table, autofit.
-4. **Layout and design** (in progress) — done (2026-11-07): section breaks (next page, continuous,
-   even/odd page) and column breaks; sections with their own page size and orientation on screen
-   (landscape pages in a portrait document); page colour, page borders and watermark (Design tab), as
-   Word writes them — checked against Word (same pages; Word shows them as its own). Still to do:
-   columns, line numbers, hyphenation, create/modify styles, themes and style sets (basic), drop cap.
+4. **Layout and design** ✅ (2026-11-07) — section breaks (next page, continuous, even/odd page) and
+   column breaks; sections with their own page size and orientation on screen (landscape pages in a
+   portrait document); text columns (any number, equal or own widths, line between; balanced before a
+   continuous break, as Word does); page colour, page borders, watermark; line numbers; automatic
+   hyphenation; create/modify styles, style sets, theme fonts and colours; drop cap. Each checked
+   against Word (same pages and positions; Word reads ours as its own). On screen, a document shows one
+   column count (its first): a section with a different count shows as one column (it prints right).
 5. **Review, view and files** — record tracked changes, compare documents, navigation pane, read
    mode, outline view, multiple pages, print dialog, document properties, password protection,
    .doc/.rtf/.odt/.txt open and save, thesaurus, read aloud, grammar (basic).

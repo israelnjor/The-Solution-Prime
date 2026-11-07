@@ -465,6 +465,8 @@ export interface PrimeDocument {
   notes?: { footnote?: Notes; endnote?: Notes };
   /** Page colour (the document's w:background), kept as Word wrote it (absent: none). */
   background?: Preserved;
+  /** Automatic hyphenation (Word's settings; absent: off). */
+  hyphenation?: Hyphenation;
   package: PackageInfo;
 }
 
@@ -501,4 +503,15 @@ export function paragraphText(p: Paragraph): string {
   };
   visit(p.content);
   return out.join("");
+}
+
+/** Automatic hyphenation settings (w:autoHyphenation and its companions in Word's settings part). */
+export interface Hyphenation {
+  auto: boolean;
+  /** Hyphenation zone, pt: a word is hyphenated only if at least this much room is left at the line's end (Word's default: 18). */
+  zone?: number;
+  /** At most this many consecutive lines end in a hyphen (0 or absent: no limit). */
+  consecutiveLimit?: number;
+  /** Words in capitals are not hyphenated. */
+  noCaps?: boolean;
 }

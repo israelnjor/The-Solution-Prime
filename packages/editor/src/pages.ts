@@ -32,6 +32,15 @@ export function resolveWraps(doc: Node, wraps: WrapPoint[]): (WrapPoint & { pos:
   });
 }
 
+/** Where automatic hyphenation split words: editor positions inside their paragraphs. */
+export function resolveHyphens(doc: Node, hyphens: { path: number[]; offset: number }[]): number[] {
+  return hyphens.flatMap((h) => {
+    const target = nodeAt(doc, h.path);
+    if (!target || target.node.type.name !== "paragraph" || h.offset <= 0 || h.offset >= target.node.content.size) return [];
+    return [target.pos + 1 + h.offset];
+  });
+}
+
 export type ResolvedFloat = PlacedFloat & { pos: number };
 
 /** Floating objects at the position of their anchor paragraph (before it). */

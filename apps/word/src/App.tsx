@@ -1,7 +1,7 @@
 import { readDocx, writeDocx } from "@prime/docx";
 import {
   blankDocument, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
-  insertColumnBreak, insertPageBreak, moveCell, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
+  insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
   pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
@@ -30,6 +30,7 @@ import { NotesPane } from "./NotesPane";
 import { SourcesDialog } from "./SourcesDialog";
 import { EquationDialog } from "./EquationDialog";
 import { SortDialog } from "./SortDialog";
+import { StylesDialog } from "./StylesDialog";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
@@ -131,7 +132,7 @@ export function App() {
   const [notesPane, setNotesPane] = useState<{ focus?: { kind: "footnote" | "endnote"; id: string } }>();
   const newNote = (kind: "footnote" | "endnote"): Command => (state, dispatch) =>
     insertNote(() => fileRef.current.base, kind, (id) => setNotesPane({ focus: { kind, id } }))(state, dispatch);
-  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock" | "caption" | "crossref" | "sources" | "newSource" | "equation" | "sort">();
+  const [dialog, setDialog] = useState<"font" | "symbol" | "datetime" | "saveBlock" | "caption" | "crossref" | "sources" | "newSource" | "equation" | "sort" | "styles">();
   /** Pages of the bookmarks in the last layout (contents, cross-references). */
   const pagesRef = useRef<Record<string, number>>({});
   const [menu, setMenu] = useState<{ x: number; y: number }>();
@@ -622,7 +623,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, driftSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -649,6 +650,12 @@ export function App() {
       if (test === "citations") citationsSelfTest(v);
       if (test === "equation") equationSelfTest(v);
       if (test === "tables") tablesSelfTest(v);
+      if (test === "columns" && measurerRef.current) columnsSelfTest(v, () => fileRef.current.base, measurerRef.current);
+      if (test === "dropcap" && measurerRef.current) dropCapSelfTest(v, () => fileRef.current.base, measurerRef.current);
+      if (test === "stylesets" && measurerRef.current) styleSetsSelfTest(v, () => fileRef.current.base, measurerRef.current);
+      if (test === "styles" && measurerRef.current) stylesSelfTest(v, () => fileRef.current.base, measurerRef.current);
+      if (test === "hyphenation" && measurerRef.current) hyphenationSelfTest(v, () => fileRef.current.base, measurerRef.current);
+      if (test === "linenumbers" && measurerRef.current) lineNumbersSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "design" && measurerRef.current) designSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "sections" && measurerRef.current) sectionsSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "drift" && measurerRef.current) driftSelfTest(v, () => fileRef.current.base, measurerRef.current);
@@ -715,7 +722,7 @@ export function App() {
     <Profiler id="app" onRender={(_id, _phase, ms) => { if (SELFTEST) performance.measure("pw:render", { start: performance.now() - ms, end: performance.now() }); }}>
     <div className="app">
       <Ribbon
-        view={v} doc={file.base} mode={mode}
+        view={v} doc={v?.state.doc.attrs.styles ? { ...file.base, styles: v.state.doc.attrs.styles } : file.base} mode={mode}
         onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)} onSave={(saveAs) => void save(saveAs)}
         onExportPdf={() => void exportToPdf()} onPrint={() => void print()}
         onFind={(replace) => setFind(replace ? "replace" : "find")}
@@ -742,6 +749,8 @@ export function App() {
         onShowNotes={() => setNotesPane((p) => (p ? undefined : {}))}
         onSources={(startNew) => setDialog(startNew ? "newSource" : "sources")}
         onSortTable={() => setDialog("sort")}
+        onStyles={() => setDialog("styles")}
+        onDropCap={(kind) => { if (v && measurerRef.current) { setDropCap(() => fileRef.current.base, measurerRef.current, kind)(v.state, v.dispatch); v.focus(); } }}
         onBibliography={() => { if (v) { insertBibliography(baseOf)(v.state, v.dispatch); v.focus(); } }}
         onCitationStyle={(style) => {
           if (!v) return;
@@ -890,6 +899,7 @@ export function App() {
       {dialog === "caption" && v && <CaptionDialog view={v} doc={baseOf} onClose={() => setDialog(undefined)} />}
       {dialog === "crossref" && v && <CrossRefDialog view={v} doc={baseOf} pages={pagesRef.current} onClose={() => setDialog(undefined)} />}
       {dialog === "sort" && v && <SortDialog view={v} onClose={() => setDialog(undefined)} />}
+      {dialog === "styles" && v && <StylesDialog view={v} base={file.base} fonts={FONTS} onClose={() => setDialog(undefined)} />}
       {dialog === "equation" && v && measurerRef.current && <EquationDialog view={v} doc={file.base} measurer={measurerRef.current} onClose={() => setDialog(undefined)} />}
       {(dialog === "sources" || dialog === "newSource") && v && (
         <SourcesDialog view={v} doc={baseOf} startNew={dialog === "newSource"} onClose={() => setDialog(undefined)}

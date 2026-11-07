@@ -44,6 +44,12 @@ export interface ResolvedParagraph {
   pageBreakBefore: boolean;
   widowControl: boolean;
   contextualSpacing: boolean;
+  /** A drop cap (Word's w:framePr w:dropCap): its letter beside the next paragraph's first `lines` lines, `space` pt from them. */
+  dropCap?: { kind: "drop" | "margin"; lines: number; space: number };
+  /** Not hyphenated automatically (w:suppressAutoHyphens). */
+  suppressAutoHyphens: boolean;
+  /** Left out of line numbering (w:suppressLineNumbers). */
+  suppressLineNumbers: boolean;
   /** Bottom border height (line width + padding) in pt, if any. */
   borderBottom: number;
   /** The bottom border line itself, for drawing. */
@@ -159,6 +165,16 @@ function mergePara(a: ParagraphProps, b: ParagraphProps | undefined): ParagraphP
     markRun: markRun ? mergeRun(a.markRun ?? {}, markRun) : a.markRun,
     extra: [...(a.extra ?? []), ...(extra ?? [])],
   };
+}
+
+/** A drop cap frame (w:framePr with w:dropCap "drop" or "margin"), if any. */
+function dropCapOf(p: ParagraphProps): { dropCap?: ResolvedParagraph["dropCap"] } {
+  const xml = p.extra?.find((x) => x.name === "w:framePr")?.xml;
+  const kind = xml && /w:dropCap="(drop|margin)"/.exec(xml)?.[1];
+  if (!kind) return {};
+  const lines = Number(/w:lines="(\d+)"/.exec(xml!)?.[1] ?? 3);
+  const space = Number(/w:hSpace="(\d+)"/.exec(xml!)?.[1] ?? 0) / 20;
+  return { dropCap: { kind: kind as "drop" | "margin", lines: Math.max(1, lines), space } };
 }
 
 const hasExtra = (p: ParagraphProps, name: string) => (p.extra ?? []).some((x) => x.name === name && !/w:val="(0|false|off)"/.test(x.xml));
@@ -337,6 +353,9 @@ export class Resolver {
       // Word applies widow/orphan control unless a document explicitly turns it off.
       widowControl: props.widowControl ?? true,
       contextualSpacing: hasExtra(props, "w:contextualSpacing"),
+      suppressLineNumbers: hasExtra(props, "w:suppressLineNumbers"),
+      suppressAutoHyphens: hasExtra(props, "w:suppressAutoHyphens"),
+      ...dropCapOf(props),
       borderBottom: bottom ? bottom.width + bottom.space : 0,
       ...(bottom ? { borderLine: bottom } : {}),
       borderTop: borders.top ? borders.top.width + borders.top.space : 0,

@@ -1,6 +1,6 @@
 export {
   layoutDocument, LayoutEngine, type ImageSource, type LayoutResult, type Page, type PlacedImage, type PositionedLine,
-  type PageStart, type PlacedFloat, type Rect, type WrapPoint, type Rule, type Segment,
+  type PageStart, type PlacedFloat, type Rect, type WrapPoint, type Rule, type Segment, type ColumnStart, type SectionColumns, sectionColumns,
 } from "./engine.js";
 export type { FontKey, FontMetrics, Measurer } from "./measure.js";
 export { Resolver, type ResolvedParagraph, type ResolvedRun, type TabStop } from "./resolve.js";

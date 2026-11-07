@@ -9,7 +9,7 @@
  * Not yet: custom tab stops, floating objects, footnotes, columns, hyphenation.
  */
 import {
-  type Block, type FloatInfo, type Inline, type Paragraph, type PrimeDocument, type RunProps, type Relationship, type Section, type Story, type Table,
+  type Block, type FloatInfo, type Inline, type Paragraph, type PrimeDocument, type RunProps, type Relationship, type Section, type SectionProps, type Story, type Table,
   paragraphText,
 } from "@prime/pdm";
 import { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
@@ -17,6 +17,7 @@ import type { FontKey, Measurer } from "./measure.js";
 import { type ResolvedParagraph, type ResolvedRun, Resolver, roman } from "./resolve.js";
 import { cellLooks, type Sides } from "./tables.js";
 import { type PageDecor, pageBorders, pageColor, watermarkOf } from "./decor.js";
+import { hyphenPoints } from "./hyphenate.js";
 
 const MARKER = /\[[A-Z]-\d{3}\]/g;
 const DEFAULT_TAB = 36;
@@ -89,7 +90,7 @@ export interface PositionedLine {
   images: PlacedImage[];
   rules: Rule[];
   /** Set for header and footer lines, and for floating pictures and text boxes. */
-  story?: "header" | "footer" | "float" | "footnote" | "endnote";
+  story?: "header" | "footer" | "float" | "footnote" | "endnote" | "lineNumber";
   /** Pen strokes (ink): x, y pairs on the page, pen width in pt, colour. */
   strokes?: { points: number[]; width: number; color: string }[];
 }
@@ -121,6 +122,10 @@ export interface LayoutResult {
   paragraphs: { text: string; page: number; y: number }[];
   /** Where pages 2, 3, ... begin, in document terms — for drawing page breaks in the editor. */
   pageStarts: PageStart[];
+  /** Where columns after the first begin (sections with text columns) — so the editor breaks there too. */
+  columnStarts: ColumnStart[];
+  /** Where automatic hyphenation split words (paragraph path and offset) — so the editor breaks there too. */
+  hyphens: { path: number[]; offset: number }[];
   /** Where text wraps around floating objects, in document terms — so the editor can do the same. */
   wraps: WrapPoint[];
   /** Floating objects relative to their anchor paragraph — so the editor can draw them with its text. */
@@ -175,10 +180,46 @@ export interface PageStart {
   row?: number;
 }
 
+/** Where a column after the first begins (a page start's twin for text columns: column 1 = the second). */
+export interface ColumnStart extends PageStart {
+  column: number;
+}
+
+/** A section's text columns (w:cols): each column's width and the space after it, in pt. */
+export interface SectionColumns {
+  widths: number[];
+  gaps: number[];
+  /** A line between columns. */
+  sep: boolean;
+}
+
+/** A section's text columns, or undefined for one column (w:cols: equal widths, or each column's own). */
+export function sectionColumns(props: SectionProps, bodyWidth: number): SectionColumns | undefined {
+  const xml = props.extra?.find((x) => x.name === "w:cols")?.xml;
+  if (!xml) return undefined;
+  const open = /<w:cols\b[^>]*>/.exec(xml)?.[0] ?? xml;
+  const sep = /w:sep="(1|true|on)"/.test(open);
+  if (/w:equalWidth="(0|false|off)"/.test(open)) {
+    const own = [...xml.matchAll(/<w:col\b([^>]*)\/?>/g)].map((m) => ({
+      w: Number(/w:w="(\d+)"/.exec(m[1])?.[1] ?? 0) / 20, space: Number(/w:space="(\d+)"/.exec(m[1])?.[1] ?? 0) / 20,
+    }));
+    if (own.length > 1 && own.every((c) => c.w > 0)) return { widths: own.map((c) => c.w), gaps: own.map((c) => c.space), sep };
+  }
+  const num = Number(/w:num="(\d+)"/.exec(open)?.[1] ?? 1);
+  if (num < 2) return undefined;
+  const space = Number(/w:space="(\d+)"/.exec(open)?.[1] ?? 720) / 20;
+  const width = (bodyWidth - (num - 1) * space) / num;
+  return { widths: Array(num).fill(width), gaps: Array(num).fill(space), sep };
+}
+
 // --- measured structures -------------------------------------------------------------------
 
 interface MLine {
   width: number;
+  /** Ends in a column break (with `pageBreakAfter`: without columns it moves to the next page). */
+  columnBreak?: boolean;
+  /** Ends in a word hyphenated here (the paragraph offset where the word was split). */
+  hyphenAt?: number;
   /** Width available to the line (for alignment). */
   avail: number;
   /** Ends with a manual line or page break (such lines are not justified). */
@@ -221,7 +262,8 @@ interface ParaBox {
  * paragraph's first line) and estimated height, the free span of the column, or where to move down to.
  */
 type Slot = (dy: number, height: number) =>
-  | { left: number; right: number; leftUntil: number; rightUntil: number }
+  // `quiet`: the room is made by something the editor draws itself (a drop cap): not reported as wrapping.
+  | { left: number; right: number; leftUntil: number; rightUntil: number; quiet?: boolean }
   | { skipTo: number };
 
 /** Narrowest gap beside a floating object that text flows into (Word leaves narrower gaps empty). */
@@ -282,7 +324,8 @@ type Atom = { offset: number } & (
   | { kind: "space"; text: string; run: ResolvedRun }
   | { kind: "tab"; run: ResolvedRun }
   | { kind: "br" }
-  | { kind: "page" }
+  // `column`: a column break (in a section without columns, a page break, as in Word).
+  | { kind: "page"; column?: boolean }
   | { kind: "image"; width: number; height: number; src: ImageSource }
   | { kind: "math"; box: MathBox; display: boolean }
 );
@@ -410,7 +453,7 @@ export class LayoutEngine {
     const settings = doc.package.parts.find((p) => /word\/settings\.xml$/.test(p.name));
     const xml = settings ? new TextDecoder().decode(Uint8Array.from(atob(settings.data), (c) => c.charCodeAt(0))) : "";
     this.compat = Number(/compatibilityMode" w:uri="[^"]*" w:val="(\d+)"/.exec(xml)?.[1] ?? 12);
-    this.cacheKey = fingerprint(`${this.compat}|${JSON.stringify(doc.styles)}|${JSON.stringify(doc.lists)}`);
+    this.cacheKey = fingerprint(`${this.compat}|${JSON.stringify(doc.styles)}|${JSON.stringify(doc.lists)}|${JSON.stringify(doc.hyphenation ?? null)}`);
   }
 
   // --- paragraph measurement -----------------------------------------------------------------
@@ -469,8 +512,10 @@ export class LayoutEngine {
           if (!i.float) out.push({ kind: "image", width: i.width, height: i.height, src: { imageId: i.imageId }, offset });
           continue;
         }
-        // A column break in a section without columns moves to the next page, as in Word.
-        if (i.type === "break") { out.push({ kind: i.kind === "page" || i.kind === "column" ? "page" : "br", offset }); continue; }
+        if (i.type === "break") {
+          out.push(i.kind === "page" || i.kind === "column" ? { kind: "page", offset, ...(i.kind === "column" ? { column: true } : {}) } : { kind: "br", offset });
+          continue;
+        }
         if (i.type === "preserved" && i.preserved.name === "w:bookmarkStart") {
           const name = /w:name="([^"]+)"/.exec(i.preserved.xml)?.[1];
           if (name) out.push({ kind: "bookmark", name, offset });
@@ -595,9 +640,10 @@ export class LayoutEngine {
     // Wrapping around floating objects: the line's top so far, and space skipped to get below one.
     let dy = 0;
     let skip = 0;
-    let free: { left: number; right: number; leftUntil: number; rightUntil: number } | undefined;
+    let free: { left: number; right: number; leftUntil: number; rightUntil: number; quiet?: boolean } | undefined;
     let lastFree = "";
     const lineGuess = slot ? this.applyLineRule(this.lineMetrics(this.faces(rp.mark)).height, rp) : 0;
+    const hyphenate = !!this.doc.hyphenation?.auto && !rp.suppressAutoHyphens;
 
     let segs: Segment[] = [];
     let images: MLine["images"] = [];
@@ -670,7 +716,7 @@ export class LayoutEngine {
         ...(lineNotes ? { notes: lineNotes } : {}),
       });
       // Record where wrapping starts or changes, for the editor (heights from the line's top after the skip).
-      const narrowed = free && (free.left > 0.01 || free.right < width - 0.01);
+      const narrowed = free && !free.quiet && (free.left > 0.01 || free.right < width - 0.01);
       const signature = narrowed ? `${free!.left}:${free!.right}` : "";
       if (skip > 0 || signature !== lastFree) {
         const top = dy + skip;
@@ -709,7 +755,11 @@ export class LayoutEngine {
       if (a.kind === "bookmark") { (lineBookmarks ??= []).push(a.name); continue; }
       if (a.kind === "note") { (lineNotes ??= []).push(a.id); continue; }
       if (a.kind === "br") { finish(false, true, a.offset + 1); continue; }
-      if (a.kind === "page") { finish(true, true, a.offset + 1); continue; }
+      if (a.kind === "page") {
+        finish(true, true, a.offset + 1);
+        if (a.column) lines[lines.length - 1].columnBreak = true;
+        continue;
+      }
       if (a.kind === "tab") {
         const pos = startX + x + (pendingSpace?.w ?? 0);
         // The next custom tab stop (positions are from the text column's left edge), else a default one.
@@ -758,6 +808,26 @@ export class LayoutEngine {
         : w.kind === "image" ? w.width : w.kind === "math" ? w.box.width : 0));
       const ww = parts.reduce((s, v) => s + v, 0);
       const spaceW = pendingSpace?.w ?? 0;
+      // Automatic hyphenation: a word that does not fit is split where it may be (see hyphenSplit).
+      if (x > 0 && x + spaceW + ww > avail && hyphenate && word.length === 1 && a.kind === "word") {
+        const split = this.hyphenSplit(a.text, a.run, avail - x, spaceW, lines);
+        if (split) {
+          if (pendingSpace) {
+            segs.push({ x: startX + x, text: pendingSpace.text, font: key(pendingSpace.run), size: pendingSpace.run.size, ...look(pendingSpace.run) });
+            x += spaceW;
+          }
+          pendingSpace = undefined;
+          const head = `${a.text.slice(0, split)}-`;
+          segs.push({ x: startX + x, text: head, font: key(a.run), size: a.run.size, ...look(a.run) });
+          runs.push(...this.faces(a.run, head));
+          x += this.textWidth(head, a.run);
+          finish(false, false, a.offset + split);
+          lines[lines.length - 1].hyphenAt = a.offset + split;
+          atoms[i] = { ...a, text: a.text.slice(split), offset: a.offset + split };
+          i--;
+          continue;
+        }
+      }
       if (x > 0 && x + spaceW + ww > avail) finish(false, false, word[0].offset);
       else if (pendingSpace && x > 0) {
         segs.push({ x: startX + x, text: pendingSpace.text, font: key(pendingSpace.run), size: pendingSpace.run.size, ...look(pendingSpace.run) });
@@ -789,6 +859,32 @@ export class LayoutEngine {
     const align = display && rp.align === "left" ? "center" : rp.align;
     lines.forEach((line, n) => this.align(line, align, n === lines.length - 1));
     return lines;
+  }
+
+  /**
+   * Where to split `text` (letters before the hyphen) to end a line with `gap` pt free before the
+   * word: only when the gap is at least the hyphenation zone (Word's rule: a smaller gap is left as
+   * it is), not after too many hyphenated lines in a row, and not in capitals if the document says so.
+   * The longest part (plus its hyphen) that fits after the space wins.
+   */
+  private hyphenSplit(text: string, run: ResolvedRun, gap: number, space: number, lines: MLine[]): number | undefined {
+    const settings = this.doc.hyphenation!;
+    if (gap < (settings.zone ?? 18)) return undefined;
+    if (settings.consecutiveLimit) {
+      let row = 0;
+      for (let k = lines.length - 1; k >= 0 && lines[k].hyphenAt !== undefined; k--) row++;
+      if (row >= settings.consecutiveLimit) return undefined;
+    }
+    const m = /^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$/.exec(text);
+    if (!m) return undefined;
+    const [, lead, core] = m;
+    if (settings.noCaps && core === core.toUpperCase()) return undefined;
+    const points = hyphenPoints(core);
+    for (let k = points.length - 1; k >= 0; k--) {
+      const n = lead.length + points[k];
+      if (space + this.textWidth(`${text.slice(0, n)}-`, run) <= gap + 0.01) return n;
+    }
+    return undefined;
   }
 
   /** Horizontal alignment; justified lines spread the slack over their spaces (not the last line). */
@@ -1045,6 +1141,7 @@ export class LayoutEngine {
     const markers: LayoutResult["markers"] = {};
     const paragraphs: LayoutResult["paragraphs"] = [];
     const pageStarts: PageStart[] = [];
+    const hyphens: { path: number[]; offset: number }[] = [];
     const wraps: WrapPoint[] = [];
     /** Room already reported for wrapping on this page, per side, and how far down it reaches. */
     let reported: { left?: { width: number; until: number }; right?: { width: number; until: number } } = {};
@@ -1057,17 +1154,59 @@ export class LayoutEngine {
     let bottom = 0;
     let left = 0;
     let prev: ParaBox | undefined;
+    // A drop cap waiting for the paragraph it belongs to (the next one): its letter, and how it sits.
+    let dropCap: { box: ParaBox; kind: "drop" | "margin"; lines: number; space: number } | undefined;
     // At the top of a page after a page break Word drops space-before; at the start of a new section
     // it keeps it, collapsed against the previous paragraph's space-after.
     let sectionTop = false;
     /** Areas of the current page that text wraps around (floating objects), in page coordinates. */
-    type Exclusion = { x1: number; x2: number; y1: number; y2: number };
+    type Exclusion = { x1: number; x2: number; y1: number; y2: number; quiet?: boolean };
     let exclusions: Exclusion[] = [];
 
     // Headers and footers are inherited from the previous section unless redefined.
     let headers: Section["headers"] = {};
     let footers: Section["footers"] = {};
     let sectionPages = 0;
+
+    // Text columns of the current section: the column text is in (`col`), where this page's set of
+    // columns starts (`colTop`; a section can start mid-page), the lowest text so far in the set,
+    // and where the set's lines and starts begin in the page's lists (for balancing and drawing).
+    let cols: SectionColumns | undefined;
+    /** The width text is set in: the section's text column, or the current column's. */
+    let width = 0;
+    let col = 0;
+    let colTop = 0;
+    let colBottom = 0;
+    let usedCols = 0;
+    let setStart = { lines: 0, rects: 0, starts: 0 };
+    let columnOpen = false;
+    const columnStarts: ColumnStart[] = [];
+    /** Body lines of the current set: where each came from (for the editor) and its column. */
+    const lineSources = new Map<PositionedLine, { path: number[]; offset: number; col: number; mark?: { para: { y: number }; pos: { y: number } } }>();
+    let pendingMark: { para: { y: number }; pos: { y: number } } | undefined;
+    const colLeft = (i: number) => {
+      if (!cols) return page.bodyLeft;
+      let x = page.bodyLeft;
+      for (let k = 0; k < i; k++) x += cols.widths[k] + cols.gaps[k];
+      return x;
+    };
+    const beginSet = () => {
+      col = 0;
+      usedCols = 0;
+      colTop = y;
+      colBottom = y;
+      setStart = { lines: page.lines.length, rects: page.rects.length, starts: columnStarts.length };
+      lineSources.clear();
+    };
+    /** Lines between the columns of the set that ends here (Word: as tall as the longest column). */
+    const closeSet = () => {
+      if (!cols?.sep || !page) return;
+      const end = Math.max(colBottom, y);
+      for (let i = 1; i <= usedCols; i++) {
+        const x = colLeft(i) - cols.gaps[i - 1] / 2;
+        page.rects.push({ x, y: colTop, width: 0, height: end - colTop, sides: { top: false, bottom: false, left: true, right: false }, stroke: { width: 0.5, color: "000000" } });
+      }
+    };
 
     // Footnotes: those referenced on the current page, the room they take at its foot, and the
     // column they are measured in.
@@ -1112,6 +1251,7 @@ export class LayoutEngine {
     };
 
     const newPage = (section: Section, index: number) => {
+      if (page && cols) closeSet();
       if (page) drawFootnotes();
       const w = section.props.pageWidth ?? 612;
       const h = section.props.pageHeight ?? 792;
@@ -1149,16 +1289,45 @@ export class LayoutEngine {
       prev = undefined;
       exclusions = [];
       reported = {};
+      beginSet();
     };
     const room = () => bottom - y;
     const atTop = () => y === top;
     const mark = (anchor: string, at: number) => {
       const pos = { page: page.number, y: Math.round(at * 10) / 10 };
-      paragraphs.push({ text: anchor.slice(0, 80), ...pos });
+      const para = { text: anchor.slice(0, 80), ...pos };
+      paragraphs.push(para);
       for (const n of anchor.match(MARKER) ?? []) markers[n] ??= pos;
+      pendingMark = { para, pos };
     };
     /** Page of each bookmark (first place it appears), for PAGEREF fields. */
     const bookmarkPages = new Map<string, number>();
+    // Line numbers (w:lnNumType): body text lines only, as Word numbers them (not tables, headers,
+    // footers, notes or text boxes). `lineNo` is the last number given; `numbered` where it was given.
+    let lineNo = 0;
+    let numbered: { page: number; section: number } | undefined;
+    const numberLine = (section: Section, si: number, line: PositionedLine) => {
+      const xml = section.props.extra?.find((x) => x.name === "w:lnNumType")?.xml;
+      const countBy = Number(xml && /w:countBy="(\d+)"/.exec(xml)?.[1]);
+      if (!xml || !countBy) return;
+      const restart = /w:restart="(\w+)"/.exec(xml)?.[1] ?? "newPage"; // Word's default too (checked)
+      const first = Number(/w:start="(\d+)"/.exec(xml)?.[1] ?? 0) + 1; // w:start counts from 0
+      if (!numbered || (restart === "newPage" && numbered.page !== page.number) || (restart !== "continuous" && numbered.section !== si)) lineNo = first - 1;
+      lineNo++;
+      numbered = { page: page.number, section: si };
+      if (lineNo % countBy) return;
+      const twips = Number(/w:distance="(\d+)"/.exec(xml)?.[1]);
+      const distance = twips ? twips / 20 : 18; // "Auto": a quarter inch
+      const run = this.resolver.paragraph({ type: "paragraph", props: {}, content: [] }).mark;
+      const text = String(lineNo);
+      const font = { family: run.font, bold: false, italic: false };
+      const width = this.m.width(text, font) * run.size;
+      page.lines.push({
+        x: 0, y: line.y, height: line.height, baseline: line.baseline, images: [], rules: [], story: "lineNumber",
+        segments: [{ x: line.x - distance - width, text, font, size: run.size }],
+      });
+    };
+
     const put = (line: MLine, x: number, at: number, extra: { story?: PositionedLine["story"]; path?: number[] } = {}) => {
       for (const b of line.bookmarks ?? []) if (!extra.story && !bookmarkPages.has(b)) bookmarkPages.set(b, page.number);
       if (!extra.story && line.notes) {
@@ -1166,9 +1335,14 @@ export class LayoutEngine {
         for (const id of line.notes) if (!pageNotes.includes(id) && footnoteText.has(id)) pageNotes.push(id);
         bottom -= need;
       }
+      if (extra.path && line.hyphenAt !== undefined) hyphens.push({ path: extra.path, offset: line.hyphenAt });
       if (extra.path && pageOpen) {
         pageStarts.push({ page: page.number, path: extra.path, offset: line.startOffset });
         pageOpen = false;
+      }
+      if (extra.path && columnOpen) {
+        columnStarts.push({ page: page.number, column: col, path: extra.path, offset: line.startOffset });
+        columnOpen = false;
       }
       if (extra.path && line.wrap) {
         // Report room on a side only where earlier reported room does not already cover it (the
@@ -1197,7 +1371,88 @@ export class LayoutEngine {
         images: line.images.map((i) => ({ ...i, x: x + i.x, y: baseline - i.height })),
         rules: line.rules.map((r) => ({ ...r, x1: x + r.x1, x2: x + r.x2, y1: baseline + r.y1, y2: baseline + r.y2 })),
       });
+      if (extra.path && !extra.story) {
+        lineSources.set(page.lines[page.lines.length - 1], { path: extra.path, offset: line.startOffset, col, ...(pendingMark ? { mark: pendingMark } : {}) });
+        pendingMark = undefined;
+      }
     };
+
+    /** The next column (the next page after the last one). */
+    const advance = (section: Section, si: number) => {
+      if (cols && col < cols.widths.length - 1) {
+        colBottom = Math.max(colBottom, y);
+        col++;
+        usedCols = Math.max(usedCols, col);
+        left = colLeft(col);
+        width = cols.widths[col];
+        y = colTop;
+        top = colTop;
+        prev = undefined;
+        columnOpen = true;
+      } else newPage(section, si);
+    };
+
+    /**
+     * Balances the columns of the set ending here (before a continuous section break, as Word does):
+     * the set's lines, in reading order, are shared out so that the columns are as even as they can be
+     * (the first ones the longest). Lines keep their breaks (columns are equally wide); a set with
+     * tables, borders, shading or floating objects is left as it is.
+     */
+    const balance = () => {
+      if (!cols || page.rects.length > setStart.rects) return;
+      const set = page.lines.slice(setStart.lines);
+      if (set.some((l) => l.story && l.story !== "lineNumber")) return;
+      const body = set.filter((l) => !l.story && lineSources.has(l));
+      if (body.length < 2 || new Set(cols.widths).size > 1) return;
+      // The set as one strip: each column's lines after the previous column's.
+      const heights = cols.widths.map(() => 0);
+      for (const l of body) { const c = lineSources.get(l)!.col; heights[c] = Math.max(heights[c], l.y + l.height - colTop); }
+      const offsets = heights.map((_, c) => heights.slice(0, c).reduce((a, b) => a + b, 0));
+      const strip = body.map((l) => ({ line: l, s: offsets[lineSources.get(l)!.col] + l.y - colTop })).sort((a, b) => a.s - b.s);
+      const n = cols.widths.length;
+      // Word's way (checked against its pages): each column aims at an equal share of the height; a
+      // line that starts before its column's share is reached stays in it, so earlier columns come out
+      // a little longer (7 and 6 lines, not 6 and 7).
+      const share = heights.reduce((a, b) => a + b, 0) / n;
+      const starts = [0];
+      let from = strip[0].s;
+      for (let i = 1; i < strip.length; i++) {
+        if (starts.length < n && strip[i].s - from >= share - 0.01) { starts.push(i); from = strip[i].s; }
+      }
+      // Move each line (and its line number) to its new column and place.
+      columnStarts.length = setStart.starts;
+      let bottom = colTop;
+      starts.forEach((first, c) => {
+        const end = starts[c + 1] ?? strip.length;
+        const from = strip[first].s;
+        for (let i = first; i < end; i++) {
+          const { line } = strip[i];
+          const source = lineSources.get(line)!;
+          const dx = colLeft(c) - colLeft(source.col);
+          const dy = colTop + (strip[i].s - from) - line.y;
+          const index = page.lines.indexOf(line);
+          const moved = [line];
+          for (let j = index + 1; j < page.lines.length && page.lines[j].story === "lineNumber"; j++) moved.push(page.lines[j]);
+          for (const m of moved) {
+            m.x += dx; m.y += dy; m.baseline += dy;
+            m.segments = m.segments.map((g) => ({ ...g, x: g.x + dx }));
+            m.images = m.images.map((g) => ({ ...g, x: g.x + dx, y: g.y + dy }));
+            m.rules = m.rules.map((r) => ({ ...r, x1: r.x1 + dx, x2: r.x2 + dx, y1: r.y1 + dy, y2: r.y2 + dy }));
+          }
+          if (source.mark) {
+            source.mark.para.y = Math.round(line.y * 10) / 10;
+            source.mark.pos.y = Math.round(line.y * 10) / 10;
+          }
+          if (i === first && c > 0) columnStarts.push({ page: page.number, column: c, path: source.path, offset: source.offset });
+          source.col = c;
+          bottom = Math.max(bottom, line.y + line.height);
+        }
+      });
+      usedCols = starts.length - 1;
+      colBottom = bottom;
+      y = bottom;
+    };
+
 
     /**
      * Places a floating object anchored in a paragraph whose first line starts at `paraTop`: draws it
@@ -1261,7 +1516,9 @@ export class LayoutEngine {
       const carried = prev;
       headers = { ...headers, ...section.headers };
       footers = { ...footers, ...section.footers };
-      sectionPages = 0;
+      // A continuous section's first page is the one it starts on (already begun): its next page is
+      // its second (no "first page" header there).
+      sectionPages = si > 0 && section.props.breakType === "continuous" ? 1 : 0;
       if (si === 0 || section.props.breakType !== "continuous") {
         // "Even page" and "odd page" sections start on the next page of that kind: a blank page of the
         // previous section between, when needed (as Word does).
@@ -1276,7 +1533,12 @@ export class LayoutEngine {
       // The first page of the document behaves like a section start: space-before is kept.
       sectionTop = true;
       const mg = section.props.margins ?? {};
-      const width = (section.props.pageWidth ?? 612) - (mg.left ?? 72) - (mg.right ?? 72);
+      const bodyWidth = (section.props.pageWidth ?? 612) - (mg.left ?? 72) - (mg.right ?? 72);
+      // Text columns start here (mid-page after a continuous section break).
+      cols = sectionColumns(section.props, bodyWidth);
+      width = cols ? cols.widths[0] : bodyWidth;
+      beginSet();
+      left = colLeft(0);
       const boxes = this.measureBlocks(section.blocks, width, undefined, [], topIndex);
       topIndex += section.blocks.length + 1; // the section's blocks, then its section break
 
@@ -1299,7 +1561,7 @@ export class LayoutEngine {
                 placeRow(parts[0], box.path);
                 current = parts[1];
               }
-              newPage(section, si);
+              advance(section, si);
               if (!current.header) for (const h of headers) placeRow(h, box.path, true);
             }
             placeRow(current, box.path);
@@ -1308,6 +1570,14 @@ export class LayoutEngine {
           return;
         }
         const rp = box.rp;
+        // An empty paragraph that only holds a continuous section break takes no room (Word lays it out
+        // with no height: the next section continues right after the text before it).
+        if (bi === boxes.length - 1 && bi > 0 && box.para.content.length === 0 && this.doc.sections[si + 1]?.props.breakType === "continuous") return;
+        // A drop cap takes no room of its own: its letter is placed with the next paragraph.
+        if (rp.dropCap && box.lines.length && boxes[bi + 1]?.kind === "para") {
+          dropCap = { box, ...rp.dropCap };
+          return;
+        }
         if (rp.pageBreakBefore && !atTop()) newPage(section, si);
         // Adjacent spacing collapses to the larger of space-after and space-before (Word behaviour,
         // confirmed against Word's positions in Experiment 2).
@@ -1329,7 +1599,7 @@ export class LayoutEngine {
           }
           const pageHeight = bottom - top;
           if ((rp.keepNext && need > room() && need <= pageHeight) || (rp.keepLines && full > room() && full <= pageHeight)) {
-            newPage(section, si);
+            advance(section, si);
             before = 0;
           }
         }
@@ -1356,6 +1626,20 @@ export class LayoutEngine {
         if (bd.top) {
           page.rects.push({ ...borderSpan(), y: y + bd.top.width / 2, height: 0, sides: { top: true, bottom: false, left: false, right: false }, stroke: stroke(bd.top) });
           y += rp.borderTop;
+        }
+        // The drop cap before this paragraph: its letter at the paragraph's top, its baseline on the
+        // baseline of the paragraph's `lines`-th line; "drop": the first lines make room beside it (an
+        // exclusion, as for a floating object); "margin": it sits in the margin, the lines keep their width.
+        if (dropCap) {
+          const letter = dropCap.box.lines[0];
+          const firstLine = box.lines[0];
+          const lineHeight = firstLine?.height ?? letter.height / dropCap.lines;
+          const baseline = y + (dropCap.lines - 1) * lineHeight + (firstLine?.ascent ?? lineHeight * 0.8);
+          const room = letter.width + dropCap.space;
+          const x = dropCap.kind === "margin" ? left + rp.left - room : left + rp.left;
+          put({ ...letter, startX: 0, segments: letter.segments.map((g) => ({ ...g, x: g.x - letter.startX })) }, x, baseline - letter.ascent, { path: dropCap.box.path });
+          if (dropCap.kind === "drop") exclusions.push({ x1: x, x2: x + room, y1: y, y2: y + dropCap.lines * lineHeight - 0.5, quiet: true });
+          dropCap = undefined;
         }
         let remaining = box.lines;
         let first = true;
@@ -1393,7 +1677,7 @@ export class LayoutEngine {
                 // How far down the objects on each side of the free span reach (relative to the paragraph).
                 const until = (side: Exclusion[]) => (side.length ? Math.max(...side.map((e) => e.y2)) - paraTop : 0);
                 return {
-                  left: best[0], right: best[1],
+                  left: best[0], right: best[1], ...(over.every((e) => e.quiet) ? { quiet: true } : {}),
                   leftUntil: until(over.filter((e) => e.x2 - left <= best[0] + 0.01)),
                   rightUntil: until(over.filter((e) => e.x1 - left >= best[1] - 0.01)),
                 };
@@ -1423,18 +1707,24 @@ export class LayoutEngine {
             else if (segment - fit === 1 && fit >= 2) fit -= 1;               // widow: lone last line
           }
           if (fit === 0 && atTop()) fit = 1;                                  // taller than a page: place anyway
-          if (fit === 0) { drawSides(y); newPage(section, si); sideTop = y; continue; }
+          if (fit === 0) { drawSides(y); advance(section, si); sideTop = y; continue; }
           for (let k = 0; k < fit; k++) {
             const line = remaining[k];
             if (first && k === 0) mark(box.anchor, y);
+            const placed = page.lines.length;
             put(line, left, y, { path: box.path });
+            if (!rp.suppressLineNumbers) {
+              const body = page.lines.slice(placed).find((l) => !l.story);
+              if (body) numberLine(section, si, body);
+            }
             y += line.height;
             if (line.pageBreakAfter) {
               remaining = remaining.slice(k + 1);
               first = false;
               endedOnBreak = remaining.length === 0;
               drawSides(y);
-              newPage(section, si);
+              if (line.columnBreak) advance(section, si);
+              else newPage(section, si);
               sideTop = y;
               fit = -1;
               break;
@@ -1443,7 +1733,7 @@ export class LayoutEngine {
           if (fit === -1) continue;
           remaining = remaining.slice(fit);
           first = false;
-          if (remaining.length) { drawSides(y); newPage(section, si); sideTop = y; }
+          if (remaining.length) { drawSides(y); advance(section, si); sideTop = y; }
         }
         if (!endedOnBreak) drawSides(y + (bd.bottom ? bd.bottom.space + bd.bottom.width : 0));
         if (rp.borderLine && !endedOnBreak) {
@@ -1459,10 +1749,27 @@ export class LayoutEngine {
         prev = box;
       });
 
+      // A section with columns ends: balanced before a continuous section break (as Word does), lines
+      // between its columns, and what follows starts below the longest column.
+      if (cols) {
+        if (this.doc.sections[si + 1]?.props.breakType === "continuous") balance();
+        colBottom = Math.max(colBottom, y);
+        closeSet();
+        y = colBottom;
+        cols = undefined;
+        left = page.bodyLeft;
+        width = bodyWidth;
+        top = page.bodyTop;
+      }
+
       function placeRow(row: RowBox, tablePath: number[], repeated = false) {
         if (!repeated && pageOpen) {
           pageStarts.push({ page: page.number, path: tablePath, row: row.index });
           pageOpen = false;
+        }
+        if (!repeated && columnOpen) {
+          columnStarts.push({ page: page.number, column: col, path: tablePath, row: row.index });
+          columnOpen = false;
         }
         for (const [ci, c] of row.cells.entries()) {
           cellRects(c, left + c.dx - CELL_MARGIN, y, row.height, page.rects);
@@ -1507,7 +1814,7 @@ export class LayoutEngine {
       const n = s.field === "PAGEREF" && s.ref ? bookmarkPages.get(s.ref) : undefined;
       if (n !== undefined) s.text = String(n);
     }
-    return { pages, markers, paragraphs, pageStarts, wraps, floats, bookmarks: Object.fromEntries(bookmarkPages) };
+    return { pages, markers, paragraphs, pageStarts, columnStarts, hyphens, wraps, floats, bookmarks: Object.fromEntries(bookmarkPages) };
   }
 }
 

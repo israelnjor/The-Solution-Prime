@@ -66,26 +66,46 @@ class Writer {
   private drawingId = 0;
 
   /**
-   * Makes the document's settings show the page colour (w:displayBackgroundShape), adding a settings
-   * part when the document has none.
+   * The settings part with what the model owns there: the page colour shown (w:displayBackgroundShape)
+   * and automatic hyphenation. Everything else in it is kept; a document without one gets a new part
+   * when it needs it.
    */
-  private showBackground(rels: Rels) {
+  private settings(rels: Rels) {
     const pkg = this.doc.package;
     const rel = pkg.preservedRels.find((r) => r.type === RelType.settings && !r.external);
     const name = rel ? rel.target : "word/settings.xml";
     const part = pkg.parts.find((p) => p.name === name);
+    const hy = this.doc.hyphenation;
+    if (!part && !this.doc.background && !hy?.auto) return;
     let xml = part ? new TextDecoder().decode(fromBase64(part.data)) : `${XML_DECL}<w:settings xmlns:w="${NS.w}"></w:settings>`;
-    if (!/<w:displayBackgroundShape\b/.test(xml)) {
-      // In schema order: after any of these, else first.
-      const before = ["w:writeProtection", "w:view", "w:zoom", "w:removePersonalInformation", "w:removeDateAndTime", "w:doNotDisplayPageBoundaries"];
-      let at = -1;
-      for (const tag of before) {
-        const m = new RegExp(`<${tag}(?=[\\s/>])[^>]*?(?:/>|>[\\s\\S]*?</${tag}>)`).exec(xml);
-        if (m) at = Math.max(at, m.index + m[0].length);
+    const element = (tag: string) => new RegExp(`<${tag}(?=[\s/>])[^>]*?(?:/>|>[\s\S]*?</${tag}>)`);
+    // Settings come in schema order: a new one goes after the last of those that precede it.
+    const ORDER = ["w:writeProtection", "w:view", "w:zoom", "w:removePersonalInformation", "w:removeDateAndTime", "w:doNotDisplayPageBoundaries",
+      "w:displayBackgroundShape", "w:printPostScriptOverText", "w:printFractionalCharacterWidth", "w:printFormsData", "w:embedTrueTypeFonts",
+      "w:embedSystemFonts", "w:saveSubsetFonts", "w:saveFormsData", "w:mirrorMargins", "w:alignBordersAndEdges", "w:bordersDoNotSurroundHeader",
+      "w:bordersDoNotSurroundFooter", "w:gutterAtTop", "w:hideSpellingErrors", "w:hideGrammaticalErrors", "w:activeWritingStyle", "w:proofState",
+      "w:formsDesign", "w:attachedTemplate", "w:linkStyles", "w:stylePaneFormatFilter", "w:stylePaneSortMethod", "w:documentType", "w:mailMerge",
+      "w:revisionView", "w:trackRevisions", "w:doNotTrackMoves", "w:doNotTrackFormatting", "w:documentProtection", "w:autoFormatOverride",
+      "w:styleLockTheme", "w:styleLockQFSet", "w:defaultTabStop", "w:autoHyphenation", "w:consecutiveHyphenLimit", "w:hyphenationZone",
+      "w:doNotHyphenateCaps"];
+    const set = (tag: string, value: string | undefined) => {
+      const old = element(tag).exec(xml);
+      if (old) xml = xml.slice(0, old.index) + (value ?? "") + xml.slice(old.index + old[0].length);
+      else if (value) {
+        let at = -1;
+        for (const before of ORDER.slice(0, ORDER.indexOf(tag))) {
+          const m = element(before).exec(xml);
+          if (m) at = Math.max(at, m.index + m[0].length);
+        }
+        if (at < 0) { const open = /<w:settings\b[^>]*>/.exec(xml)!; at = open.index + open[0].length; }
+        xml = xml.slice(0, at) + value + xml.slice(at);
       }
-      if (at < 0) { const open = /<w:settings\b[^>]*>/.exec(xml)!; at = open.index + open[0].length; }
-      xml = xml.slice(0, at) + "<w:displayBackgroundShape/>" + xml.slice(at);
-    }
+    };
+    if (this.doc.background && !element("w:displayBackgroundShape").test(xml)) set("w:displayBackgroundShape", "<w:displayBackgroundShape/>");
+    set("w:autoHyphenation", hy?.auto ? "<w:autoHyphenation/>" : undefined);
+    set("w:consecutiveHyphenLimit", hy?.auto && hy.consecutiveLimit ? `<w:consecutiveHyphenLimit w:val="${hy.consecutiveLimit}"/>` : undefined);
+    set("w:hyphenationZone", hy?.auto && hy.zone !== undefined ? `<w:hyphenationZone w:val="${Math.round(hy.zone * 20)}"/>` : undefined);
+    set("w:doNotHyphenateCaps", hy?.auto && hy.noCaps ? "<w:doNotHyphenateCaps/>" : undefined);
     this.put(name, encoder.encode(xml), pkg.contentTypes.overrides[name] ?? ContentType.settings);
     if (!rel) rels.add(RelType.settings, name);
   }
@@ -115,7 +135,7 @@ class Writer {
     const rootAttrs = { ...ROOT_NAMESPACES, ...pkg.rootAttrs };
     // The page colour comes before the body; Word shows it only with displayBackgroundShape set.
     const background = this.doc.background?.xml ?? "";
-    if (background) this.showBackground(rels);
+    this.settings(rels);
     this.put(main, encoder.encode(`${XML_DECL}<w:document${attrString(rootAttrs, "")}>${background}<w:body>${body}</w:body></w:document>`),
       pkg.contentTypes.overrides[main] ?? ContentType.document);
     this.notes("footnote", body, rels);

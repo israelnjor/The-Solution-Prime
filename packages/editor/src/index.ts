@@ -18,7 +18,7 @@ export { cssToRunProps, pastePlugin, toHex, toPt } from "./paste.js";
 export { storyFromProseMirror, storyToProseMirror } from "./convert.js";
 export {
   insertColumnBreak, insertField, insertFieldResult, insertSectionBreak, ownStory, PAPER, pageSetup, type SectionAttrs, type SectionStart, sectionInfo,
-  setPageSetup, setStory, setTitlePage, storyAt,
+  setPageSetup, setStory, setTitlePage, storyAt, columnPreset, type ColumnsSpec, columnsOf, hyphenationOn, setColumns, setHyphenation, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers, toggleSuppressLineNumbers,
 } from "./docsetup.js";
 export { type BorderKind, bordersAt, setBorders, setIndent, setLineSpacing, setParagraphSpacing, updateParagraphs } from "./paragraph.js";
 export { type Template, TEMPLATES } from "./templates.js";
@@ -42,3 +42,7 @@ export { autofitWindow, type BorderChoice, type CellRange, columnResizing, distr
 export {
   type PageBorderSpec, pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, watermarkXml, type WatermarkSpec,
 } from "./design.js";
+export {
+  applyColors, applyFontPair, applyStyleSet, changedStyle, COLOR_SETS, createStyle, FONT_PAIRS, modifyStyle, modifyStyles, STYLE_SETS, type StyleChange, stylesOf,
+} from "./styleedit.js";
+export { type DropCapKind, dropCapOf, setDropCap } from "./dropcap.js";

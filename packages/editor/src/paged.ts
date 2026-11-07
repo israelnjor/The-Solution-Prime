@@ -4,14 +4,14 @@
  * are sized from the real screen positions, so every page's content starts exactly at the top of
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
-import { type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver } from "@prime/layout";
+import { type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver, sectionColumns } from "@prime/layout";
 import type { PrimeDocument, SectionProps } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { fromProseMirror } from "./convert.js";
 import { inkSvg } from "./ink.js";
-import { type ResolvedFloat, type ResolvedStart, resolveFloats, resolvePageStarts, resolveWraps } from "./pages.js";
+import { type ResolvedFloat, type ResolvedStart, resolveFloats, resolveHyphens, resolvePageStarts, resolveWraps } from "./pages.js";
 
 /** Whether `timed` records (self-tests turn it on; entries would otherwise pile up over a session). */
 const timing = () => (globalThis as { primeTiming?: boolean }).primeTiming === true;
@@ -76,6 +76,39 @@ export interface PagedOptions {
 
 interface PagedState {
   decorations: DecorationSet;
+  /** The text columns the editor shows (the editor is then a multi-column container), if any. */
+  columns?: ScreenColumns;
+}
+
+/** Equal text columns, as the browser draws them: how many, the space between (pt), a line between. */
+interface ScreenColumns { count: number; gap: number; rule: boolean }
+
+/**
+ * The text columns to show on screen. The editor is one multi-column container: blocks of sections
+ * with these columns flow through them (the browser splits paragraphs between columns, as Word
+ * does); every other block spans the page (column-span: all), as do page gaps, which end a page's
+ * set of columns. The browser's columns are equally wide and as wide as the first section's text: a
+ * section with other columns shows one column on screen (its printed pages are right).
+ */
+function screenColumns(props: SectionProps[]): { columns?: ScreenColumns; inColumns: boolean[] } {
+  const body = (q: SectionProps) => (q.pageWidth ?? 612) - (q.margins?.left ?? 72) - (q.margins?.right ?? 72);
+  const offsets = sectionOffsets(props);
+  const specs = props.map((q, i) => {
+    const c = sectionColumns(q, body(q));
+    const equal = c && new Set(c.widths.map((w) => Math.round(w * 10))).size === 1;
+    return c && equal && !offsets[i].left && !offsets[i].right ? { count: c.widths.length, gap: c.gaps[0], rule: c.sep } : undefined;
+  });
+  const columns = specs.find(Boolean);
+  const same = (c: ScreenColumns | undefined) => !!c && !!columns && c.count === columns.count && Math.abs(c.gap - columns.gap) < 0.1;
+  return { ...(columns ? { columns } : {}), inColumns: specs.map(same) };
+}
+
+/** The text columns the editor shows for a document (see screenColumns). */
+function columnsIn(doc: Node): ScreenColumns | undefined {
+  const sections: SectionProps[] = [];
+  doc.forEach((node) => { if (node.type.name === "section_break") sections.push(node.attrs.section?.props ?? {}); });
+  sections.push(doc.attrs.section?.props ?? {});
+  return screenColumns(sections).columns;
 }
 
 export const paginationKey = new PluginKey<PagedState>("pagination");
@@ -202,9 +235,39 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
   };
 }
 
+/** A soft hyphen: where the layout hyphenated a word, the screen may break it too (and nowhere else). */
+function softHyphen(): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "pw-shy";
+  el.textContent = String.fromCharCode(0xad); // U+00AD SOFT HYPHEN
+  return el;
+}
+
 function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeof resolveWraps>,
-  floats: ResolvedFloat[] = [], base?: PrimeDocument): DecorationSet {
+  floats: ResolvedFloat[] = [], base?: PrimeDocument, hyphens: number[] = []): DecorationSet {
   const out: Decoration[] = [];
+  // Text columns: blocks outside them span the page. The layout's column starts are not forced on
+  // screen: where the screen's text ran a little longer or shorter than the layout's, forced breaks gave
+  // a page more columns than it has, off the side of the page. The browser balances each page's
+  // columns (a page gap ends them); a column break typed in the text still breaks (styles.css).
+  {
+    const sections: SectionProps[] = [];
+    doc.forEach((node) => { if (node.type.name === "section_break") sections.push(node.attrs.section?.props ?? {}); });
+    sections.push(doc.attrs.section?.props ?? {});
+    const { columns, inColumns } = screenColumns(sections);
+    let si = 0;
+    doc.forEach((node, pos, index) => {
+      if (node.type.name === "section_break") { si++; return; }
+      if (columns && !inColumns[si]) out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-span" }));
+      // An empty paragraph that only holds a continuous section break takes no room (as in the layout).
+      const next = doc.maybeChild(index + 1);
+      const following = next?.type.name === "section_break" ? sections[si + 1] : undefined;
+      if (node.type.name === "paragraph" && node.content.size === 0 && following?.breakType === "continuous" && index > 0) {
+        out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-break-holder" }));
+      }
+    });
+  }
+  for (const pos of hyphens) out.push(Decoration.widget(pos, softHyphen, { side: -1, key: "shy", marks: [] }));
   // Sections with their own page width or margins: their blocks' text column (see sectionOffsets;
   // paragraph and table margins add these variables).
   const props: SectionProps[] = [];
@@ -368,6 +431,8 @@ export function pagination(opts: PagedOptions): Plugin {
   let raw: ResolvedStart[] = [];
   /** Where text wraps around floating objects, and the objects themselves (from the layout). */
   let wraps: ReturnType<typeof resolveWraps> = [];
+  /** Where the layout hyphenated words (editor positions). */
+  let hyphens: number[] = [];
   let floats: ResolvedFloat[] = [];
   /** Rounds of corrections (each moves every break that needs it) since the last layout: a loop guard. */
   let rounds = 0;
@@ -556,19 +621,28 @@ export function pagination(opts: PagedOptions): Plugin {
       init: () => ({ decorations: DecorationSet.empty }),
       apply(tr, old) {
         const drawn = tr.getMeta(paginationKey) as ResolvedStart[] | undefined;
-        if (drawn) return { decorations: decorations(tr.doc, drawn, wraps, floats, opts.base()) };
+        if (drawn) {
+          const columns = columnsIn(tr.doc);
+          return { decorations: decorations(tr.doc, drawn, wraps, floats, opts.base(), hyphens), ...(columns ? { columns } : {}) };
+        }
         if (!tr.docChanged) return old;
         // Keep page starts and wrap points on their text until the next layout replaces them (a
         // correction made before then must not put a break where the text was before an edit).
         starts = starts.map((p) => ({ ...p, pos: tr.mapping.map(p.pos) }));
         raw = raw.map((p) => ({ ...p, pos: tr.mapping.map(p.pos) }));
         wraps = wraps.map((w) => ({ ...w, pos: tr.mapping.map(w.pos) }));
+        hyphens = hyphens.map((h) => tr.mapping.map(h));
         floats = floats.map((f) => ({ ...f, pos: tr.mapping.map(f.pos) }));
-        return { decorations: old.decorations.map(tr.mapping, tr.doc) };
+        return { decorations: old.decorations.map(tr.mapping, tr.doc), ...(old.columns ? { columns: old.columns } : {}) };
       },
     },
     props: {
       decorations: (state) => paginationKey.getState(state)?.decorations,
+      // Text columns: the editor is a multi-column container (see screenColumns).
+      attributes: (state): Record<string, string> => {
+        const c = paginationKey.getState(state)?.columns;
+        return c ? { class: "pw-columns", style: `column-count:${c.count};column-gap:${c.gap}pt;column-fill:balance${c.rule ? ";column-rule:0.5pt solid #000" : ""}` } : {};
+      },
     },
     view(view) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -613,6 +687,7 @@ export function pagination(opts: PagedOptions): Plugin {
         timed("onLayout", () => opts.onLayout?.(result));
         const next = timed("pageStarts", () => resolvePageStarts(view.state.doc, result.pageStarts));
         const nextWraps = resolveWraps(view.state.doc, result.wraps);
+        const nextHyphens = resolveHyphens(view.state.doc, result.hyphens ?? []);
         const nextFloats = resolveFloats(view.state.doc, result.floats);
         // Corrections stand where the layout did not change: a page whose start and whose previous
         // page's start are where the last layout put them keeps its correction (an edit in chapter 10
@@ -625,9 +700,12 @@ export function pagination(opts: PagedOptions): Plugin {
         const kept = (page: number) => (was.get(page) ?? "") === (nextAt.get(page) ?? "");
         const merged = next.map((p) => (kept(p.page) && kept(p.page - 1) && fixed.get(p.page)) || p);
         const same = merged.length === starts.length && merged.every((p, i) => id(p) === id(starts[i]) && p.page === starts[i].page)
-          && JSON.stringify(nextWraps) === JSON.stringify(wraps) && JSON.stringify(nextFloats) === JSON.stringify(floats);
+          && JSON.stringify(nextWraps) === JSON.stringify(wraps) && JSON.stringify(nextFloats) === JSON.stringify(floats)
+          && nextHyphens.length === hyphens.length && nextHyphens.every((h, i) => h === hyphens[i])
+          && JSON.stringify(columnsIn(view.state.doc) ?? null) === JSON.stringify(paginationKey.getState(view.state)?.columns ?? null);
         raw = next;
         wraps = nextWraps;
+        hyphens = nextHyphens;
         floats = nextFloats;
         rounds = 0; // the loop guard counts per layout
         unfixable = new Set();

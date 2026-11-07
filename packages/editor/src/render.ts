@@ -429,9 +429,11 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
 
   const build = (pm: Node): StylesState => {
     const looks = new WeakMap<Node, Look>();
-    const resolver = new Resolver(doc);
+    // The editor's own stylesheet once a style was created or modified (styleedit.ts), else the file's.
+    const sheet = pm.attrs.styles ? { ...doc, styles: pm.attrs.styles } : doc;
+    const resolver = new Resolver(sheet);
     // A second resolver to look at the next paragraph (the first counts list numbers in order).
-    const peek = new Resolver(doc);
+    const peek = new Resolver(sheet);
     const decorations: Decoration[] = [];
     const visit = (node: Node, pos: number, tableStyle?: string, cond?: RunProps) => {
       let prev: { styleId: string; contextual: boolean } | undefined;
@@ -467,6 +469,10 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
             // Plus the section's own text column in Print Layout (--pw-sx / --pw-sr, see paged.ts).
             `margin:${pt(joinBefore ? 0 : rp.spaceBefore)} calc(${pt(rp.right)} + var(--pw-sr, 0pt)) ${pt(joinAfter ? 0 : rp.spaceAfter)} calc(${pt(rp.left)} + var(--pw-sx, 0pt))`,
             `text-indent:${pt(rp.firstLine)}`,
+            // Kept with the next paragraph / its lines together (Word's keep options): honoured where the
+            // browser breaks text itself (text columns on screen).
+            rp.keepNext ? "break-after:avoid" : "",
+            rp.keepLines ? "break-inside:avoid" : "",
             `text-align:${rp.align === "both" || rp.align === "distribute" ? "justify" : rp.align === "end" ? "right" : rp.align === "start" ? "left" : rp.align}`,
             `line-height:${pt(lineHeight)}`,
             ...(["top", "bottom", "left", "right"] as const).map((k) => {
@@ -481,7 +487,27 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
           child.forEach((n) => { if (n.type.name === "tab") tabs++; });
           const rightStop = tabs === 1 ? rp.tabs.find((t) => t.align === "right") : undefined;
           const classes = rightStop ? `pw-righttab${rightStop.leader ? ` pw-leader-${rightStop.leader}` : ""}` : "";
-          looks.set(child, { style: css + (rp.shading ? `;background:#${rp.shading}` : ""), styleId: rp.styleId, className: classes });
+          // A drop cap (its own paragraph, before the one it belongs to): floated left, so the next
+          // paragraph's first lines wrap beside it, and moved down so its baseline sits on the baseline
+          // of that paragraph's `lines`-th line (as the layout places it). "In margin": left of the text.
+          let drop = "";
+          if (rp.dropCap && nrp) {
+            const m = (r: typeof run) => measurer.metrics({ family: r.font, bold: r.bold, italic: r.italic });
+            const nm = m(nrp.mark);
+            const nSingle = nm.lineHeight * nrp.mark.size;
+            const nLine = nrp.lineRule === "exact" ? nrp.line / 20 : nrp.lineRule === "atLeast" ? Math.max(nrp.line / 20, nSingle) : nSingle * (nrp.line / 240);
+            // Baselines in CSS line boxes: half the leading above the font's ascent.
+            const nBaseline = (nLine - nSingle) / 2 + nm.ascent * nrp.mark.size;
+            const target = (rp.dropCap.lines - 1) * nLine + nBaseline;
+            const lm = m(run);
+            const baseline = (lineHeight - lm.lineHeight * run.size) / 2 + lm.ascent * run.size;
+            const space = rp.dropCap.space;
+            drop = rp.dropCap.kind === "margin"
+              ? `;float:left;margin:${pt(nrp.spaceBefore)} 0 0 0;width:0;overflow:visible;direction:rtl;position:relative;top:${pt(target - baseline)};left:${pt(-space)}`
+              // As tall as the lines beside it (the letter's own glyph box is taller, and would narrow one more).
+              : `;float:left;margin:${pt(nrp.spaceBefore)} ${pt(space)} 0 0;text-indent:0;height:${pt(rp.dropCap.lines * nLine - 0.5)};overflow:visible;position:relative;top:${pt(target - baseline)}`;
+          }
+          looks.set(child, { style: css + (rp.shading ? `;background:#${rp.shading}` : "") + drop, styleId: rp.styleId, className: drop ? [classes, "pw-dropcap"].filter(Boolean).join(" ") : classes });
           const floats: FloatInfo[] = [];
           child.forEach((n) => {
             if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float);

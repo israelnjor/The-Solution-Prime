@@ -27,7 +27,7 @@ function Chrome({ page, total, doc, top }: { page: Page; total: number; doc: Pri
       {page.rects.filter((r) => r.story).map((r, i) => (
         <div key={`r${i}`} className="pw-chrome-rule" style={{ left: `${r.x}pt`, top: `${top + r.y}pt`, width: `${r.width}pt` }} />
       ))}
-      {page.lines.filter((l) => l.story === "header" || l.story === "footer" || l.story === "footnote" || l.story === "endnote").map((line, i) => (
+      {page.lines.filter((l) => l.story === "header" || l.story === "footer" || l.story === "footnote" || l.story === "endnote" || l.story === "lineNumber").map((line, i) => (
         <div key={i} className={line.story === "footnote" || line.story === "endnote" ? "pw-chrome-note" : undefined}
           onClick={line.story === "footnote" || line.story === "endnote" ? () => window.dispatchEvent(new Event(NOTES_EVENT)) : undefined}>
           {line.segments.map((s, j) => (
@@ -125,6 +125,12 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
   const widest = Math.max(...pages.map((p) => p.width));
   const total = tops[tops.length - 1] + pages[pages.length - 1].height;
   const offset = (i: number) => (widest - pages[i].width) / 2; // each sheet, centred
+  // Text wider than its column (a large picture) is cut off at the page edge, as Word shows it: the
+  // flow clips at the furthest page edge from its own sides (clip margins are the same on all sides).
+  const flowLeft = offset(0) + (laid[0]?.bodyLeft ?? section.margins?.left ?? 72);
+  const flowRight = flowLeft + (laid[0] ? laid[0].bodyRight - laid[0].bodyLeft : pages[0].width - (margins.left ?? 72) - (margins.right ?? 72));
+  // (At least the first page's top margin too: floating objects can sit there.)
+  const clip = Math.max(0, laid[0]?.bodyTop ?? margins.top ?? 72, ...pages.map((p, i) => Math.max(offset(i) + p.width - flowRight, flowLeft - offset(i))));
   const count = pages.length;
   const box = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState<[number, number]>([0, AROUND * 2]);
@@ -169,6 +175,8 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
         top: `${first?.bodyTop ?? margins.top ?? 72}pt`,
         left: `${offset(0) + (first?.bodyLeft ?? margins.left ?? 72)}pt`,
         width: `${first ? first.bodyRight - first.bodyLeft : pages[0].width - (margins.left ?? 72) - (margins.right ?? 72)}pt`,
+        overflow: "clip",
+        ...({ overflowClipMargin: `${clip}pt` } as Record<string, string>),
       }}>
         {children}
       </div>

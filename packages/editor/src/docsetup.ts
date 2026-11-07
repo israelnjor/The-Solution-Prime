@@ -39,6 +39,17 @@ function current(state: EditorState): { pos: number; attrs: SectionAttrs; index:
   return { ...all[index], index };
 }
 
+/** The sections the selection touches, as Word's ribbon applies its settings (all of a one-section document). */
+function touched(state: EditorState): { pos: number; attrs: SectionAttrs }[] {
+  const all = sections(state);
+  const { from, to } = state.selection;
+  return all.filter((s, i) => {
+    const start = i === 0 ? 0 : all[i - 1].pos;
+    const end = s.pos === -1 ? state.doc.content.size : s.pos;
+    return end >= from && start <= to;
+  });
+}
+
 function setSection(tr: Transaction, pos: number, attrs: SectionAttrs): Transaction {
   if (pos === -1) return tr.setDocAttribute("section", attrs);
   return tr.setNodeMarkup(pos, undefined, { section: attrs });
@@ -58,15 +69,7 @@ export function setPageSetup(change: { paper?: { width: number; height: number }
   return (state, dispatch) => {
     if (!dispatch) return true;
     let tr = state.tr;
-    // The sections the selection touches, as Word's ribbon does (all of a one-section document).
-    const all = sections(state);
-    const { from, to } = state.selection;
-    const touched = all.filter((s, i) => {
-      const start = i === 0 ? 0 : all[i - 1].pos;
-      const end = s.pos === -1 ? state.doc.content.size : s.pos;
-      return end >= from && start <= to;
-    });
-    for (const s of touched) {
+    for (const s of touched(state)) {
       const p = { ...s.attrs.props };
       let w = change.paper?.width ?? p.pageWidth ?? 612;
       let h = change.paper?.height ?? p.pageHeight ?? 792;
@@ -213,6 +216,167 @@ export function setTitlePage(on: boolean): Command {
     if (on) props.titlePage = true;
     else delete props.titlePage;
     dispatch(setSection(state.tr, pos, { ...attrs, props }));
+    return true;
+  };
+}
+
+// --- line numbers ----------------------------------------------------------------------------------
+
+/** Line numbering: off, or numbers restarting on each page, each section, or running on. */
+export type LineNumbering = "none" | "newPage" | "newSection" | "continuous";
+
+/** The line numbering of the section at the cursor. */
+export function lineNumbersOf(state: EditorState): LineNumbering {
+  const xml = current(state).attrs.props.extra?.find((x) => x.name === "w:lnNumType")?.xml;
+  if (!xml || !/w:countBy="[1-9]/.test(xml)) return "none";
+  // Without w:restart: a new start on each page.
+  return (/w:restart="(newSection|continuous)"/.exec(xml)?.[1] as LineNumbering | undefined) ?? "newPage";
+}
+
+/** Sets line numbering for the sections the selection touches (Word's Layout → Line Numbers). */
+export function setLineNumbers(mode: LineNumbering): Command {
+  return (state, dispatch) => {
+    if (!dispatch) return true;
+    let tr = state.tr;
+    for (const s of touched(state)) {
+      const extra = (s.attrs.props.extra ?? []).filter((x) => x.name !== "w:lnNumType");
+      if (mode !== "none") extra.push({ name: "w:lnNumType", xml: `<w:lnNumType w:countBy="1" w:restart="${mode}"/>` });
+      tr = setSection(tr, s.pos, { ...s.attrs, props: { ...s.attrs.props, extra } });
+    }
+    dispatch(tr);
+    return true;
+  };
+}
+
+/** Whether the paragraph at the cursor is left out of line numbering. */
+export function lineNumbersSuppressed(state: EditorState): boolean {
+  const props = state.selection.$from.parent.attrs.props as { extra?: { name: string }[] } | undefined;
+  return !!props?.extra?.some((x) => x.name === "w:suppressLineNumbers");
+}
+
+/** Leaves the selected paragraphs out of line numbering, or puts them back (Word: "Suppress for Current Paragraph"). */
+export const toggleSuppressLineNumbers: Command = (state, dispatch) => {
+  if (!dispatch) return true;
+  const on = !lineNumbersSuppressed(state);
+  const tr = state.tr;
+  state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+    if (node.type.name !== "paragraph") return true;
+    const props = { ...(node.attrs.props ?? {}) } as { extra?: { name: string; xml: string }[] };
+    const extra = (props.extra ?? []).filter((x) => x.name !== "w:suppressLineNumbers");
+    if (on) extra.push({ name: "w:suppressLineNumbers", xml: "<w:suppressLineNumbers/>" });
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, props: { ...props, extra } });
+    return false;
+  });
+  dispatch(tr);
+  return true;
+};
+
+// --- hyphenation -------------------------------------------------------------------------------------
+
+/** Whether words are hyphenated automatically (Word's Layout → Hyphenation → Automatic). */
+export function hyphenationOn(state: EditorState): boolean {
+  return !!(state.doc.attrs.hyphenation as { auto?: boolean } | null)?.auto;
+}
+
+/** Turns automatic hyphenation on (Word's defaults: 0.25" zone, no limit) or off. */
+export function setHyphenation(on: boolean): Command {
+  return (state, dispatch) => {
+    if (dispatch) {
+      const old = state.doc.attrs.hyphenation as Record<string, unknown> | null;
+      dispatch(state.tr.setDocAttribute("hyphenation", on ? { ...(old ?? {}), auto: true } : null));
+    }
+    return true;
+  };
+}
+
+// --- text columns ------------------------------------------------------------------------------------
+
+/** Text columns as the Columns dialog sets them: their number, the space between, a line between, and
+ * (when not equal) each column's width; widths and spaces in pt. */
+export interface ColumnsSpec {
+  count: number;
+  space: number;
+  line?: boolean;
+  /** Each column's own width (unequal columns); omitted: equal columns. */
+  widths?: number[];
+}
+
+/** The text columns of the section at the cursor (one column when it has none). */
+export function columnsOf(state: EditorState): ColumnsSpec {
+  const xml = current(state).attrs.props.extra?.find((x) => x.name === "w:cols")?.xml;
+  if (!xml) return { count: 1, space: 36 };
+  const open = /<w:cols\b[^>]*>/.exec(xml)?.[0] ?? xml;
+  const line = /w:sep="(1|true|on)"/.test(open);
+  const space = Number(/w:space="(\d+)"/.exec(open)?.[1] ?? 720) / 20;
+  if (/w:equalWidth="(0|false|off)"/.test(open)) {
+    const widths = [...xml.matchAll(/<w:col\b([^>]*)\/?>/g)].map((m) => Number(/w:w="(\d+)"/.exec(m[1])?.[1] ?? 0) / 20);
+    if (widths.length > 1) return { count: widths.length, space, line, widths };
+  }
+  return { count: Math.max(1, Number(/w:num="(\d+)"/.exec(open)?.[1] ?? 1)), space, line };
+}
+
+/** Word's column presets for a text width: One, Two, Three, Left (a narrow first column), Right. */
+export function columnPreset(name: "one" | "two" | "three" | "left" | "right", textWidth: number): ColumnsSpec {
+  const space = 36;
+  if (name === "one") return { count: 1, space };
+  if (name === "two") return { count: 2, space };
+  if (name === "three") return { count: 3, space };
+  const narrow = Math.round(((textWidth - space) / 3) * 10) / 10;
+  const wide = Math.round((textWidth - space - narrow) * 10) / 10;
+  return { count: 2, space, widths: name === "left" ? [narrow, wide] : [wide, narrow] };
+}
+
+/**
+ * Sets text columns, as Word's Layout → Columns does: with text selected, for the paragraphs the
+ * selection covers only — continuous section breaks go before and after them (where they do not
+ * already start or end their section), so the text around keeps its own columns; with nothing
+ * selected (or a selection across sections), for the sections the selection touches.
+ */
+export function setColumns(spec: ColumnsSpec): Command {
+  return (state, dispatch) => {
+    if (!dispatch) return true;
+    const tw = (pt: number) => Math.round(pt * 20);
+    const count = Math.max(1, Math.min(12, Math.round(spec.count)));
+    const xml = spec.widths && spec.widths.length > 1
+      ? `<w:cols w:num="${spec.widths.length}"${spec.line ? ' w:sep="1"' : ""} w:space="${tw(spec.space)}" w:equalWidth="0">${spec.widths
+        .map((w, i) => `<w:col w:w="${tw(w)}"${i < spec.widths!.length - 1 ? ` w:space="${tw(spec.space)}"` : ""}/>`).join("")}</w:cols>`
+      : `<w:cols${count > 1 ? ` w:num="${count}"` : ""}${spec.line && count > 1 ? ' w:sep="1"' : ""} w:space="${tw(spec.space)}"/>`;
+    const withColumns = (props: SectionProps): SectionProps => ({ ...props, extra: [...(props.extra ?? []).filter((x) => x.name !== "w:cols"), { name: "w:cols", xml }] });
+    const all = sections(state);
+    const { from, to, empty } = state.selection;
+    const section = all.findIndex((s) => s.pos === -1 || s.pos >= from);
+    const own = all[section];
+    const start = section === 0 ? 0 : all[section - 1].pos + state.doc.child(state.doc.resolve(all[section - 1].pos).index(0)).nodeSize;
+    const end = own.pos === -1 ? state.doc.content.size : own.pos;
+    if (!empty && to <= end) {
+      // The whole paragraphs (or tables) the selection covers.
+      const $from = state.doc.resolve(from);
+      const $to = state.doc.resolve(to);
+      const blockFrom = $from.depth ? $from.before(1) : from;
+      const blockTo = $to.depth ? $to.after(1) : to;
+      const hasBefore = blockFrom > start;
+      const hasAfter = blockTo < end;
+      const s = own.attrs;
+      // The selected part: the new columns; it starts on the same page (continuous) unless it starts the section.
+      const middle: SectionProps = { ...withColumns(s.props), ...(hasBefore ? { breakType: "continuous" } : {}) };
+      if (!hasBefore && s.props.breakType === undefined) delete middle.breakType;
+      const middleAttrs: SectionAttrs = hasBefore ? { props: middle, headers: {}, footers: {} } : { ...s, props: middle };
+      const tr = state.tr;
+      if (hasAfter) {
+        // The break after the selection ends the selected part; what follows keeps the section's own settings.
+        tr.insert(blockTo, state.schema.nodes.section_break.create({ section: middleAttrs }));
+        setSection(tr, own.pos === -1 ? -1 : tr.mapping.map(own.pos), { props: { ...s.props, breakType: "continuous" }, headers: {}, footers: {} });
+      } else {
+        setSection(tr, own.pos === -1 ? -1 : tr.mapping.map(own.pos), middleAttrs);
+      }
+      // The break before the selection ends the part before it, as the section was.
+      if (hasBefore) tr.insert(blockFrom, state.schema.nodes.section_break.create({ section: { ...s } }));
+      dispatch(tr.scrollIntoView());
+      return true;
+    }
+    let tr = state.tr;
+    for (const s of touched(state)) tr = setSection(tr, s.pos, { ...s.attrs, props: withColumns(s.attrs.props) });
+    dispatch(tr);
     return true;
   };
 }

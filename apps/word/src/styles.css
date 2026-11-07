@@ -557,3 +557,23 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 /* Design tab: watermark (behind the text, on its sheet) and page borders (over the page). */
 .pw-watermark { position: absolute; white-space: pre; line-height: 1; pointer-events: none; user-select: none; }
 .pw-page-borders { position: absolute; left: 0; overflow: visible; pointer-events: none; }
+
+/* Home → Styles… */
+.styles-dialog { min-width: 520px; }
+.styles-dialog fieldset { border: 1px solid #d0d7e2; border-radius: 4px; margin: 8px 0; padding: 8px 10px; display: grid; gap: 6px; }
+.styles-dialog .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.styles-dialog input[type="number"] { width: 72px; }
+
+/* A drop cap (render.ts): exactly as tall as the lines beside it, whatever its letter's size. */
+.pw-editor p.pw-dropcap { min-height: 0; }
+
+/* Text columns (paged.ts): the editor is a multi-column container; blocks outside column sections and
+   page gaps span the page (a page gap ends a page's set of columns); the layout's column starts are
+   forced breaks. */
+.pw-editor .ProseMirror.pw-columns > .pw-span, .pw-editor .ProseMirror.pw-columns .pw-page-gap { column-span: all; }
+.pw-editor .pw-col-break { display: flow-root; height: 0; break-before: column; }
+/* An empty paragraph that only holds a continuous section break: no room, as Word lays it out. */
+.pw-editor.paged p.pw-break-holder { display: none; }
+
+/* A column break typed in the text, inside text columns on screen: the text after it starts the next column. */
+.pw-editor.paged .ProseMirror.pw-columns .pw-column-break { display: flow-root; height: 0; margin: 0; border: 0; break-before: column; }
