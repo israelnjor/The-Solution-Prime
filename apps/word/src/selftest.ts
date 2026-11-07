@@ -1723,6 +1723,26 @@ export function trackChangesSelfTest(view: EditorView, base: () => PrimeDocument
     if (grid.length > 1) { grid[0] += 20; grid[1] -= 20; }
     ed.setColumnWidths(tpos, grid)(view.state, view.dispatch);
     out.table = { insertRecorded: afterInsert > before, resizeRecorded: list().length - afterInsert, resized: (view.state.doc.nodeAt(tpos)!.attrs.grid as number[])[0] === grid[0] };
+    // Formatting: a word made bold, a paragraph centred, a second word bolded then un-bolded (no change left).
+    let fp = -1;
+    view.state.doc.forEach((n, pos) => { if (fp < 0 && pos > other + 400 && n.type.name === "paragraph" && n.textContent.length > 80) fp = pos; });
+    const fw = fp + 1 + view.state.doc.nodeAt(fp)!.textContent.indexOf(" ") + 1;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, fw, fw + 4)));
+    ed.toggleRun("bold")(view.state, view.dispatch);
+    ed.setParagraph("align", "center")(view.state, view.dispatch);
+    const fw2 = fw + 20;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, fw2, fw2 + 3)));
+    ed.toggleRun("italic")(view.state, view.dispatch);
+    ed.toggleRun("italic")(view.state, view.dispatch);
+    const formats = () => ed.changes(view.state.doc).filter((c) => c.kind === "format").map((c) => (c.paragraph !== undefined ? "¶" : view.state.doc.textBetween(c.from, c.to)));
+    await wait(300);
+    out.formatted = { changes: formats(), boldStays: ed.isActive(view.state.apply(view.state.tr.setSelection(TextSelection.create(view.state.doc, fw + 1))), "bold"), marked: view.dom.querySelectorAll(".pw-fmt").length, bar: view.dom.querySelectorAll(".pw-fmt-para").length };
+    // Reject the paragraph's change: left aligned again; the bold stays (its own change).
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, fp + 3)));
+    const beforeReject = view.state.doc.nodeAt(fp)!.attrs.props.align;
+    ed.acceptOrReject(false)(view.state, view.dispatch);
+    out.rejectParagraph = { before: beforeReject, after: view.state.doc.nodeAt(fp)!.attrs.props.align ?? "none", left: formats() };
+    ed.setParagraph("align", "right")(view.state, view.dispatch);
     // Saved and read back (Word's own markup and setting).
     const docx = writeDocx(fromProseMirror(view.state.doc, base()));
     const back = readDocx(docx).doc;
@@ -1730,7 +1750,7 @@ export function trackChangesSelfTest(view: EditorView, base: () => PrimeDocument
     const dec = (n: string) => (files?.[n] ? new TextDecoder().decode(files[n]) : "");
     const body = dec("word/document.xml");
     const ids = [...body.matchAll(/<w:(?:ins|del) w:id="(\d+)"/g)].map((m) => m[1]);
-    out.saved = { trackRevisions: !!back.trackRevisions, setting: /<w:trackRevisions\/>/.test(dec("word/settings.xml")), ins: (body.match(/<w:ins /g) ?? []).length, del: (body.match(/<w:del /g) ?? []).length, delText: (body.match(/<w:delText/g) ?? []).length, uniqueIds: new Set(ids).size === ids.length, paraMarkFirst: !/<w:rPr>(?:(?!<\/w:rPr>).)*?<w:(?:rFonts|sz|b)\b[^>]*\/>(?:(?!<\/w:rPr>).)*?<w:(?:ins|del) /.test(body.replace(/<w:r>.*?<\/w:r>/g, "")) };
+    out.saved = { rPrChange: (body.match(/<w:rPrChange /g) ?? []).length, pPrChange: (body.match(/<w:pPrChange /g) ?? []).length, trackRevisions: !!back.trackRevisions, setting: /<w:trackRevisions\/>/.test(dec("word/settings.xml")), ins: (body.match(/<w:ins /g) ?? []).length, del: (body.match(/<w:del /g) ?? []).length, delText: (body.match(/<w:delText/g) ?? []).length, uniqueIds: new Set(ids).size === ids.length, paraMarkFirst: !/<w:rPr>(?:(?!<\/w:rPr>).)*?<w:(?:rFonts|sz|b)\b[^>]*\/>(?:(?!<\/w:rPr>).)*?<w:(?:ins|del) /.test(body.replace(/<w:r>.*?<\/w:r>/g, "")) };
     // Accept All: the edits stay, the marks go; not itself recorded.
     ed.acceptOrReject(true, true)(view.state, view.dispatch);
     out.accepted = { left: list().length, typedKept: view.state.doc.textContent.includes("ZZ") };

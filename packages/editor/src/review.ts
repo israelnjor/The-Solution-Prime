@@ -7,13 +7,15 @@ import type { PrimeDocument } from "@prime/pdm";
 import type { Mark, Node } from "prosemirror-model";
 import { type Command, type EditorState, Plugin, PluginKey, TextSelection, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { PARA_CHANGE, RUN_CHANGE, resolvedParagraph, resolvedRun, runPropsOf, setRunProps } from "./formatchanges.js";
 
 // --- tracked changes -------------------------------------------------------------------------
 
 export interface Change {
   from: number;
   to: number;
-  kind: "ins" | "del";
+  /** Inserted, deleted, or formatted (the formatting before is kept: w:rPrChange, w:pPrChange). */
+  kind: "ins" | "del" | "format";
   author?: string;
   date?: string;
   /** A paragraph mark (an inserted or deleted paragraph break): the position of its paragraph. */
@@ -31,20 +33,30 @@ function markRevision(node: Node): { kind: "ins" | "del"; author?: string; date?
 
 const revisionOf = (node: Node): Mark | undefined => node.marks.find((m) => m.type.name === "revision");
 
+const xmlAttr = (xml: string, n: string) => new RegExp(`w:${n}="([^"]*)"`).exec(xml)?.[1];
+
 /** All tracked changes, in document order (adjacent text with the same revision joined). */
 export function changes(doc: Node): Change[] {
-  const out: (Change & { mark: Mark })[] = [];
+  const out: (Change & { mark?: Mark; format?: string })[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name === "paragraph") {
+      const pc = ((node.attrs.props?.extra ?? []) as { name: string; xml: string }[]).find((x) => x.name === PARA_CHANGE);
+      if (pc) out.push({ from: pos + 1, to: pos + node.nodeSize - 1, kind: "format", author: xmlAttr(pc.xml, "author"), date: xmlAttr(pc.xml, "date"), paragraph: pos, format: pc.xml });
       const r = markRevision(node);
       // The mark sits at the paragraph's end.
       if (r) out.push({ from: pos + node.nodeSize - 1, to: pos + node.nodeSize - 1, ...r, paragraph: pos, mark: node.type.schema.marks.revision.create({ kind: r.kind }) });
     }
     if (!node.isInline) return true;
+    const rc = (runPropsOf(node).extra ?? []).find((x) => x.name === RUN_CHANGE);
+    if (rc) {
+      const last = out[out.length - 1];
+      if (last && last.kind === "format" && last.paragraph === undefined && last.to === pos && last.format === rc.xml) last.to = pos + node.nodeSize;
+      else out.push({ from: pos, to: pos + node.nodeSize, kind: "format", author: xmlAttr(rc.xml, "author"), date: xmlAttr(rc.xml, "date"), format: rc.xml });
+    }
     const mark = revisionOf(node);
     if (!mark) return false;
     const last = out[out.length - 1];
-    if (last && last.to === pos && last.mark.eq(mark)) last.to = pos + node.nodeSize;
+    if (last && last.to === pos && last.mark?.eq(mark)) last.to = pos + node.nodeSize;
     else {
       // Revision attributes keep their qualified names (w:author).
       const a = (mark.attrs.attrs ?? {}) as Record<string, string>;
@@ -52,7 +64,7 @@ export function changes(doc: Node): Change[] {
     }
     return false;
   });
-  return out.map(({ mark: _mark, ...c }) => c).sort((a, b) => a.from - b.from);
+  return out.map(({ mark: _mark, format: _f, ...c }) => c).sort((a, b) => a.from - b.from);
 }
 
 /** The change at (or touching) the selection. */
@@ -63,6 +75,25 @@ export function changeAt(state: EditorState): Change | undefined {
 
 /** Accepting keeps an insertion (drops its mark) and removes a deletion; rejecting does the opposite. */
 function resolve(tr: Transaction, c: Change, accept: boolean) {
+  if (c.kind === "format") {
+    // Accepting keeps the new formatting (drops the record); rejecting puts the earlier one back.
+    if (c.paragraph !== undefined) {
+      const pos = tr.mapping.map(c.paragraph);
+      const node = tr.doc.nodeAt(pos);
+      if (node) tr.setNodeMarkup(pos, undefined, { ...node.attrs, props: resolvedParagraph(node.attrs.props ?? {}, accept) });
+      return;
+    }
+    const from = tr.mapping.map(c.from);
+    const to = tr.mapping.map(c.to);
+    const parts: { a: number; b: number; props: ReturnType<typeof runPropsOf> }[] = [];
+    tr.doc.nodesBetween(from, to, (node, pos) => {
+      if (!node.isInline) return true;
+      parts.push({ a: Math.max(from, pos), b: Math.min(to, pos + node.nodeSize), props: resolvedRun(runPropsOf(node), accept) });
+      return false;
+    });
+    for (const p of parts) setRunProps(tr, p.a, p.b, p.props);
+    return;
+  }
   const keep = (c.kind === "ins") === accept;
   if (c.paragraph !== undefined) {
     // A paragraph break: drop the revision from its mark; a break that goes joins the next paragraph on.

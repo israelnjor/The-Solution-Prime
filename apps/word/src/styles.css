@@ -258,6 +258,12 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .pw-commented { background: rgb(255 214 102 / 0.35); }
 .pw-comment-active { background: rgb(255 193 7 / 0.6); }
 .pw-markup-none del.pw-del, .pw-markup-original ins.pw-ins { display: none; }
+/* Tracked formatting: a dotted line under the text, a bar beside the paragraph (Word's change bar). */
+.pw-fmt { border-bottom: 1px dotted #7b1fa2; }
+.pw-fmt-para { position: relative; }
+.pw-fmt-para::before { content: ""; position: absolute; left: -14px; top: 0; bottom: 0; width: 2px; background: #7b1fa2; }
+.pw-markup-none .pw-fmt, .pw-markup-original .pw-fmt { border-bottom: none; }
+.pw-markup-none .pw-fmt-para::before, .pw-markup-original .pw-fmt-para::before { display: none; }
 .pw-markup-none ins.pw-ins, .pw-markup-original del.pw-del { color: inherit; text-decoration: none; }
 .comments-pane {
   position: fixed; right: 0; top: 150px; bottom: 32px; width: 300px; z-index: 30; overflow: auto;

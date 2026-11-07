@@ -27,6 +27,8 @@ export interface Render {
 }
 
 const props = { props: { default: {} } };
+/** A tracked formatting change on props (the formatting before, kept as Word keeps it). */
+const changed = (props: { extra?: { name: string }[] } | null, name: string) => !!props?.extra?.some((x) => x.name === name);
 const json = (v: unknown) => JSON.stringify(v);
 const parse = (el: HTMLElement, name: string) => JSON.parse(el.getAttribute(name) ?? "null");
 
@@ -52,7 +54,7 @@ export function createSchema(render?: Render): Schema {
         group: "block",
         content: "inline*",
         attrs: { ...props },
-        toDOM: (n) => ["p", { "data-pw-props": json(n.attrs.props) }, 0],
+        toDOM: (n) => ["p", { "data-pw-props": json(n.attrs.props), ...(changed(n.attrs.props, "w:pPrChange") ? { class: "pw-fmt-para" } : {}) }, 0],
         parseDOM: [
           own("p", "data-pw-props", (props) => ({ props })),
           ...[1, 2, 3, 4, 5, 6].map((level): TagParseRule => ({ tag: `h${level}`, attrs: { props: { style: `Heading${level}` } } })),
@@ -232,7 +234,7 @@ export function createSchema(render?: Render): Schema {
       // Character formatting: the run's RunProps, verbatim.
       run: {
         attrs: { ...props },
-        toDOM: (m) => ["span", { style: render?.run(m) ?? "", "data-pw-run": json(m.attrs.props) }, 0],
+        toDOM: (m) => ["span", { style: render?.run(m) ?? "", "data-pw-run": json(m.attrs.props), ...(changed(m.attrs.props, "w:rPrChange") ? { class: "pw-fmt" } : {}) }, 0],
         parseDOM: [own("span", "data-pw-run", (props) => ({ props }))],
       },
       // Formatting from pasted HTML; merged into `run` by paste.ts and never kept in a document.

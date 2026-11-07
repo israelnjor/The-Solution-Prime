@@ -3,11 +3,12 @@
  * edit is rewritten before it is applied: text taken out stays, marked deleted (w:del); text put in is
  * marked inserted (w:ins), after any text it replaces; paragraph breaks put in or taken out are marked
  * on the paragraph's mark. Deleting your own insertion removes it outright, as in Word. Formatting
- * changes are not recorded (they apply directly).
+ * changes keep the formatting from before (formatchanges.ts).
  */
 import type { Mark, MarkType, Node } from "prosemirror-model";
 import { type Command, type EditorState, Selection, TextSelection, type Transaction } from "prosemirror-state";
 import { Mapping, ReplaceStep, type Step } from "prosemirror-transform";
+import { recordFormatting } from "./formatchanges.js";
 
 /** Whether edits are recorded as tracked changes (the document's Word setting). */
 export function trackingOn(state: EditorState): boolean {
@@ -126,11 +127,11 @@ function recordInsertion(tr: Transaction, from: number, to: number, revision: Ma
 export function trackTransaction(state: EditorState, tr: Transaction, author: string, date = revisionDate()): Transaction {
   if (!tr.docChanged || !trackingOn(state) || tr.getMeta(NO_TRACK) || tr.getMeta("addToHistory") === false) return tr;
   const revision = state.schema.marks.revision;
-  const replaces = tr.steps.some((s, i) => s instanceof ReplaceStep && !rebuilds(s, tr.docs[i]));
-  if (!replaces) return tr;
   const out = state.tr;
   // Positions in the transaction's step-by-step documents → positions in `out`.
   let map = new Mapping();
+  // Ranges other steps changed (formatting), as out-step index and positions after that step.
+  const changed: { at: number; from: number; to: number }[] = [];
   const onlyDelete = tr.steps.length === 1 && tr.steps[0] instanceof ReplaceStep && (tr.steps[0] as ReplaceStep).slice.size === 0;
   tr.steps.forEach((step, i) => {
     const before = tr.docs[i];
@@ -149,7 +150,12 @@ export function trackTransaction(state: EditorState, tr: Transaction, author: st
       }
     } else {
       const mapped = step.map(map);
-      if (mapped) out.maybeStep(mapped);
+      if (mapped && !out.maybeStep(mapped).failed) {
+        const r = mapped as unknown as { from?: number; to?: number; pos?: number };
+        const m = mapped.getMap();
+        if (r.from !== undefined && r.to !== undefined) changed.push({ at: out.steps.length, from: m.map(r.from, -1), to: m.map(r.to, 1) });
+        else if (r.pos !== undefined) changed.push({ at: out.steps.length, from: r.pos, to: r.pos + 1 });
+      }
     }
     const next = new Mapping();
     next.appendMap(step.getMap().invert());
@@ -157,6 +163,14 @@ export function trackTransaction(state: EditorState, tr: Transaction, author: st
     next.appendMapping(out.mapping.slice(k));
     map = next;
   });
+  // Formatting changed: recorded on the runs and paragraphs it changed.
+  if (changed.length) {
+    const back = out.mapping.invert();
+    for (const c of changed) {
+      const m = out.mapping.slice(c.at);
+      recordFormatting(out, state.doc, back, m.map(c.from, -1), m.map(c.to, 1), author, date);
+    }
+  }
   // The cursor: Backspace leaves it before the text it marked deleted; Delete and typing, after.
   const { selection } = tr;
   const backspace = onlyDelete && state.selection.empty && state.selection.head === (tr.steps[0] as ReplaceStep).to;
