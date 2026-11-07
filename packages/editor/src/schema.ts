@@ -44,7 +44,7 @@ export function createSchema(render?: Render): Schema {
         // the footnotes' and endnotes' text (PrimeDocument.notes), so editing a note can be undone.
         // The page colour (PrimeDocument.background), so changing it can be undone.
         // Automatic hyphenation (PrimeDocument.hyphenation), likewise.
-        attrs: { section: { default: null }, notes: { default: null }, background: { default: null }, hyphenation: { default: null },
+        attrs: { section: { default: null }, notes: { default: null }, background: { default: null }, hyphenation: { default: null }, trackRevisions: { default: false },
           // The stylesheet once a style is created or modified (it then overrides the file's), likewise.
           styles: { default: null } },
       },

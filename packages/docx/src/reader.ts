@@ -156,6 +156,7 @@ class Reader {
     if (settings) {
       const setting = (name: string) => elements(settings).find((x) => qname(x) === name);
       const on = (x: Element | undefined) => !!x && !/^(0|false|off)$/.test(attr(x, "val") ?? "");
+      if (on(setting("w:trackRevisions"))) doc.trackRevisions = true;
       const auto = setting("w:autoHyphenation");
       if (on(auto)) {
         const zone = Number(attr(setting("w:hyphenationZone"), "val") ?? NaN);

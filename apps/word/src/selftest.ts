@@ -1628,6 +1628,116 @@ export function columnsSelfTest(view: EditorView, base: () => PrimeDocument, mea
       inColumns: [...root.children].filter((el) => el.matches("p, table") && !el.classList.contains("pw-span")).length,
       alignment: alignmentReport(),
     };
+    // A selection in a section already in columns: the text around it goes back to one column.
+    const counts = () => model().sections.map((x) => Number(/w:num="(\d+)"/.exec(x.props.extra?.find((e) => e.name === "w:cols")?.xml ?? "")?.[1] ?? 1));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, view.state.doc.content.size - 1)));
+    set(menu(), "three"); await wait(3000);
+    const allThree = counts();
+    const later: number[] = [];
+    view.state.doc.forEach((n, pos) => { if (n.type.name === "paragraph" && n.textContent.length > 200) later.push(pos); });
+    const c = later[later.length - 4];
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, c + 5, c + view.state.doc.nodeAt(c)!.nodeSize - 2)));
+    set(menu(), "two"); await wait(3500);
+    out.inColumnsSection = { before: allThree, after: counts(), alignment: alignmentReport() };
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Track changes: typing, deleting, replacing and Enter are recorded; own insertions delete outright; resizing a table column records nothing; saved and read back; Accept All. */
+export function trackChangesSelfTest(view: EditorView, base: () => PrimeDocument) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const out: Record<string, unknown> = {};
+  const key = (k: string, mods: KeyboardEventInit = {}) => {
+    const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...mods });
+    view.someProp("handleKeyDown", (f) => f(view, e));
+  };
+  const type = (text: string) => {
+    for (const ch of text) {
+      const { from, to } = view.state.selection;
+      if (!view.someProp("handleTextInput", (f) => f(view, from, to, ch))) view.dispatch(view.state.tr.insertText(ch, from, to));
+    }
+  };
+  // Character deletion is the browser's own (ProseMirror reads it back as a deletion).
+  const backspace = () => { const h = view.state.selection.head; view.dispatch(view.state.tr.delete(h - 1, h)); };
+  const del = () => { const h = view.state.selection.head; view.dispatch(view.state.tr.delete(h, h + 1)); };
+  void (async () => {
+    const ed = await import("@prime/editor");
+    const { writeDocx, readDocx } = await import("@prime/docx");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Review")?.click();
+    await wait(150);
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Track Changes")?.click();
+    await wait(100);
+    out.on = ed.trackingOn(view.state);
+    let para = -1;
+    view.state.doc.forEach((n, pos) => { if (para < 0 && n.type.name === "paragraph" && n.textContent.length > 80 && !/[^\x20-\x7e’‘“”–—]/.test(n.textContent.slice(0, 40))) para = pos; });
+    const text = () => view.state.doc.nodeAt(para)!.textContent;
+    const original = text();
+    const list = () => ed.changes(view.state.doc).map((c) => `${c.kind}:${c.paragraph !== undefined ? "¶" : view.state.doc.textBetween(c.from, c.to)}`);
+    // Typing in the middle of a word boundary.
+    const space = original.indexOf(" ", 20);
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, para + 1 + space)));
+    type(" new");
+    out.typed = list();
+    out.author = ed.changes(view.state.doc)[0]?.author;
+    // Backspace on your own insertion removes it.
+    backspace();
+    out.afterOwnBackspace = list();
+    // Backspace into the original text: kept, marked deleted, the cursor moves before it.
+    const at = para + 1 + space;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+    backspace(); backspace();
+    out.deleted = list();
+    out.cursorMoved = at - view.state.selection.head;
+    out.textKept = text().startsWith(original.slice(0, space));
+    // Delete (forward) marks the next character, the cursor after it.
+    const fwd = para + 1 + original.indexOf(" ", space + 5) + 1;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, fwd)));
+    del();
+    out.forward = { changes: list().length, cursor: view.state.selection.head - fwd };
+    // Typing over a selected word: the word is deleted, the new text inserted after it.
+    const w = para + 1 + original.lastIndexOf(" ", 70) + 1;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, w, w + 4)));
+    type("ZZ");
+    out.replaced = list().slice(-2);
+    // Enter in the middle: the new paragraph mark is an insertion.
+    const mid = para + 1 + 10;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, mid)));
+    key("Enter");
+    out.enter = list().filter((c) => c.endsWith("¶"));
+    // Backspace at the start of a paragraph marks the paragraph mark before it deleted.
+    let other = -1;
+    view.state.doc.forEach((n, pos) => { if (other < 0 && pos > para + 200 && n.type.name === "paragraph" && n.textContent.length > 20 && view.state.doc.resolve(pos).index() > 0 && view.state.doc.child(view.state.doc.resolve(pos).index() - 1).type.name === "paragraph") other = pos; });
+    const blocks = view.state.doc.childCount;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, other + 1)));
+    key("Backspace");
+    out.joinKept = { blocks: view.state.doc.childCount === blocks, paragraphMarks: list().filter((c) => c === "del:¶").length };
+    // A table column resized: nothing recorded.
+    const before = list().length;
+    ed.insertTable(base, 2, 2)(view.state, view.dispatch);
+    const afterInsert = list().length;
+    let tpos = -1;
+    view.state.doc.forEach((n, pos) => { if (n.type.name === "table") tpos = pos; });
+    const grid = [...view.state.doc.nodeAt(tpos)!.attrs.grid] as number[];
+    if (grid.length > 1) { grid[0] += 20; grid[1] -= 20; }
+    ed.setColumnWidths(tpos, grid)(view.state, view.dispatch);
+    out.table = { insertRecorded: afterInsert > before, resizeRecorded: list().length - afterInsert, resized: (view.state.doc.nodeAt(tpos)!.attrs.grid as number[])[0] === grid[0] };
+    // Saved and read back (Word's own markup and setting).
+    const docx = writeDocx(fromProseMirror(view.state.doc, base()));
+    const back = readDocx(docx).doc;
+    const files = await import("fflate").then((f) => f.unzipSync(docx)).catch(() => null);
+    const dec = (n: string) => (files?.[n] ? new TextDecoder().decode(files[n]) : "");
+    const body = dec("word/document.xml");
+    const ids = [...body.matchAll(/<w:(?:ins|del) w:id="(\d+)"/g)].map((m) => m[1]);
+    out.saved = { trackRevisions: !!back.trackRevisions, setting: /<w:trackRevisions\/>/.test(dec("word/settings.xml")), ins: (body.match(/<w:ins /g) ?? []).length, del: (body.match(/<w:del /g) ?? []).length, delText: (body.match(/<w:delText/g) ?? []).length, uniqueIds: new Set(ids).size === ids.length, paraMarkFirst: !/<w:rPr>(?:(?!<\/w:rPr>).)*?<w:(?:rFonts|sz|b)\b[^>]*\/>(?:(?!<\/w:rPr>).)*?<w:(?:ins|del) /.test(body.replace(/<w:r>.*?<\/w:r>/g, "")) };
+    // Accept All: the edits stay, the marks go; not itself recorded.
+    ed.acceptOrReject(true, true)(view.state, view.dispatch);
+    out.accepted = { left: list().length, typedKept: view.state.doc.textContent.includes("ZZ") };
+    // Off: typing is not recorded.
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Track Changes")?.click();
+    type("q");
+    out.off = { on: ed.trackingOn(view.state), recorded: list().length };
     console.log("[selftest] align", JSON.stringify(out));
   })();
 }

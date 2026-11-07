@@ -16,7 +16,7 @@ export function toProseMirror(doc: PrimeDocument, schema: Schema): Node {
   });
   if (!blocks.length) blocks.push(schema.nodes.paragraph.create());
   const last = doc.sections[doc.sections.length - 1];
-  return schema.nodes.doc.create({ section: last ? sectionAttrs(last) : null, notes: doc.notes ?? null, background: doc.background ?? null, hyphenation: doc.hyphenation ?? null }, blocks);
+  return schema.nodes.doc.create({ section: last ? sectionAttrs(last) : null, notes: doc.notes ?? null, background: doc.background ?? null, hyphenation: doc.hyphenation ?? null, trackRevisions: !!doc.trackRevisions }, blocks);
 }
 
 const sectionAttrs = (s: Section) => ({ props: s.props, headers: s.headers, footers: s.footers });
@@ -105,9 +105,9 @@ export function fromProseMirror(pm: Node, base: PrimeDocument): PrimeDocument {
   const notes = pm.attrs.notes as PrimeDocument["notes"] | null;
   const background = pm.attrs.background as PrimeDocument["background"] | null;
   const hyphenation = pm.attrs.hyphenation as PrimeDocument["hyphenation"] | null;
-  const { background: _bg, hyphenation: _hy, ...rest } = base;
+  const { background: _bg, hyphenation: _hy, trackRevisions: _tr, ...rest } = base;
   const styles = pm.attrs.styles as PrimeDocument["styles"] | null;
-  return { ...rest, ...(styles ? { styles } : {}), sections, ...(notes ? { notes } : {}), ...(background ? { background } : {}), ...(hyphenation ? { hyphenation } : {}) };
+  return { ...rest, ...(styles ? { styles } : {}), sections, ...(notes ? { notes } : {}), ...(background ? { background } : {}), ...(hyphenation ? { hyphenation } : {}), ...(pm.attrs.trackRevisions ? { trackRevisions: true } : {}) };
 }
 
 /**

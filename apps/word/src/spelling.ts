@@ -90,6 +90,8 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
     // Text not to check: links and fields (addresses, references), and web/e-mail addresses typed as text.
     const skip: boolean[] = [...cap].map(() => false);
     node.forEach((child, offset) => {
+      // Tracked deletions are not checked, and the text either side joins (as in Word).
+      if (child.marks.some((m) => m.type.name === "revision" && m.attrs.kind === "del")) return;
       const s = child.isText ? child.text! : " ";
       const linked = child.marks.some((m) => m.type.name === "link" || m.type.name === "field");
       for (let i = 0; i < s.length; i++) { at.push(pos + 1 + offset + i); skip.push(linked); }

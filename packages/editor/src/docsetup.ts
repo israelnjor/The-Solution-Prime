@@ -356,7 +356,13 @@ export function setColumns(spec: ColumnsSpec): Command {
       const blockTo = $to.depth ? $to.after(1) : to;
       const hasBefore = blockFrom > start;
       const hasAfter = blockTo < end;
-      const s = own.attrs;
+      const own0 = own.attrs;
+      // Columns for a selection in a section that already has columns: the text around goes back to one
+      // column (else the selection seemed to change nothing, the whole section still in columns). Taking
+      // a selection out of columns (One) keeps the columns around it.
+      const s: SectionAttrs = count > 1 || (spec.widths?.length ?? 0) > 1
+        ? { ...own0, props: { ...own0.props, extra: (own0.props.extra ?? []).filter((x) => x.name !== "w:cols") } }
+        : own0;
       // The selected part: the new columns; it starts on the same page (continuous) unless it starts the section.
       const middle: SectionProps = { ...withColumns(s.props), ...(hasBefore ? { breakType: "continuous" } : {}) };
       if (!hasBefore && s.props.breakType === undefined) delete middle.breakType;

@@ -90,7 +90,8 @@ export function acceptOrReject(accept: boolean, all = false): Command {
     if (dispatch) {
       const tr = state.tr;
       for (const c of list) resolve(tr, c, accept);
-      dispatch(tr.scrollIntoView());
+      // Never recorded as a change itself (pw-notrack: trackchanges.ts).
+      dispatch(tr.setMeta("pw-notrack", true).scrollIntoView());
     }
     return true;
   };

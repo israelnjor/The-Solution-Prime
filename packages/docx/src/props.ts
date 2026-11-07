@@ -52,7 +52,10 @@ export function readRunProps(rPr: Element | undefined): RunProps | undefined {
   return p;
 }
 
-export function writeRunProps(p: RunProps | undefined): string {
+/** A paragraph mark's run properties: as a run's, but its tracked change (w:ins, w:del, moves) comes first (CT_ParaRPr). */
+const PARA_RPR_ORDER = ["w:ins", "w:del", "w:moveFrom", "w:moveTo", ...RPR_ORDER.filter((n) => !["w:ins", "w:del", "w:moveFrom", "w:moveTo"].includes(n))];
+
+export function writeRunProps(p: RunProps | undefined, order: readonly string[] = RPR_ORDER): string {
   if (!p) return "";
   const items: Item[] = [];
   if (p.style !== undefined) items.push(valXml("w:rStyle", p.style));
@@ -69,7 +72,7 @@ export function writeRunProps(p: RunProps | undefined): string {
   if (p.vertAlign !== undefined) items.push(valXml("w:vertAlign", p.vertAlign));
   if (p.charSpacing !== undefined) items.push(valXml("w:spacing", String(Math.round(p.charSpacing * 20))));
   items.push(...extraItems(p.extra));
-  return wrap("w:rPr", RPR_ORDER, items);
+  return wrap("w:rPr", order, items);
 }
 
 // --- paragraph properties ------------------------------------------------------------------
@@ -155,7 +158,7 @@ export function writeParagraphProps(p: ParagraphProps | undefined, sectPrXml = "
     if (p.indent) items.push(["w:ind", writeIndent(p.indent)]);
     if (p.align !== undefined) items.push(valXml("w:jc", p.align));
     if (p.outlineLevel !== undefined) items.push(valXml("w:outlineLvl", String(p.outlineLevel)));
-    if (p.markRun) items.push(["w:rPr", writeRunProps(p.markRun) || "<w:rPr/>"]);
+    if (p.markRun) items.push(["w:rPr", writeRunProps(p.markRun, PARA_RPR_ORDER) || "<w:rPr/>"]);
     items.push(...extraItems(p.extra));
   }
   if (sectPrXml) items.push(["w:sectPr", sectPrXml]);

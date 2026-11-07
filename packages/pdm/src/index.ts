@@ -467,6 +467,8 @@ export interface PrimeDocument {
   background?: Preserved;
   /** Automatic hyphenation (Word's settings; absent: off). */
   hyphenation?: Hyphenation;
+  /** Track changes is on: edits are recorded as revisions (Word's w:trackRevisions setting; absent: off). */
+  trackRevisions?: boolean;
   package: PackageInfo;
 }
 

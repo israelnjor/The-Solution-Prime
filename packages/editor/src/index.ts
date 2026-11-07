@@ -46,3 +46,4 @@ export {
   applyColors, applyFontPair, applyStyleSet, changedStyle, COLOR_SETS, createStyle, FONT_PAIRS, modifyStyle, modifyStyles, STYLE_SETS, type StyleChange, stylesOf,
 } from "./styleedit.js";
 export { type DropCapKind, dropCapOf, setDropCap } from "./dropcap.js";
+export { NO_TRACK, setTracking, trackingOn, trackTransaction } from "./trackchanges.js";

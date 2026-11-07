@@ -64,6 +64,8 @@ class Writer {
   private defaults: Record<string, string>;
   private used = new Set<string>();
   private drawingId = 0;
+  /** Ids for tracked changes recorded in Prime Word (Word's own keep theirs). */
+  private revisionId = 900000;
 
   /**
    * The settings part with what the model owns there: the page colour shown (w:displayBackgroundShape)
@@ -76,7 +78,7 @@ class Writer {
     const name = rel ? rel.target : "word/settings.xml";
     const part = pkg.parts.find((p) => p.name === name);
     const hy = this.doc.hyphenation;
-    if (!part && !this.doc.background && !hy?.auto) return;
+    if (!part && !this.doc.background && !hy?.auto && !this.doc.trackRevisions) return;
     let xml = part ? new TextDecoder().decode(fromBase64(part.data)) : `${XML_DECL}<w:settings xmlns:w="${NS.w}"></w:settings>`;
     const element = (tag: string) => new RegExp(`<${tag}(?=[\s/>])[^>]*?(?:/>|>[\s\S]*?</${tag}>)`);
     // Settings come in schema order: a new one goes after the last of those that precede it.
@@ -102,6 +104,7 @@ class Writer {
       }
     };
     if (this.doc.background && !element("w:displayBackgroundShape").test(xml)) set("w:displayBackgroundShape", "<w:displayBackgroundShape/>");
+    set("w:trackRevisions", this.doc.trackRevisions ? "<w:trackRevisions/>" : undefined);
     set("w:autoHyphenation", hy?.auto ? "<w:autoHyphenation/>" : undefined);
     set("w:consecutiveHyphenLimit", hy?.auto && hy.consecutiveLimit ? `<w:consecutiveHyphenLimit w:val="${hy.consecutiveLimit}"/>` : undefined);
     set("w:hyphenationZone", hy?.auto && hy.zone !== undefined ? `<w:hyphenationZone w:val="${Math.round(hy.zone * 20)}"/>` : undefined);
@@ -320,7 +323,7 @@ class Writer {
       case "contentControl":
         return this.contentControl(i.settings, this.inlines(i.content, rels, deleted));
       case "revision":
-        return `<w:${i.kind}${attrString(i.attrs, "")}>${this.inlines(i.content, rels, deleted || i.kind === "del")}</w:${i.kind}>`;
+        return `<w:${i.kind}${attrString(i.attrs["w:id"] !== undefined ? i.attrs : { "w:id": String(this.revisionId++), ...i.attrs }, "")}>${this.inlines(i.content, rels, deleted || i.kind === "del")}</w:${i.kind}>`;
       case "link": {
         let a = "";
         if (i.href !== undefined) a += ` r:id="${rels.add(RelType.hyperlink, i.href, true)}"`;

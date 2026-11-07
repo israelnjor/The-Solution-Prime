@@ -7,7 +7,7 @@ import {
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
   insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
-  toggleSuppressLineNumbers, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  toggleSuppressLineNumbers, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
@@ -649,6 +649,10 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </div>
             <div className="group" aria-label="Proofing">
               <button onClick={onAutoCorrect} title="Choose what is corrected as you type, and add your own replacements">AutoCorrect…</button>
+            </div>
+            <div className="group" aria-label="Tracking">
+              <button className={state && trackingOn(state) ? "on" : ""} aria-pressed={!!(state && trackingOn(state))} onClick={() => state && run(setTracking(!trackingOn(state)))()}
+                title="Track Changes: record insertions and deletions as changes others can accept or reject (Ctrl+Shift+E)">Track Changes</button>
             </div>
             <div className="group" aria-label="Tracked changes">
               <button onClick={run(gotoChange(-1))} title="Previous change">◀ Previous</button>

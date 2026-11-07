@@ -1,6 +1,6 @@
 import { readDocx, writeDocx } from "@prime/docx";
 import {
-  blankDocument, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
+  blankDocument, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -42,7 +42,7 @@ import { PasteOptions } from "./PasteOptions";
 import { Ruler } from "./Ruler";
 import { SymbolDialog } from "./SymbolDialog";
 import { CaptionDialog, CrossRefDialog } from "./ReferencesDialogs";
-import { CommentsPane } from "./CommentsPane";
+import { authorName, CommentsPane } from "./CommentsPane";
 import { Home } from "./Home";
 import type { ConversionResult } from "@prime/pdf-import";
 import { PdfConverter } from "./PdfConverter";
@@ -248,6 +248,7 @@ export function App() {
           "Mod-p": command(() => window.dispatchEvent(new Event(PRINT_EVENT))),
           "Mod-Enter": insertPageBreak,
           "Mod-Shift-Enter": insertColumnBreak,
+          "Mod-Shift-e": (st, d) => setTracking(!trackingOn(st))(st, d),
           // Word's "move paragraph up / down".
           "Alt-Shift-ArrowUp": moveBlock(-1), "Alt-Shift-ArrowDown": moveBlock(1),
           // Tab moves between table cells, or changes a list item's level.
@@ -297,6 +298,9 @@ export function App() {
       // For screen readers: the document is one multi-line text field.
       attributes: { spellcheck: "false", role: "textbox", "aria-multiline": "true", "aria-label": "Document" },
       dispatchTransaction(tr) {
+        // Track changes on: the edit is recorded (deleted text kept and marked, insertions marked). Not
+        // while composing (an input method edits the text in place).
+        if (!v.composing) tr = trackTransaction(v.state, tr, authorName().trim() || "Prime Word user");
         v.updateState(v.state.apply(tr));
         if (tr.docChanged) {
           setDirty(true);
@@ -623,7 +627,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -650,6 +654,7 @@ export function App() {
       if (test === "citations") citationsSelfTest(v);
       if (test === "equation") equationSelfTest(v);
       if (test === "tables") tablesSelfTest(v);
+      if (test === "track") trackChangesSelfTest(v, () => fileRef.current.base);
       if (test === "columns" && measurerRef.current) columnsSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "dropcap" && measurerRef.current) dropCapSelfTest(v, () => fileRef.current.base, measurerRef.current);
       if (test === "stylesets" && measurerRef.current) styleSetsSelfTest(v, () => fileRef.current.base, measurerRef.current);
