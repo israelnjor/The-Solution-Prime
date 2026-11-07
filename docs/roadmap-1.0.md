@@ -79,8 +79,11 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    Harvard, IEEE); equation editor.
 3. **Tables complete** ✅ (2026-11-04) — merge/split, borders and shading, table styles, cell alignment, column
    resizing, header rows, sort, text↔table, autofit.
-4. **Layout and design** — section and column breaks, columns, page borders, watermark, page colour,
-   line numbers, hyphenation, create/modify styles, themes and style sets (basic), drop cap.
+4. **Layout and design** (in progress) — done (2026-11-07): section breaks (next page, continuous,
+   even/odd page) and column breaks; sections with their own page size and orientation on screen
+   (landscape pages in a portrait document); page colour, page borders and watermark (Design tab), as
+   Word writes them — checked against Word (same pages; Word shows them as its own). Still to do:
+   columns, line numbers, hyphenation, create/modify styles, themes and style sets (basic), drop cap.
 5. **Review, view and files** — record tracked changes, compare documents, navigation pane, read
    mode, outline view, multiple pages, print dialog, document properties, password protection,
    .doc/.rtf/.odt/.txt open and save, thesaurus, read aloud, grammar (basic).

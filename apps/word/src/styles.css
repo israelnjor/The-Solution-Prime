@@ -128,6 +128,7 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .pw-mask-page { background: #fff; margin: 0 40px; }
 .pw-mask-gap { background: var(--canvas); }
 .pw-chrome { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.pw-chrome-page { position: absolute; top: 0; }
 .pw-chrome-text { position: absolute; white-space: pre; color: #000; opacity: 0.75; pointer-events: none; }
 .pw-chrome-image { position: absolute; opacity: 0.85; pointer-events: none; }
 .pw-notice {
@@ -548,3 +549,11 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 /* Lines as tall as Word makes them (see paragraphStyles): the paragraph's line height is its common
    text's; runs add no height of their own, except taller runs (pw-tall), which grow their line. */
 .pw-editor p :is(span, a):not(.pw-page-gap):not(.pw-math):not(.pw-chip):not(.pw-tall) { line-height: 0; }
+
+/* A section's text-column offsets (--pw-sx / --pw-sr, Print Layout) place top-level blocks only:
+   paragraphs inside table cells are placed by their cell. */
+.pw-editor :is(td, th) { --pw-sx: 0pt; --pw-sr: 0pt; }
+
+/* Design tab: watermark (behind the text, on its sheet) and page borders (over the page). */
+.pw-watermark { position: absolute; white-space: pre; line-height: 1; pointer-events: none; user-select: none; }
+.pw-page-borders { position: absolute; left: 0; overflow: visible; pointer-events: none; }

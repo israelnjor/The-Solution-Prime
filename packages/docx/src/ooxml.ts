@@ -12,6 +12,7 @@ export const RelType = {
   hyperlink: `${REL}/hyperlink`,
   footnotes: `${REL}/footnotes`,
   endnotes: `${REL}/endnotes`,
+  settings: `${REL}/settings`,
 } as const;
 
 /** Relationship types whose targets the reader turns into model content (the writer regenerates them). */
@@ -25,6 +26,7 @@ export const ContentType = {
   footer: "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml",
   footnotes: "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
   endnotes: "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml",
+  settings: "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml",
   rels: "application/vnd.openxmlformats-package.relationships+xml",
   xml: "application/xml",
 } as const;

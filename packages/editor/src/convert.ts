@@ -16,7 +16,7 @@ export function toProseMirror(doc: PrimeDocument, schema: Schema): Node {
   });
   if (!blocks.length) blocks.push(schema.nodes.paragraph.create());
   const last = doc.sections[doc.sections.length - 1];
-  return schema.nodes.doc.create({ section: last ? sectionAttrs(last) : null, notes: doc.notes ?? null }, blocks);
+  return schema.nodes.doc.create({ section: last ? sectionAttrs(last) : null, notes: doc.notes ?? null, background: doc.background ?? null }, blocks);
 }
 
 const sectionAttrs = (s: Section) => ({ props: s.props, headers: s.headers, footers: s.footers });
@@ -103,7 +103,9 @@ export function fromProseMirror(pm: Node, base: PrimeDocument): PrimeDocument {
   const last = pm.attrs.section ?? { props: {}, headers: {}, footers: {} };
   sections.push({ props: last.props, headers: last.headers, footers: last.footers, blocks });
   const notes = pm.attrs.notes as PrimeDocument["notes"] | null;
-  return { ...base, sections, ...(notes ? { notes } : {}) };
+  const background = pm.attrs.background as PrimeDocument["background"] | null;
+  const { background: _old, ...rest } = base;
+  return { ...rest, sections, ...(notes ? { notes } : {}), ...(background ? { background } : {}) };
 }
 
 /**

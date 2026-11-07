@@ -3,8 +3,8 @@
  * print and preview — the PDF shows exactly the pages the layout engine computed.
  */
 import fontkit from "@pdf-lib/fontkit";
-import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, rgb, setCharacterSpacing } from "pdf-lib";
-import type { FontKey, ImageSource, LayoutResult, Page, Segment } from "@prime/layout";
+import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, degrees, rgb, setCharacterSpacing } from "pdf-lib";
+import type { FontKey, ImageSource, LayoutResult, Page, PageBorderLine, Segment, Watermark } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 
 /** Supplies font files for embedding, and splits text into runs per drawing font (glyph fallback). */
@@ -75,6 +75,9 @@ class Renderer {
   async page(p: Page) {
     const out = this.pdf.addPage([p.width, p.height]);
     const Y = (y: number) => p.height - y;
+    // Page colour and watermark behind the text (Word's own PDFs include both).
+    if (p.decor?.background) out.drawRectangle({ x: 0, y: 0, width: p.width, height: p.height, color: color(p.decor.background) });
+    if (p.decor?.watermark) await this.watermark(out, p, p.decor.watermark);
     for (const r of p.rects) {
       if (r.fill) out.drawRectangle({ x: r.x, y: Y(r.y + r.height), width: r.width, height: r.height, color: color(r.fill) });
       if (r.sides) {
@@ -105,6 +108,44 @@ class Renderer {
       for (const r of line.rules) {
         out.drawLine({ start: { x: r.x1, y: Y(r.y1) }, end: { x: r.x2, y: Y(r.y2) }, thickness: r.width, color: rgb(0, 0, 0) });
       }
+    }
+    if (p.decor?.borders) this.borders(out, p, p.decor.borders);
+  }
+
+  /** Text across the page, rotated about its centre, semi-transparent. */
+  private async watermark(out: PDFPage, p: Page, w: Watermark) {
+    const font = await this.font(w.font);
+    let width: number;
+    try { width = font.widthOfTextAtSize(w.text, w.size); } catch { return; }
+    // PDF angles run anticlockwise with y up; Word's rotation is clockwise with y down.
+    const angle = ((360 - w.rotation) % 360) * (Math.PI / 180);
+    const [a, b] = [width / 2, w.size * 0.35]; // from the text's origin (baseline start) to its centre
+    const x = w.x - (a * Math.cos(angle) - b * Math.sin(angle));
+    const y = p.height - w.y - (a * Math.sin(angle) + b * Math.cos(angle));
+    try {
+      out.drawText(w.text, { x, y, size: w.size, font, color: color(w.color), opacity: w.opacity, rotate: degrees((360 - w.rotation) % 360) });
+    } catch {
+      // A character the font cannot encode: no watermark rather than a failed export.
+    }
+  }
+
+  /** Page borders: each side's line, dashed, dotted or doubled as set. */
+  private borders(out: PDFPage, p: Page, lines: PageBorderLine[]) {
+    const Y = (y: number) => p.height - y;
+    for (const l of lines) {
+      const dash = l.style === "dotted" ? [l.width, l.width * 2] : l.style.startsWith("dash") ? [l.width * 4, l.width * 3] : undefined;
+      const thickness = l.style === "double" ? l.width / 3 : l.width;
+      const draw = (dx: number, dy: number) => out.drawLine({
+        start: { x: l.x1 + dx, y: Y(l.y1 + dy) }, end: { x: l.x2 + dx, y: Y(l.y2 + dy) }, thickness, color: color(l.color),
+        ...(dash ? { dashArray: dash } : {}),
+      });
+      if (l.style === "double") {
+        // Two lines, each a third of the border's width, a third apart (Word's w:sz is the whole width).
+        const vertical = l.x1 === l.x2;
+        const d = l.width / 3;
+        draw(vertical ? -d : 0, vertical ? 0 : -d);
+        draw(vertical ? d : 0, vertical ? 0 : d);
+      } else draw(0, 0);
     }
   }
 

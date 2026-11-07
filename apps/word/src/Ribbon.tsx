@@ -6,6 +6,8 @@ import {
   changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign, type CitationStyle, insertCitation, readSources,
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
+  insertColumnBreak, insertSectionBreak, type SectionStart,
+  pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
 import { Resolver } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
@@ -25,9 +27,9 @@ export const LINK_EVENT = "prime-word:link";
 const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
   ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
-type Tab = "file" | "home" | "insert" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture";
+type Tab = "file" | "home" | "insert" | "design" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture";
 /** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+S, Alt+R, Alt+W. */
-const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", layout: "P", references: "S", review: "R", view: "W" };
+const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", design: "G", layout: "P", references: "S", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
 
 const CM = 72 / 2.54;
@@ -138,7 +140,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const [popover, setPopover] = useState<"link" | "table" | "margins" | null>(null);
+  const [popover, setPopover] = useState<"link" | "table" | "margins" | "watermark" | null>(null);
+  const [mark, setMark] = useState<Required<Omit<WatermarkSpec, "font">>>({ text: "DRAFT", color: "C0C0C0", layout: "diagonal", semitransparent: true });
   /** The pen for table borders (Table Design): width in pt and colour. */
   const [pen, setPen] = useState({ width: 0.5, color: "000000" });
   const [shade, setShade] = useState("D9E2F3");
@@ -188,7 +191,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     <header className="ribbon">
       <nav className="tabs" role="tablist" aria-label="Ribbon tabs">
         <button className="brand" onClick={onHome} title="Home: new, open, recent documents">Prime Word</button>
-        {([["file", "File"], ["home", "Home"], ["insert", "Insert"], ["layout", "Layout"], ["references", "References"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
+        {([["file", "File"], ["home", "Home"], ["insert", "Insert"], ["design", "Design"], ["layout", "Layout"], ["references", "References"], ["review", "Review"], ["view", "View"]] as const).map(([t, label]) => (
           <button key={t} role="tab" aria-selected={activeTab === t} className={activeTab === t ? "on" : ""} onClick={() => setTab(t)}
             title={`${label} (Alt+${TAB_KEYS[t]})`}>{label}</button>
         ))}
@@ -356,6 +359,70 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         )}
 
 
+        {activeTab === "design" && state && (() => {
+          const color = pageColorOf(state);
+          const border = pageBordersOf(state);
+          const current = watermarkOf(state);
+          const borderChoice = !border ? "none" : border.style === "single" && border.width >= 2 ? "thick" : border.style;
+          const borderOf = (choice: string, hex?: string) => (choice === "none" ? undefined : {
+            style: choice === "thick" ? "single" : choice, width: choice === "thick" ? 3 : choice === "double" ? 0.75 : 0.5,
+            ...(hex ? { color: hex } : border?.color ? { color: border.color } : {}),
+          });
+          return (
+            <>
+              <div className="group" aria-label="Watermark">
+                <select value="" aria-label="Watermark" title="Text across every page, behind the text" onChange={(e) => {
+                  const v2 = e.target.value;
+                  if (v2 === "remove") run(setWatermark(undefined))();
+                  else if (v2 === "custom") {
+                    setMark({ text: current?.text ?? "DRAFT", color: current?.color ?? "C0C0C0", layout: current?.layout ?? "diagonal", semitransparent: current?.semitransparent ?? true });
+                    setPopover("watermark");
+                  } else if (v2) run(setWatermark({ text: v2 }))();
+                }}>
+                  <option value="">{current ? `Watermark: ${current.text}` : "Watermark"}</option>
+                  {["CONFIDENTIAL", "DO NOT COPY", "DRAFT", "SAMPLE", "URGENT", "ASAP"].map((t) => <option key={t} value={t}>{t}</option>)}
+                  <option value="custom">Custom Watermark…</option>
+                  {current && <option value="remove">Remove Watermark</option>}
+                </select>
+                {popover === "watermark" && (
+                  <span className="popover-anchor">
+                    <form className="popover" onSubmit={(e) => {
+                      e.preventDefault();
+                      if (mark.text.trim()) run(setWatermark({ ...mark, text: mark.text.trim() }))();
+                      setPopover(null);
+                    }}>
+                      <label>Text <input value={mark.text} onChange={(e) => setMark((m) => ({ ...m, text: e.target.value }))} autoFocus /></label>
+                      <label>Colour <input type="color" value={`#${mark.color}`} onChange={(e) => setMark((m) => ({ ...m, color: e.target.value.slice(1).toUpperCase() }))} /></label>
+                      <label>Layout <select value={mark.layout} onChange={(e) => setMark((m) => ({ ...m, layout: e.target.value as "diagonal" | "horizontal" }))}>
+                        <option value="diagonal">Diagonal</option><option value="horizontal">Horizontal</option>
+                      </select></label>
+                      <label className="choice"><input type="checkbox" checked={mark.semitransparent} onChange={(e) => setMark((m) => ({ ...m, semitransparent: e.target.checked }))} /> Semitransparent</label>
+                      <button className="primary" type="submit">Apply</button>
+                    </form>
+                  </span>
+                )}
+              </div>
+              <div className="group" aria-label="Page Color">
+                <label className="field">Page Color <input type="color" value={`#${color ?? "FFFFFF"}`} aria-label="Page Color"
+                  onChange={(e) => run(setPageColor(e.target.value))()} /></label>
+                <button onClick={run(setPageColor(undefined))} disabled={!color} title="White pages">No Color</button>
+              </div>
+              <div className="group" aria-label="Page Borders">
+                <select value={borderChoice} aria-label="Page Borders" title="A box round every page" onChange={(e) => run(setPageBorders(borderOf(e.target.value)))()}>
+                  <option value="none">No page border</option>
+                  <option value="single">Box: single line</option>
+                  <option value="double">Box: double line</option>
+                  <option value="thick">Box: thick line</option>
+                  <option value="dotted">Box: dotted</option>
+                  <option value="dashed">Box: dashed</option>
+                </select>
+                <input type="color" value={`#${border?.color ?? "000000"}`} aria-label="Page border colour" title="Border colour" disabled={!border}
+                  onChange={(e) => run(setPageBorders(borderOf(borderChoice, e.target.value.slice(1).toUpperCase())))()} />
+              </div>
+            </>
+          );
+        })()}
+
         {activeTab === "layout" && state && (() => {
           const setup = pageSetup(state);
           const m = setup.margins!;
@@ -399,6 +466,26 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <div className="group">
                 <button className={!landscape ? "on" : ""} onClick={run(setPageSetup({ orientation: "portrait" }))}>Portrait</button>
                 <button className={landscape ? "on" : ""} onClick={run(setPageSetup({ orientation: "landscape" }))}>Landscape</button>
+              </div>
+              <div className="group" aria-label="Breaks">
+                <select value="" title="Breaks" aria-label="Breaks" onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "page") run(insertPageBreak)();
+                  else if (v === "column") run(insertColumnBreak)();
+                  else if (v) run(insertSectionBreak(v as SectionStart))();
+                }}>
+                  <option value="">Breaks</option>
+                  <optgroup label="Page breaks">
+                    <option value="page">Page (Ctrl+Enter)</option>
+                    <option value="column">Column (Ctrl+Shift+Enter)</option>
+                  </optgroup>
+                  <optgroup label="Section breaks">
+                    <option value="nextPage">Next page</option>
+                    <option value="continuous">Continuous</option>
+                    <option value="evenPage">Even page</option>
+                    <option value="oddPage">Odd page</option>
+                  </optgroup>
+                </select>
               </div>
               <div className="group">
                 <label className="field">Size

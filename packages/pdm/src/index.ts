@@ -463,6 +463,8 @@ export interface PrimeDocument {
   images: Record<string, ImageResource>;
   /** Footnotes and endnotes (absent: none). */
   notes?: { footnote?: Notes; endnote?: Notes };
+  /** Page colour (the document's w:background), kept as Word wrote it (absent: none). */
+  background?: Preserved;
   package: PackageInfo;
 }
 

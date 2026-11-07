@@ -146,7 +146,10 @@ class Reader {
       images: this.images,
       package: { mainPart: main, parts: [], preservedRels: [], contentTypes: this.contentTypes, rootAttrs },
     };
-    for (const e of elements(root)) if (qname(e) !== "w:body") this.warn(`Document-level ${qname(e)} is not supported and was dropped.`);
+    for (const e of elements(root)) {
+      if (qname(e) === "w:background") doc.background = ctx.keep(e); // page colour
+      else if (qname(e) !== "w:body") this.warn(`Document-level ${qname(e)} is not supported and was dropped.`);
+    }
     const footnotes = relOf(RelType.footnotes);
     const endnotes = relOf(RelType.endnotes);
     if (footnotes || endnotes) {
@@ -345,8 +348,11 @@ class Reader {
   }
 
   runPreserved(e: Element, ctx: StoryContext, label = qname(e), shown = false): Extract<Inline, { type: "runPreserved" }> {
-    if (!shown && !["w:sym", "w:noBreakHyphen", "w:softHyphen"].includes(label)) this.notePreserved(label);
-    return { type: "runPreserved", preserved: ctx.keep(e) };
+    const preserved = ctx.keep(e);
+    // Word's watermark (a WordArt shape in a header) is shown and edited from the Design tab.
+    const watermark = /PowerPlusWaterMarkObject/.test(preserved.xml);
+    if (!shown && !watermark && !["w:sym", "w:noBreakHyphen", "w:softHyphen"].includes(label)) this.notePreserved(label);
+    return { type: "runPreserved", preserved };
   }
 
   /**

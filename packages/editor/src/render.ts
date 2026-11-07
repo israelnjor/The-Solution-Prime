@@ -106,9 +106,13 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
     table: (node) => {
       const grid: number[] = node.attrs.grid;
       const props = node.attrs.props;
-      const align = props.align === "center" ? "margin-left:auto;margin-right:auto" : props.align === "right" ? "margin-left:auto" : "";
+      const width = pt(grid.reduce((a, b) => a + b, 0));
+      // In its section's text column: --pw-sx / --pw-sr move it there in Print Layout (paged.ts).
+      const sx = "var(--pw-sx, 0pt)";
+      const column = `(100% - ${sx} - var(--pw-sr, 0pt))`;
+      const left = props.align === "center" ? `calc(${sx} + (${column} - ${width}) / 2)` : props.align === "right" ? `calc(${sx} + ${column} - ${width})` : sx;
       return ["table", {
-        class: "pw-table", style: `width:${pt(grid.reduce((a, b) => a + b, 0))};${align}`,
+        class: "pw-table", style: `width:${width};margin-left:${left}`,
         "data-pw-props": json(props), "data-pw-grid": json(grid),
       },
         ["colgroup", ...grid.map((w) => ["col", { style: `width:${pt(w)}` }])], ["tbody", 0]];
@@ -460,7 +464,8 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
           }
           const css = [
             runCss(run),
-            `margin:${pt(joinBefore ? 0 : rp.spaceBefore)} ${pt(rp.right)} ${pt(joinAfter ? 0 : rp.spaceAfter)} ${pt(rp.left)}`,
+            // Plus the section's own text column in Print Layout (--pw-sx / --pw-sr, see paged.ts).
+            `margin:${pt(joinBefore ? 0 : rp.spaceBefore)} calc(${pt(rp.right)} + var(--pw-sr, 0pt)) ${pt(joinAfter ? 0 : rp.spaceAfter)} calc(${pt(rp.left)} + var(--pw-sx, 0pt))`,
             `text-indent:${pt(rp.firstLine)}`,
             `text-align:${rp.align === "both" || rp.align === "distribute" ? "justify" : rp.align === "end" ? "right" : rp.align === "start" ? "left" : rp.align}`,
             `line-height:${pt(lineHeight)}`,

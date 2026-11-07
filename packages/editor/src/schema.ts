@@ -42,7 +42,8 @@ export function createSchema(render?: Render): Schema {
         content: "block+",
         // The last section's properties, headers and footers (earlier sections end in section_break nodes);
         // the footnotes' and endnotes' text (PrimeDocument.notes), so editing a note can be undone.
-        attrs: { section: { default: null }, notes: { default: null } },
+        // The page colour (PrimeDocument.background), so changing it can be undone.
+        attrs: { section: { default: null }, notes: { default: null }, background: { default: null } },
       },
       paragraph: {
         group: "block",

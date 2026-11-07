@@ -1235,3 +1235,124 @@ export function driftSelfTest(view: EditorView, base: () => import("@prime/pdm")
     console.log("[selftest] align", JSON.stringify({ done: true }));
   })();
 }
+
+/**
+ * Section and column breaks (Wave 4): inserted from Layout → Breaks; checks the sections, how each
+ * starts, the pages they produce (an odd-page section starts on an odd page, a blank page between when
+ * needed) and that a saved file keeps them.
+ */
+export function sectionsSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (el: HTMLSelectElement | null | undefined, value: string) => {
+    if (!el) return;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { TextSelection } = await import("prosemirror-state");
+    const { writeDocx, readDocx } = await import("@prime/docx");
+    await wait(1500);
+    // The n-th top-level paragraph with text.
+    const para = (n: number) => { let k = 0; let at = -1; view.state.doc.forEach((node, pos) => { if (at < 0 && node.type.name === "paragraph" && node.textContent.length > 20 && k++ === n) at = pos; }); return at; };
+    const breaks = () => document.querySelector<HTMLSelectElement>('select[aria-label="Breaks"]');
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Layout")?.click();
+    await wait(150);
+    out.menu = breaks() ? [...breaks()!.options].map((o) => o.value).filter(Boolean) : "missing";
+    const pagesBefore = layoutDocument(fromProseMirror(view.state.doc, base()), measurer).pages.length;
+    // A continuous break in the middle of a paragraph: it is split there.
+    const p1 = para(2);
+    const text1 = view.state.doc.nodeAt(p1)!.textContent;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, p1 + 1 + 10)));
+    choose(breaks(), "continuous"); await wait(150);
+    out.splitAt = [view.state.doc.nodeAt(p1)!.textContent, text1.slice(0, 10)];
+    // A continuous section starts no new page.
+    out.continuousAddsNoPage = layoutDocument(fromProseMirror(view.state.doc, base()), measurer).pages.length === pagesBefore;
+    // An odd-page section a few paragraphs later; a column break after it.
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, para(5) + 1)));
+    choose(breaks(), "oddPage"); await wait(150);
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, para(8) + 1 + 5)));
+    choose(breaks(), "column"); await wait(150);
+    const model = fromProseMirror(view.state.doc, base());
+    out.sections = model.sections.map((s) => s.props.breakType ?? "nextPage");
+    out.headersInherited = model.sections.slice(1).every((s) => !Object.keys(s.headers).length);
+    const layout = layoutDocument(model, measurer);
+    out.pages = [pagesBefore, layout.pages.length];
+    const firstOf = (si: number) => layout.pages.find((p) => p.section === si)?.number;
+    out.oddSectionStartsOn = firstOf(2);
+    // Saved and read again.
+    const again = readDocx(writeDocx(model)).doc;
+    out.saved = again.sections.map((s) => s.props.breakType ?? "nextPage");
+    out.columnBreakSaved = JSON.stringify(again.sections).includes('"kind":"column"');
+    // The last section landscape (Layout → Landscape applies to the section at the cursor).
+    const lastPara = para(10);
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, lastPara + 1)));
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Landscape")?.click();
+    await wait(3000); // laid out and fitted
+    const laidOut = layoutDocument(fromProseMirror(view.state.doc, base()), measurer);
+    out.pageSizes = [...new Set(laidOut.pages.map((p) => `s${p.section}:${Math.round(p.width)}x${Math.round(p.height)}`))];
+    // On screen: the landscape section's text starts at its own page's left margin.
+    const el = view.nodeDOM(lastPara) as HTMLElement;
+    el.scrollIntoView({ block: "center" });
+    await wait(600);
+    const page = laidOut.pages.find((p) => p.section === laidOut.pages.at(-1)!.section)!;
+    const sheet = document.querySelector<HTMLElement>(`.pw-sheet[data-page="${page.number}"]`);
+    const scale = sheet ? sheet.getBoundingClientRect().width / page.width : 0;
+    out.landscapeTextLeftPx = sheet ? Math.round((el.getBoundingClientRect().left - sheet.getBoundingClientRect().left - page.bodyLeft * scale) * 10) / 10 : "no sheet";
+    out.landscapeTextWidthPx = sheet ? Math.round((el.getBoundingClientRect().width - (page.bodyRight - page.bodyLeft) * scale) * 10) / 10 : "no sheet";
+    out.alignment = alignmentReport();
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/**
+ * Design tab (Wave 4): watermark, page colour and page borders from the ribbon; checks the document,
+ * the laid-out pages, the screen and a saved file.
+ */
+export function designSelfTest(view: EditorView, base: () => PrimeDocument, measurer: Measurer) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const choose = (el: HTMLSelectElement | HTMLInputElement | null | undefined, value: string, event = "change") => {
+    if (!el) return;
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event(event, { bubbles: true }));
+  };
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const { writeDocx, readDocx } = await import("@prime/docx");
+    const { watermarkShape } = await import("@prime/layout");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Design")?.click();
+    await wait(150);
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Watermark"]'), "CONFIDENTIAL"); await wait(150);
+    // A colour input reports "input" as the user drags and "change" at the end; React listens to both.
+    choose(document.querySelector<HTMLInputElement>('input[aria-label="Page Color"]'), "#fff8e1", "input"); await wait(150);
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Page Borders"]'), "double"); await wait(150);
+    choose(document.querySelector<HTMLInputElement>('input[aria-label="Page border colour"]'), "#1f4e79", "input"); await wait(150);
+    const model = fromProseMirror(view.state.doc, base());
+    out.background = model.background?.xml;
+    out.borders = model.sections.map((s) => s.props.extra?.find((x) => x.name === "w:pgBorders")?.xml.slice(0, 120));
+    out.watermarkInHeaders = model.sections.map((s) => Object.keys(s.headers).filter((k) => JSON.stringify(s.headers[k as "default"]).includes("PowerPlusWaterMarkObject")));
+    const layout = layoutDocument(model, measurer);
+    const decor = layout.pages[0].decor;
+    out.decor = { background: decor?.background, borders: decor?.borders?.length, borderStyle: decor?.borders?.[0]?.style, watermark: decor?.watermark && { text: decor.watermark.text, size: Math.round(decor.watermark.size), rotation: decor.watermark.rotation } };
+    out.everyPage = layout.pages.every((p) => p.decor?.watermark && p.decor.borders);
+    await wait(2500); // laid out on screen
+    out.screen = {
+      watermark: document.querySelector(".pw-watermark")?.textContent,
+      sheetColour: getComputedStyle(document.querySelector(".pw-sheet")!).backgroundColor,
+      borderLines: document.querySelector(".pw-page-borders")?.querySelectorAll("line").length,
+    };
+    const again = readDocx(writeDocx(model)).doc;
+    const runs = (again.sections[0].headers.default?.blocks ?? []).flatMap((b) => (b.type === "paragraph" ? b.content : []));
+    const shape = runs.map((i) => ("preserved" in i ? watermarkShape(i.preserved.xml) : undefined)).find(Boolean);
+    out.saved = { background: again.background?.xml, borders: !!again.sections[0].props.extra?.some((x) => x.name === "w:pgBorders"), watermark: shape?.text };
+    // Removing them again.
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Watermark"]'), "remove"); await wait(150);
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "No Color")?.click(); await wait(150);
+    choose(document.querySelector<HTMLSelectElement>('select[aria-label="Page Borders"]'), "none"); await wait(150);
+    const cleared = fromProseMirror(view.state.doc, base());
+    out.removed = !cleared.background && !JSON.stringify(cleared.sections).includes("PowerPlusWaterMarkObject") && !JSON.stringify(cleared.sections).includes("w:pgBorders");
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}

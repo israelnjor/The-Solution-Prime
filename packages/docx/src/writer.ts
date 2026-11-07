@@ -65,6 +65,31 @@ class Writer {
   private used = new Set<string>();
   private drawingId = 0;
 
+  /**
+   * Makes the document's settings show the page colour (w:displayBackgroundShape), adding a settings
+   * part when the document has none.
+   */
+  private showBackground(rels: Rels) {
+    const pkg = this.doc.package;
+    const rel = pkg.preservedRels.find((r) => r.type === RelType.settings && !r.external);
+    const name = rel ? rel.target : "word/settings.xml";
+    const part = pkg.parts.find((p) => p.name === name);
+    let xml = part ? new TextDecoder().decode(fromBase64(part.data)) : `${XML_DECL}<w:settings xmlns:w="${NS.w}"></w:settings>`;
+    if (!/<w:displayBackgroundShape\b/.test(xml)) {
+      // In schema order: after any of these, else first.
+      const before = ["w:writeProtection", "w:view", "w:zoom", "w:removePersonalInformation", "w:removeDateAndTime", "w:doNotDisplayPageBoundaries"];
+      let at = -1;
+      for (const tag of before) {
+        const m = new RegExp(`<${tag}(?=[\\s/>])[^>]*?(?:/>|>[\\s\\S]*?</${tag}>)`).exec(xml);
+        if (m) at = Math.max(at, m.index + m[0].length);
+      }
+      if (at < 0) { const open = /<w:settings\b[^>]*>/.exec(xml)!; at = open.index + open[0].length; }
+      xml = xml.slice(0, at) + "<w:displayBackgroundShape/>" + xml.slice(at);
+    }
+    this.put(name, encoder.encode(xml), pkg.contentTypes.overrides[name] ?? ContentType.settings);
+    if (!rel) rels.add(RelType.settings, name);
+  }
+
   constructor(private doc: PrimeDocument) {
     this.defaults = { ...doc.package.contentTypes.defaults };
   }
@@ -88,7 +113,10 @@ class Writer {
     const sections = this.doc.sections;
     const body = sections.map((s, i) => this.section(s, i === sections.length - 1, rels)).join("");
     const rootAttrs = { ...ROOT_NAMESPACES, ...pkg.rootAttrs };
-    this.put(main, encoder.encode(`${XML_DECL}<w:document${attrString(rootAttrs, "")}><w:body>${body}</w:body></w:document>`),
+    // The page colour comes before the body; Word shows it only with displayBackgroundShape set.
+    const background = this.doc.background?.xml ?? "";
+    if (background) this.showBackground(rels);
+    this.put(main, encoder.encode(`${XML_DECL}<w:document${attrString(rootAttrs, "")}>${background}<w:body>${body}</w:body></w:document>`),
       pkg.contentTypes.overrides[main] ?? ContentType.document);
     this.notes("footnote", body, rels);
     this.notes("endnote", body, rels);

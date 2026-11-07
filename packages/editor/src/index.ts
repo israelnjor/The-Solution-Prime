@@ -8,7 +8,7 @@ export {
   deleteFloat, floatAt, floatEditing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
   setPictureWrap, withBox, type FloatBox,
 } from "./floats.js";
-export { PAGE_GAP, pageAt, pagination, paginationKey, type PagedOptions, mark, timed } from "./paged.js";
+export { PAGE_GAP, pageAt, pageTops, pagination, paginationKey, type PagedOptions, mark, sectionOffsets, timed } from "./paged.js";
 export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
 export { changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, toggleList } from "./lists.js";
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";
@@ -17,7 +17,8 @@ export { findAll, findNext, findPlugin, findState, type FindQuery, replaceAll, r
 export { cssToRunProps, pastePlugin, toHex, toPt } from "./paste.js";
 export { storyFromProseMirror, storyToProseMirror } from "./convert.js";
 export {
-  insertField, insertFieldResult, ownStory, PAPER, pageSetup, type SectionAttrs, sectionInfo, setPageSetup, setStory, setTitlePage, storyAt,
+  insertColumnBreak, insertField, insertFieldResult, insertSectionBreak, ownStory, PAPER, pageSetup, type SectionAttrs, type SectionStart, sectionInfo,
+  setPageSetup, setStory, setTitlePage, storyAt,
 } from "./docsetup.js";
 export { type BorderKind, bordersAt, setBorders, setIndent, setLineSpacing, setParagraphSpacing, updateParagraphs } from "./paragraph.js";
 export { type Template, TEMPLATES } from "./templates.js";
@@ -38,3 +39,6 @@ export { deleteNote, gotoNoteRef, insertNote, type NoteEntry, noteAt, noteList, 
 export { bibliographyBlocks, citationText, type CitationStyle, citedTags, insertBibliography, insertCitation, newTag, type Person, readSources, referenceInlines, type Source, type SourceType, writeSources } from "./citations.js";
 export { insertEquation, latexToOmml, ommlToLatex } from "./equations.js";
 export { autofitWindow, type BorderChoice, type CellRange, columnResizing, distributeColumns, isHeaderRow, mergeCells, type Pen, selectedCells, setCellAlign, setCellBorders, setCellShading, setColumnWidths, setTableStyle, sortTable, type SortOptions, splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows } from "./tableedit.js";
+export {
+  type PageBorderSpec, pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, watermarkXml, type WatermarkSpec,
+} from "./design.js";

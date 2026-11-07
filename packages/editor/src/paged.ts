@@ -5,7 +5,7 @@
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
 import { type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver } from "@prime/layout";
-import type { PrimeDocument } from "@prime/pdm";
+import type { PrimeDocument, SectionProps } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
@@ -30,6 +30,33 @@ export function timed<T>(name: string, fn: () => T): T {
 
 /** Gap between page sheets on screen, in pt. */
 export const PAGE_GAP = 16;
+
+/**
+ * Where each page starts on screen (pt from the first page's top): pages are stacked at their own
+ * heights with PAGE_GAP between (a section can have its own page size, e.g. landscape pages).
+ */
+export function pageTops(pages: readonly { height: number }[], gap = PAGE_GAP): number[] {
+  const tops: number[] = [];
+  let y = 0;
+  for (const p of pages) { tops.push(y); y += p.height + gap; }
+  return tops;
+}
+
+/**
+ * How far the text column of each section is from the first section's on screen (pt): pages are
+ * centred on the widest one, so a wider (landscape) section's text starts further left (`left`
+ * negative) and ends further right (`right` negative). Indexed by section.
+ */
+export function sectionOffsets(sections: readonly SectionProps[]): { left: number; right: number }[] {
+  const width = (s: SectionProps) => s.pageWidth ?? 612;
+  const widest = Math.max(...sections.map(width), 0);
+  const column = (s: SectionProps) => {
+    const x = (widest - width(s)) / 2;
+    return [x + (s.margins?.left ?? 72), x + width(s) - (s.margins?.right ?? 72)];
+  };
+  const [l0, r0] = sections.length ? column(sections[0]) : [0, 0];
+  return sections.map((s) => { const [l, r] = column(s); return { left: l - l0, right: r0 - r }; });
+}
 const PX = 96 / 72;
 
 export interface PagedOptions {
@@ -178,6 +205,20 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
 function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeof resolveWraps>,
   floats: ResolvedFloat[] = [], base?: PrimeDocument): DecorationSet {
   const out: Decoration[] = [];
+  // Sections with their own page width or margins: their blocks' text column (see sectionOffsets;
+  // paragraph and table margins add these variables).
+  const props: SectionProps[] = [];
+  doc.forEach((node) => { if (node.type.name === "section_break") props.push(node.attrs.section?.props ?? {}); });
+  props.push(doc.attrs.section?.props ?? {});
+  const offsets = sectionOffsets(props);
+  if (offsets.some((o) => o.left || o.right)) {
+    let si = 0;
+    doc.forEach((node, pos) => {
+      if (node.type.name === "section_break") { si++; return; }
+      const o = offsets[si];
+      if (o.left || o.right) out.push(Decoration.node(pos, pos + node.nodeSize, { style: `--pw-sx:${o.left}pt;--pw-sr:${o.right}pt` }));
+    });
+  }
   if (base) {
     const resolver = new Resolver(base);
     for (const f of floats) {
@@ -333,6 +374,20 @@ export function pagination(opts: PagedOptions): Plugin {
   /** Pages whose overflow has no earlier break (e.g. one block taller than the page), until the next layout. */
   let unfixable = new Set<number>();
 
+  /** Where each page starts (pt from the first page's top), for the current layout. */
+  let tops: number[] = [];
+  /** Where page `page`'s body starts, in screen px from the editor's top (the first page's body top). */
+  const bodyTopOf = (page: number) => {
+    const pages = layout!.pages;
+    return ((tops[page - 1] ?? 0) + (pages[page - 1]?.bodyTop ?? pages[0].bodyTop) - pages[0].bodyTop) * PX;
+  };
+  /** How far down content before page `page` may reach: the previous page's body bottom (+1 px). */
+  const limitOf = (page: number) => {
+    const pages = layout!.pages;
+    const previous = pages[page - 2];
+    return previous ? (tops[page - 2] + previous.bodyBottom - pages[0].bodyTop) * PX + 1 : Infinity;
+  };
+
   /** Spacer sizes currently in the stylesheet, by spacer ("gap-3", "row-3"). */
   let applied = new Map<string, number>();
 
@@ -352,8 +407,6 @@ export function pagination(opts: PagedOptions): Plugin {
    */
   const fit = (view: EditorView, sheet: HTMLStyleElement, pass = 0) => {
     if (!layout?.pages.length) return;
-    const first = layout.pages[0];
-    const pitch = (first.height + PAGE_GAP) * PX;
     const box = timed("fit.reflow", () => view.dom.getBoundingClientRect());
     // Screen measurements include any zoom; sizes we set are in unzoomed CSS pixels.
     // (Unrounded CSS width: offsetWidth is a whole number, and its rounding error grows down the document.)
@@ -367,7 +420,7 @@ export function pagination(opts: PagedOptions): Plugin {
     const bottom = (el: Element) => (rect(el).bottom - box.top) / zoom;
     let blocks: Element[] | undefined;
     const topLevel = () => (blocks ??= Array.from(view.dom.children).filter((el) => !el.classList.contains("pw-page-gap")));
-    const bodyTopAt = (page: number) => (page - 1) * pitch + ((layout!.pages[page - 1]?.bodyTop ?? first.bodyTop) - first.bodyTop) * PX;
+    const bodyTopAt = (page: number) => bodyTopOf(page);
     const overflow = new Set<number>();
     const items = Array.from(view.dom.querySelectorAll<HTMLElement>(".pw-page-gap, .pw-page-row"));
     const tops = items.map(top); // the one measuring pass
@@ -393,8 +446,7 @@ export function pagination(opts: PagedOptions): Plugin {
       const natural = tops[i] + shift;
       const size = Math.max(0, bodyTopAt(page) - natural);
       // Content before this spacer should end inside the previous page's body area.
-      const previous = layout.pages[page - 2];
-      const limit = previous ? (page - 2) * pitch + (previous.bodyBottom - first.bodyTop) * PX + 1 : Infinity;
+      const limit = limitOf(page);
       if (natural > limit) {
         if (rounds < 10 && !unfixable.has(page)) {
           // Only content after the previous page's start may move to this page.
@@ -461,8 +513,6 @@ export function pagination(opts: PagedOptions): Plugin {
    */
   const fastFit = (view: EditorView, sheet: HTMLStyleElement, from: number): boolean => {
     if (!layout?.pages.length) return true;
-    const first = layout.pages[0];
-    const pitch = (first.height + PAGE_GAP) * PX;
     const items = view.dom.querySelectorAll<HTMLElement>(".pw-page-gap, .pw-page-row");
     // The first spacer after the edit (spacers are in document order).
     let lo = 0;
@@ -482,11 +532,8 @@ export function pagination(opts: PagedOptions): Plugin {
     const cssWidth = parseFloat(getComputedStyle(view.dom).width);
     const zoom = cssWidth ? box.width / cssWidth : 1;
     const natural = (el.getBoundingClientRect().top - box.top) / zoom;
-    const previous = layout.pages[page - 2];
-    const limit = previous ? (page - 2) * pitch + (previous.bodyBottom - first.bodyTop) * PX + 1 : Infinity;
-    if (natural > limit) return false;
-    const bodyTop = (page - 1) * pitch + ((layout.pages[page - 1]?.bodyTop ?? first.bodyTop) - first.bodyTop) * PX;
-    const size = Math.max(0, bodyTop - natural);
+    if (natural > limitOf(page)) return false;
+    const size = Math.max(0, bodyTopOf(page) - natural);
     if (Math.abs(size - (applied.get(key) ?? 0)) > 0.5) write(sheet, new Map(applied).set(key, size));
     return true;
   };
@@ -562,6 +609,7 @@ export function pagination(opts: PagedOptions): Plugin {
         const doc = timed("toModel", () => fromProseMirror(view.state.doc, opts.base()));
         const result = timed("layout", () => layoutDocument(doc, opts.measurer));
         layout = result;
+        tops = pageTops(result.pages);
         timed("onLayout", () => opts.onLayout?.(result));
         const next = timed("pageStarts", () => resolvePageStarts(view.state.doc, result.pageStarts));
         const nextWraps = resolveWraps(view.state.doc, result.wraps);

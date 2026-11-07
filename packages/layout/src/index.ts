@@ -7,3 +7,4 @@ export { Resolver, type ResolvedParagraph, type ResolvedRun, type TabStop } from
 export { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 export { extractFont } from "./fontfile.js";
 export { type Border, type CellLook, cellLooks, parseBorders, type Sides } from "./tables.js";
+export { type PageBorderLine, type PageDecor, pageColor, type Watermark, watermarkShape } from "./decor.js";

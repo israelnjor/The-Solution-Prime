@@ -16,6 +16,7 @@ import { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 import type { FontKey, Measurer } from "./measure.js";
 import { type ResolvedParagraph, type ResolvedRun, Resolver, roman } from "./resolve.js";
 import { cellLooks, type Sides } from "./tables.js";
+import { type PageDecor, pageBorders, pageColor, watermarkOf } from "./decor.js";
 
 const MARKER = /\[[A-Z]-\d{3}\]/g;
 const DEFAULT_TAB = 36;
@@ -108,6 +109,8 @@ export interface Page {
   /** Left and right edges of the body text area. */
   bodyLeft: number;
   bodyRight: number;
+  /** Page colour, page borders and watermark (Design tab), when there are any. */
+  decor?: PageDecor;
 }
 
 export interface LayoutResult {
@@ -466,7 +469,8 @@ export class LayoutEngine {
           if (!i.float) out.push({ kind: "image", width: i.width, height: i.height, src: { imageId: i.imageId }, offset });
           continue;
         }
-        if (i.type === "break") { out.push({ kind: i.kind === "page" ? "page" : "br", offset }); continue; }
+        // A column break in a section without columns moves to the next page, as in Word.
+        if (i.type === "break") { out.push({ kind: i.kind === "page" || i.kind === "column" ? "page" : "br", offset }); continue; }
         if (i.type === "preserved" && i.preserved.name === "w:bookmarkStart") {
           const name = /w:name="([^"]+)"/.exec(i.preserved.xml)?.[1];
           if (name) out.push({ kind: "bookmark", name, offset });
@@ -831,18 +835,21 @@ export class LayoutEngine {
     return out;
   }
 
-  private stories = new Map<Story, StoryBox>();
+  /** Headers and footers as laid out, by story and width (sections can differ in width, e.g. landscape). */
+  private stories = new Map<Story, Map<number, StoryBox>>();
 
   /** A header or footer's measured content (empty when there is none). */
   private story(story: Story | undefined, width: number): StoryBox {
     if (!story) return { height: 0, lines: [], markers: [] };
-    let box = this.stories.get(story);
+    let byWidth = this.stories.get(story);
+    if (!byWidth) this.stories.set(story, (byWidth = new Map()));
+    let box = byWidth.get(width);
     if (!box) {
       const saved = this.rels;
       this.rels = story.preservedRels ?? [];
       box = this.measureCell(story.blocks, width);
       this.rels = saved;
-      this.stories.set(story, box);
+      byWidth.set(width, box);
     }
     return box;
   }
@@ -1120,6 +1127,14 @@ export class LayoutEngine {
       left = mg.left ?? 72;
       noteColumn = width;
       page = { number: pages.length + 1, section: index, width: w, height: h, lines: [], rects: [], bodyTop: top, bodyBottom: bottom, bodyLeft: left, bodyRight: w - (mg.right ?? 72) };
+      const decor: PageDecor = {};
+      const background = pageColor(this.doc);
+      if (background) decor.background = background;
+      const borders = pageBorders(section.props, w, h, sectionPages === 1);
+      if (borders) decor.borders = borders;
+      const watermark = watermarkOf(headers[kind], section.props, w, h, this.m);
+      if (watermark) decor.watermark = watermark;
+      if (decor.background || decor.borders || decor.watermark) page.decor = decor;
       pages.push(page);
       pageOpen = pages.length > 1;
       const headerTop = mg.header ?? 36;
@@ -1247,7 +1262,16 @@ export class LayoutEngine {
       headers = { ...headers, ...section.headers };
       footers = { ...footers, ...section.footers };
       sectionPages = 0;
-      if (si === 0 || section.props.breakType !== "continuous") newPage(section, si);
+      if (si === 0 || section.props.breakType !== "continuous") {
+        // "Even page" and "odd page" sections start on the next page of that kind: a blank page of the
+        // previous section between, when needed (as Word does).
+        const parity = section.props.breakType === "evenPage" ? 0 : section.props.breakType === "oddPage" ? 1 : undefined;
+        if (si > 0 && parity !== undefined && (pages.length + 1) % 2 !== parity) {
+          newPage(this.doc.sections[si - 1], si - 1);
+          sectionPages = 0;
+        }
+        newPage(section, si);
+      }
       prev = carried;
       // The first page of the document behaves like a section start: space-before is kept.
       sectionTop = true;
@@ -1289,7 +1313,8 @@ export class LayoutEngine {
         // confirmed against Word's positions in Experiment 2).
         let before = atTop() && !sectionTop ? 0 : Math.max(rp.spaceBefore - (prev?.rp.spaceAfter ?? 0), 0);
         sectionTop = false;
-        if (prev && rp.contextualSpacing && prev.rp.contextualSpacing && prev.rp.styleId === rp.styleId) {
+        // (Not at the top of a page: there is no space after above it to take back.)
+        if (prev && !atTop() && rp.contextualSpacing && prev.rp.contextualSpacing && prev.rp.styleId === rp.styleId) {
           y -= prev.rp.spaceAfter;
           before = 0;
         }

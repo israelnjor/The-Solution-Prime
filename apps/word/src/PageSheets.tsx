@@ -1,6 +1,7 @@
-import type { LayoutResult, Page, PlacedImage } from "@prime/layout";
+import type { LayoutResult, Page, PageBorderLine, PlacedImage, Watermark } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { pageTops } from "@prime/editor";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 /** Clicking a footnote or endnote on the page opens the Notes pane. */
 export const NOTES_EVENT = "prime-word:notes";
@@ -53,20 +54,48 @@ function Chrome({ page, total, doc, top }: { page: Page; total: number; doc: Pri
   );
 }
 
+/** Text across the page behind the body text, as the layout placed it (rotated about its centre). */
+function WatermarkText({ w }: { w: Watermark }) {
+  return (
+    <div className="pw-watermark" style={{
+      left: `${w.x}pt`, top: `${w.y}pt`, transform: `translate(-50%, -50%) rotate(${w.rotation}deg)`,
+      fontFamily: `"${w.font.family}"`, fontSize: `${w.size}pt`, color: `#${w.color}`, opacity: w.opacity,
+    }}>{w.text}</div>
+  );
+}
+
+/** Page borders over the page (in front of the text, as Word draws them by default). */
+function Borders({ lines, width, height, top }: { lines: PageBorderLine[]; width: number; height: number; top: number }) {
+  const dash = (l: PageBorderLine) => (l.style === "dotted" ? `${l.width} ${l.width * 2}` : l.style.startsWith("dash") ? `${l.width * 4} ${l.width * 3}` : undefined);
+  return (
+    <svg className="pw-page-borders" style={{ top: `${top}pt`, width: `${width}pt`, height: `${height}pt` }} viewBox={`0 0 ${width} ${height}`}>
+      {lines.flatMap((l, i) => {
+        const vertical = l.x1 === l.x2;
+        // Double: two lines, each a third of the width, a third apart (Word's w:sz is the whole width).
+        const offsets = l.style === "double" ? [-l.width / 3, l.width / 3] : [0];
+        const stroke = l.style === "double" ? l.width / 3 : l.width;
+        return offsets.map((d, k) => (
+          <line key={`${i}-${k}`} x1={l.x1 + (vertical ? d : 0)} y1={l.y1 + (vertical ? 0 : d)} x2={l.x2 + (vertical ? d : 0)} y2={l.y2 + (vertical ? 0 : d)}
+            stroke={`#${l.color ?? "000000"}`} strokeWidth={stroke} strokeDasharray={dash(l)} />
+        ));
+      })}
+    </svg>
+  );
+}
+
 /** Pages drawn beyond the visible ones, above and below (scrolling a little shows no blank page). */
 const AROUND = 2;
 
 /**
- * Where page `page`'s sheet starts on screen (client y), drawn or not: sheets are spaced evenly.
- * (Only the sheets near the visible pages are drawn: see PageSheets.)
+ * Where page `page`'s sheet starts on screen (client y), drawn or not. (Only the sheets near the
+ * visible pages are drawn: see PageSheets.)
  */
 export function sheetTop(page: number): number | undefined {
   const box = document.querySelector<HTMLElement>(".pw-sheets");
   if (!box) return undefined;
-  const pitch = Number(box.dataset.pitch);
-  const total = Number(box.dataset.count) * pitch - Number(box.dataset.gap);
+  const tops = JSON.parse(box.dataset.tops ?? "[]") as number[];
   const r = box.getBoundingClientRect();
-  return r.top + ((page - 1) * pitch * r.height) / total;
+  return r.top + ((tops[page - 1] ?? 0) * r.height) / Number(box.dataset.height);
 }
 
 /**
@@ -75,37 +104,44 @@ export function sheetTop(page: number): number | undefined {
  * which hide what runs through the space between pages (e.g. table borders); headers and footers.
  * A mask is dropped where the screen's content overflowed a page, so text is never hidden.
  *
+ * Pages are stacked at their own sizes (a section can be landscape), centred on the widest; the
+ * text of a section with another page width or margins is moved into its own column by the editor
+ * (sectionOffsets).
+ *
  * Only the sheets, masks and headers and footers of the pages on screen (and AROUND either side) are
- * drawn, as Word draws only what is on screen: each is a positioned box the browser composites on
- * every frame, and all of a 855-page book's (some 3,400) cost ~60 ms a frame while typing. The editor
- * itself stays whole; the drawn range follows scrolling.
+ * drawn, as Word draws only what is on screen. The editor itself stays whole; the drawn range
+ * follows scrolling.
  */
 export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow, children }: {
   layout?: LayoutResult; doc: PrimeDocument; gap: number; overflow: Set<number>; children: ReactNode;
 }) {
   const section = doc.sections[0]?.props ?? {};
   const margins = section.margins ?? {};
-  const pages = layout?.pages ?? [];
-  const first = pages[0];
-  const width = first?.width ?? section.pageWidth ?? 612;
-  const height = first?.height ?? section.pageHeight ?? 792;
-  const pitch = height + gap;
-  const count = Math.max(1, pages.length);
-  const mixed = pages.some((p) => p.width !== width || p.height !== height);
+  const laid = layout?.pages ?? [];
+  // Before the first layout: one page of the first section's size.
+  const pages: { width: number; height: number }[] = laid.length ? laid : [{ width: section.pageWidth ?? 612, height: section.pageHeight ?? 792 }];
+  const first = laid[0];
+  const tops = useMemo(() => pageTops(pages, gap), [pages, gap]);
+  const widest = Math.max(...pages.map((p) => p.width));
+  const total = tops[tops.length - 1] + pages[pages.length - 1].height;
+  const offset = (i: number) => (widest - pages[i].width) / 2; // each sheet, centred
+  const count = pages.length;
   const box = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState<[number, number]>([0, AROUND * 2]);
   useEffect(() => {
     const el = box.current;
     const scroller = el?.closest(".canvas");
     if (!el) return;
+    // The page at a height (pt) from the top: the last one starting above it.
+    const at = (y: number) => { let lo = 0; let hi = tops.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (tops[mid] <= y) lo = mid; else hi = mid - 1; } return lo; };
     const update = () => {
       const r = el.getBoundingClientRect();
       const view = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: innerHeight };
-      const perPage = (pitch * r.height) / (count * pitch - gap); // px
-      if (!perPage) return;
-      const first = Math.max(0, Math.floor((view.top - r.top) / perPage) - AROUND);
-      const last = Math.min(count - 1, Math.floor((view.bottom - r.top) / perPage) + AROUND);
-      setShown((old) => (old[0] === first && old[1] === last ? old : [first, last]));
+      const scale = r.height / total; // px per pt
+      if (!scale) return;
+      const from = Math.max(0, at((view.top - r.top) / scale) - AROUND);
+      const to = Math.min(count - 1, at((view.bottom - r.top) / scale) + AROUND);
+      setShown((old) => (old[0] === from && old[1] === to ? old : [from, to]));
     };
     update();
     const target = scroller ?? window;
@@ -115,37 +151,51 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
     const resize = new ResizeObserver(update);
     resize.observe(el);
     return () => { target.removeEventListener("scroll", update); window.removeEventListener("resize", update); resize.disconnect(); };
-  }, [count, pitch, gap]);
+  }, [tops, total, count]);
   const [from, to] = shown;
   const near = (i: number) => i >= from && i <= to;
   return (
-    <div ref={box} className="pw-sheets" data-pitch={pitch} data-count={count} data-gap={gap} data-masked={Math.max(0, pages.length - 1 - overflow.size)}
-      style={{ width: `${width}pt`, height: `${count * pitch - gap}pt` }}>
-      {mixed && <div className="pw-notice">This document has sections with different page sizes; all pages are shown at the first page's size.</div>}
-      {Array.from({ length: count }, (_, i) => near(i) && (
-        <div key={i} className="pw-sheet" data-page={i + 1} style={{ top: `${i * pitch}pt`, width: `${width}pt`, height: `${height}pt` }} />
+    <div ref={box} className="pw-sheets" data-tops={JSON.stringify(tops)} data-height={total} data-count={count} data-masked={Math.max(0, laid.length - 1 - overflow.size)}
+      style={{ width: `${widest}pt`, height: `${total}pt` }}>
+      {pages.map((p, i) => near(i) && (
+        <div key={i} className="pw-sheet" data-page={i + 1} style={{
+          top: `${tops[i]}pt`, left: `${offset(i)}pt`, width: `${p.width}pt`, height: `${p.height}pt`,
+          ...(laid[i]?.decor?.background ? { background: `#${laid[i].decor!.background}` } : {}),
+        }}>
+          {laid[i]?.decor?.watermark && <WatermarkText w={laid[i].decor!.watermark!} />}
+        </div>
       ))}
       <div className="pw-flow" style={{
         top: `${first?.bodyTop ?? margins.top ?? 72}pt`,
-        left: `${first?.bodyLeft ?? margins.left ?? 72}pt`,
-        width: `${first ? first.bodyRight - first.bodyLeft : width - (margins.left ?? 72) - (margins.right ?? 72)}pt`,
+        left: `${offset(0) + (first?.bodyLeft ?? margins.left ?? 72)}pt`,
+        width: `${first ? first.bodyRight - first.bodyLeft : pages[0].width - (margins.left ?? 72) - (margins.right ?? 72)}pt`,
       }}>
         {children}
       </div>
-      {pages.slice(1).map((next, i) => {
+      {laid.slice(1).map((next, i) => {
         if (overflow.has(next.number) || !(near(i) || near(i + 1))) return null;
-        const prev = pages[i];
-        const from = i * pitch + prev.bodyBottom;
+        const prev = laid[i];
+        const start = tops[i] + prev.bodyBottom;
+        // White over the bottom margin of one page and the top margin of the next (each its own width).
+        const sheet = (k: number) => ({
+          marginLeft: `calc(40px + ${offset(k)}pt)`, width: `${laid[k].width}pt`,
+          ...(laid[k].decor?.background ? { background: `#${laid[k].decor!.background}` } : {}),
+        });
         return (
-          <div key={`m${next.number}`} className="pw-mask" data-page={next.number} style={{ top: `${from}pt`, height: `${(i + 1) * pitch + next.bodyTop - from}pt` }}>
-            <div className="pw-mask-page" style={{ height: `${height - prev.bodyBottom}pt` }} />
+          <div key={`m${next.number}`} className="pw-mask" data-page={next.number} style={{ top: `${start}pt`, height: `${tops[i + 1] + next.bodyTop - start}pt` }}>
+            <div className="pw-mask-page" style={{ height: `${prev.height - prev.bodyBottom}pt`, ...sheet(i) }} />
             <div className="pw-mask-gap" style={{ height: `${gap}pt` }} />
-            <div className="pw-mask-page" style={{ height: `${next.bodyTop}pt` }} />
+            <div className="pw-mask-page" style={{ height: `${next.bodyTop}pt`, ...sheet(i + 1) }} />
           </div>
         );
       })}
       <div className="pw-chrome">
-        {pages.map((p, i) => near(i) && <Chrome key={i} page={p} total={pages.length} doc={doc} top={i * pitch} />)}
+        {laid.map((p, i) => near(i) && (
+          <div key={i} className="pw-chrome-page" style={{ left: `${offset(i)}pt` }}>
+            {p.decor?.borders && <Borders lines={p.decor.borders} width={p.width} height={p.height} top={tops[i]} />}
+            <Chrome page={p} total={laid.length} doc={doc} top={tops[i]} />
+          </div>
+        ))}
       </div>
     </div>
   );

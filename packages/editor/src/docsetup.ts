@@ -3,7 +3,7 @@
  * the editor document: the last section's in the doc's attributes, earlier ones in section breaks.
  */
 import type { HeaderFooterKind, SectionProps, Story } from "@prime/pdm";
-import type { Command, EditorState, Transaction } from "prosemirror-state";
+import { type Command, type EditorState, TextSelection, type Transaction } from "prosemirror-state";
 
 export interface SectionAttrs {
   props: SectionProps;
@@ -51,14 +51,22 @@ export function pageSetup(state: EditorState): Required<Pick<SectionProps, "page
 }
 
 /**
- * Applies page setup to the whole document (Word's default "Apply to: Whole document").
- * Orientation swaps width and height when needed.
+ * Applies page setup to the sections the selection touches (the whole of a one-section document), as
+ * Word's ribbon does. Orientation swaps width and height when needed.
  */
 export function setPageSetup(change: { paper?: { width: number; height: number }; orientation?: "portrait" | "landscape"; margins?: SectionProps["margins"] }): Command {
   return (state, dispatch) => {
     if (!dispatch) return true;
     let tr = state.tr;
-    for (const s of sections(state)) {
+    // The sections the selection touches, as Word's ribbon does (all of a one-section document).
+    const all = sections(state);
+    const { from, to } = state.selection;
+    const touched = all.filter((s, i) => {
+      const start = i === 0 ? 0 : all[i - 1].pos;
+      const end = s.pos === -1 ? state.doc.content.size : s.pos;
+      return end >= from && start <= to;
+    });
+    for (const s of touched) {
       const p = { ...s.attrs.props };
       let w = change.paper?.width ?? p.pageWidth ?? 612;
       let h = change.paper?.height ?? p.pageHeight ?? 792;
@@ -76,6 +84,58 @@ export function setPageSetup(change: { paper?: { width: number; height: number }
     return true;
   };
 }
+
+/** How a section starts: Word's section break kinds (w:sectPr/w:type; "nextPage" is the default). */
+export type SectionStart = "nextPage" | "continuous" | "evenPage" | "oddPage";
+
+/**
+ * Inserts a section break at the cursor, splitting the paragraph there (as Word does). The text before
+ * it keeps the section's settings, headers and footers; the text after starts as `start` says, with
+ * the same page setup, and its headers and footers continue the ones before ("Link to Previous").
+ */
+export function insertSectionBreak(start: SectionStart): Command {
+  return (state, dispatch) => {
+    const $cursor = state.selection.$from;
+    if (!dispatch) return true;
+    const cur = current(state);
+    const tr = state.tr.deleteSelection();
+    const $from = tr.doc.resolve(tr.mapping.map($cursor.pos));
+    // Where the break goes, between two top-level blocks.
+    let at: number;
+    if ($from.depth === 1 && $from.parent.isTextblock && $from.parentOffset > 0 && $from.parentOffset < $from.parent.content.size) {
+      tr.split($from.pos);
+      at = $from.pos + 1;
+    } else if ($from.depth >= 1 && $from.parentOffset === 0 && $from.depth === 1) {
+      at = $from.before(1);
+    } else {
+      at = $from.depth ? $from.after(1) : $from.pos;
+    }
+    const before: SectionAttrs = { ...cur.attrs };
+    tr.insert(at, state.schema.nodes.section_break.create({ section: before }));
+    // The section after the break: same page setup, starting as asked, headers and footers inherited.
+    const props = { ...cur.attrs.props };
+    if (start === "nextPage") delete props.breakType;
+    else props.breakType = start;
+    setSection(tr, cur.pos === -1 ? -1 : tr.mapping.map(cur.pos), { props, headers: {}, footers: {} });
+    // The cursor at the start of what follows the break (a new empty paragraph at the end of the document).
+    let after = at + 1;
+    if (after >= tr.doc.content.size || !tr.doc.resolve(after).nodeAfter?.isTextblock) {
+      tr.insert(after, state.schema.nodes.paragraph.create());
+    }
+    tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1)));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
+/** Inserts a column break: the text after it starts the next column (the next page, without columns). */
+export const insertColumnBreak: Command = (state, dispatch) => {
+  if (!dispatch) return true;
+  const tr = state.tr.replaceSelectionWith(state.schema.nodes.hard_break.create({ kind: "column" }), false);
+  tr.split(tr.selection.from);
+  dispatch(tr.scrollIntoView());
+  return true;
+};
 
 /**
  * The header or footer shown for the section at the cursor: its own, or the one it inherits from
