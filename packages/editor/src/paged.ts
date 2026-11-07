@@ -243,6 +243,31 @@ function softHyphen(): HTMLElement {
   return el;
 }
 
+/**
+ * Classes blocks get from the page layout: outside text columns, a block spans the page (pw-span); an
+ * empty paragraph that only holds a continuous section break takes no room (pw-break-holder, as in
+ * the layout). For the top-level blocks between `from` and `to` (all by default).
+ */
+function layoutClasses(doc: Node, from = 0, to = doc.content.size): Decoration[] {
+  const out: Decoration[] = [];
+  const sections: SectionProps[] = [];
+  doc.forEach((node) => { if (node.type.name === "section_break") sections.push(node.attrs.section?.props ?? {}); });
+  sections.push(doc.attrs.section?.props ?? {});
+  const { columns, inColumns } = screenColumns(sections);
+  let si = 0;
+  doc.forEach((node, pos, index) => {
+    if (node.type.name === "section_break") { si++; return; }
+    if (pos + node.nodeSize < from || pos > to) return;
+    if (columns && !inColumns[si]) out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-span" }, { layoutClass: true }));
+    const next = doc.maybeChild(index + 1);
+    const following = next?.type.name === "section_break" ? sections[si + 1] : undefined;
+    if (node.type.name === "paragraph" && node.content.size === 0 && following?.breakType === "continuous" && index > 0) {
+      out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-break-holder" }, { layoutClass: true }));
+    }
+  });
+  return out;
+}
+
 function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeof resolveWraps>,
   floats: ResolvedFloat[] = [], base?: PrimeDocument, hyphens: number[] = []): DecorationSet {
   const out: Decoration[] = [];
@@ -250,23 +275,7 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
   // screen: where the screen's text ran a little longer or shorter than the layout's, forced breaks gave
   // a page more columns than it has, off the side of the page. The browser balances each page's
   // columns (a page gap ends them); a column break typed in the text still breaks (styles.css).
-  {
-    const sections: SectionProps[] = [];
-    doc.forEach((node) => { if (node.type.name === "section_break") sections.push(node.attrs.section?.props ?? {}); });
-    sections.push(doc.attrs.section?.props ?? {});
-    const { columns, inColumns } = screenColumns(sections);
-    let si = 0;
-    doc.forEach((node, pos, index) => {
-      if (node.type.name === "section_break") { si++; return; }
-      if (columns && !inColumns[si]) out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-span" }));
-      // An empty paragraph that only holds a continuous section break takes no room (as in the layout).
-      const next = doc.maybeChild(index + 1);
-      const following = next?.type.name === "section_break" ? sections[si + 1] : undefined;
-      if (node.type.name === "paragraph" && node.content.size === 0 && following?.breakType === "continuous" && index > 0) {
-        out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-break-holder" }));
-      }
-    });
-  }
+  out.push(...layoutClasses(doc));
   for (const pos of hyphens) out.push(Decoration.widget(pos, softHyphen, { side: -1, key: "shy", marks: [] }));
   // Sections with their own page width or margins: their blocks' text column (see sectionOffsets;
   // paragraph and table margins add these variables).
@@ -431,6 +440,8 @@ export function pagination(opts: PagedOptions): Plugin {
   let raw: ResolvedStart[] = [];
   /** Where text wraps around floating objects, and the objects themselves (from the layout). */
   let wraps: ReturnType<typeof resolveWraps> = [];
+  /** Whether the drawn decorations include layout classes (text columns, break holders): kept up after edits. */
+  let layoutClassed = false;
   /** Where the layout hyphenated words (editor positions). */
   let hyphens: number[] = [];
   let floats: ResolvedFloat[] = [];
@@ -623,7 +634,9 @@ export function pagination(opts: PagedOptions): Plugin {
         const drawn = tr.getMeta(paginationKey) as ResolvedStart[] | undefined;
         if (drawn) {
           const columns = columnsIn(tr.doc);
-          return { decorations: decorations(tr.doc, drawn, wraps, floats, opts.base(), hyphens), ...(columns ? { columns } : {}) };
+          const set = decorations(tr.doc, drawn, wraps, floats, opts.base(), hyphens);
+          layoutClassed = set.find(undefined, undefined, (spec) => spec.layoutClass).length > 0;
+          return { decorations: set, ...(columns ? { columns } : {}) };
         }
         if (!tr.docChanged) return old;
         // Keep page starts and wrap points on their text until the next layout replaces them (a
@@ -633,7 +646,22 @@ export function pagination(opts: PagedOptions): Plugin {
         wraps = wraps.map((w) => ({ ...w, pos: tr.mapping.map(w.pos) }));
         hyphens = hyphens.map((h) => tr.mapping.map(h));
         floats = floats.map((f) => ({ ...f, pos: tr.mapping.map(f.pos) }));
-        return { decorations: old.decorations.map(tr.mapping, tr.doc), ...(old.columns ? { columns: old.columns } : {}) };
+        let mapped = old.decorations.map(tr.mapping, tr.doc);
+        // Blocks the edit replaced (a table rebuilt when a column is resized, a restyled paragraph) lose
+        // their node decorations: their layout classes are worked out again (else a table outside text
+        // columns fell into them, its rows over the text).
+        if (layoutClassed) {
+          const from = tr.before.content.findDiffStart(tr.doc.content);
+          if (from !== null) {
+            const to = tr.before.content.findDiffEnd(tr.doc.content)?.b ?? tr.doc.content.size;
+            const $from = tr.doc.resolve(Math.min(from, tr.doc.content.size));
+            const $to = tr.doc.resolve(Math.min(Math.max(to, from), tr.doc.content.size));
+            const a = $from.depth ? $from.before(1) : from;
+            const b = $to.depth ? $to.after(1) : Math.max(to, from);
+            mapped = mapped.remove(mapped.find(a, b, (spec) => spec.layoutClass)).add(tr.doc, layoutClasses(tr.doc, a, b));
+          }
+        }
+        return { decorations: mapped, ...(old.columns ? { columns: old.columns } : {}) };
       },
     },
     props: {
