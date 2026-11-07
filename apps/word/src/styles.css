@@ -650,10 +650,10 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 
 /* View → Outline: paragraphs indented by outline level, Word's symbols before them. */
 .page.outline-page { width: min(1000px, 94%); padding: 32px 40px 48px 64px; min-height: 70vh; }
-.pw-outline > .pw-ol { position: relative; margin-left: var(--pw-ol-indent, 0px) !important; text-indent: 0 !important; }
-.pw-outline > .pw-ol::before { position: absolute; left: -22px; top: 0.1em; width: 16px; text-align: center; font: 13px/1.2 "Segoe UI Symbol", sans-serif; color: #6b7280; }
-.pw-outline > .pw-ol-plus::before { content: "\2295"; cursor: pointer; color: #2b579a; }
-.pw-outline > .pw-ol-minus::before { content: "\2296"; }
-.pw-outline > .pw-ol-body::before { content: "\25CB"; font-size: 9px; top: 0.45em; }
-.pw-outline > .pw-ol-folded { text-decoration: underline wavy #9aa5b8 1px; text-underline-offset: 4px; }
-.pw-outline > .pw-ol-hidden { display: none !important; }
+.pw-outline .pw-ol { position: relative; margin-left: var(--pw-ol-indent, 0px) !important; text-indent: 0 !important; }
+.pw-outline .pw-ol::before { position: absolute; left: -22px; top: 0.1em; width: 16px; text-align: center; font: 13px/1.2 "Segoe UI Symbol", sans-serif; color: #6b7280; }
+.pw-outline .pw-ol-plus::before { content: "\2295"; cursor: pointer; color: #2b579a; }
+.pw-outline .pw-ol-minus::before { content: "\2296"; }
+.pw-outline .pw-ol-body::before { content: "\25CB"; font-size: 9px; top: 0.45em; }
+.pw-outline .pw-ol-folded { text-decoration: underline wavy #9aa5b8 1px; text-underline-offset: 4px; }
+.pw-outline .pw-ol-hidden { display: none !important; }

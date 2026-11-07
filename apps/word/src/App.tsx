@@ -351,7 +351,10 @@ export function App() {
     });
     view.current = v;
     // Self-tests use the editor that is current (it is rebuilt when fonts arrive).
-    if (SELFTEST) (globalThis as { primeView?: EditorView }).primeView = v;
+    if (SELFTEST) {
+      (globalThis as { primeView?: EditorView }).primeView = v;
+      (globalThis as { primeBase?: () => PrimeDocument }).primeBase = () => fileRef.current.base;
+    }
     v.focus();
     refresh();
     return () => v.destroy();
@@ -673,7 +676,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest, navPaneSelfTest, printReadSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest, navPaneSelfTest, printReadSelfTest, outlineSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -700,6 +703,7 @@ export function App() {
       if (test === "citations") citationsSelfTest(v);
       if (test === "equation") equationSelfTest(v);
       if (test === "tables") tablesSelfTest(v);
+      if (test === "outline") outlineSelfTest(() => (globalThis as { primeView?: EditorView }).primeView!);
       if (test === "printread") printReadSelfTest();
       if (test === "nav") navPaneSelfTest(v, () => fileRef.current.base);
       if (test === "track") trackChangesSelfTest(v, () => fileRef.current.base);
@@ -792,7 +796,7 @@ export function App() {
         onFind={(replace) => (replace ? setFind("replace") : searchNav())}
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
-        onMode={(m) => { setMode(m); if (m === "web") setLayout(undefined); }}
+        onMode={(m) => { setMode(m); if (m !== "print") setLayout(undefined); }}
         markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)} onConvertPdf={() => setConverter({})} onEditPicture={() => setEditingPicture(true)}
         onLetterhead={() => setDesigningLetterhead(true)}
         onSignature={() => setSigning(true)}

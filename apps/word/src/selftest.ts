@@ -1893,3 +1893,59 @@ export function printReadSelfTest() {
     console.log("[selftest] align", JSON.stringify(out));
   })();
 }
+
+/** Outline view: levels and symbols, Show Level, folding a heading, promote / demote, back to Print Layout. */
+export function outlineSelfTest(view: () => EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    const ed = await import("@prime/editor");
+    await wait(1500);
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "View")?.click();
+    await wait(150);
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Outline")?.click();
+    await wait(1500);
+    const v = view();
+    const root = v.dom;
+    const visible = () => [...root.querySelectorAll<HTMLElement>(":scope > .pw-ol")].filter((e) => e.offsetParent !== null);
+    out.outlineTab = document.querySelector("nav button.contextual.on")?.textContent;
+    out.symbols = { plus: root.querySelectorAll(".pw-ol-plus").length, minus: root.querySelectorAll(".pw-ol-minus").length, body: root.querySelectorAll(".pw-ol-body").length };
+    const h2 = root.querySelector<HTMLElement>(".pw-ol-plus ~ .pw-ol-plus");
+    out.indents = [...root.querySelectorAll<HTMLElement>(":scope > .pw-ol")].slice(0, 12).map((e) => Math.round(e.getBoundingClientRect().left));
+    out.all = visible().length;
+    const show = document.querySelector<HTMLSelectElement>('select[aria-label="Show level"]')!;
+    const pick = (sel: HTMLSelectElement, val: string) => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(sel, val); sel.dispatchEvent(new Event("change", { bubbles: true })); };
+    pick(show, "1");
+    await wait(300);
+    out.level1 = { shown: visible().length, texts: visible().slice(0, 3).map((e) => e.textContent?.slice(0, 20)) };
+    pick(show, "10");
+    await wait(300);
+    // Fold the first heading with text under it: a click on its ⊕ (left of the paragraph).
+    const first = root.querySelector<HTMLElement>(".pw-ol-plus")!;
+    const r = first.getBoundingClientRect();
+    first.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: r.left - 12, clientY: r.top + 6 }));
+    await wait(300);
+    out.folded = { shown: visible().length, foldedClass: first.classList.contains("pw-ol-folded") || !!root.querySelector(".pw-ol-folded") };
+    first.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: r.left - 12, clientY: r.top + 6 }));
+    await wait(300);
+    out.unfolded = visible().length;
+    // Demote the first Heading 1 to Heading 2, then promote it back; a body paragraph promoted.
+    let hpos = -1;
+    v.state.doc.forEach((n, pos) => { if (hpos < 0 && ed.outlineLevelAt(v.state.apply(v.state.tr.setSelection(TextSelection.create(v.state.doc, pos + 1))), (globalThis as { primeBase?: () => PrimeDocument }).primeBase!()) === 1) hpos = pos; });
+    v.dispatch(v.state.tr.setSelection(TextSelection.create(v.state.doc, hpos + 1)));
+    const level = () => (document.querySelector<HTMLSelectElement>('select[aria-label="Outline level"]')?.value);
+    await wait(200);
+    const before = level();
+    document.querySelector<HTMLButtonElement>('button[aria-label="Demote"]')!.click();
+    await wait(200);
+    const demoted = { level: level(), style: view().state.doc.nodeAt(hpos)!.attrs.props.style };
+    document.querySelector<HTMLButtonElement>('button[aria-label="Promote"]')!.click();
+    await wait(200);
+    out.demotePromote = { before, demoted, back: level() };
+    void h2;
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Close Outline View")?.click();
+    await wait(2500);
+    out.backToPrint = !!document.querySelector(".pw-editor.paged") && !document.querySelector(".pw-outline");
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
