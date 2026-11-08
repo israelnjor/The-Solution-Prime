@@ -657,3 +657,39 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .pw-outline .pw-ol-body::before { content: "\25CB"; font-size: 9px; top: 0.45em; }
 .pw-outline .pw-ol-folded { text-decoration: underline wavy #9aa5b8 1px; text-underline-offset: 4px; }
 .pw-outline .pw-ol-hidden { display: none !important; }
+
+/* Review → Read Aloud: the player, and the word being read. */
+.read-aloud { position: fixed; right: 18px; top: 160px; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: #fff; border: 1px solid var(--chrome-border); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.15); font-size: 12px; }
+.read-aloud select { max-width: 170px; }
+.pw-speaking { background: #ffe58f; border-radius: 2px; box-shadow: 0 0 0 1px #ffd24d; }
+
+/* Grammar: a blue double underline (Word's), its message in the right-click menu. */
+.pw-grammar { text-decoration: underline double #2b6cb0; text-decoration-skip-ink: none; text-underline-offset: 3px; }
+.spell-menu .grammar-message { margin: 2px 6px 6px; max-width: 240px; font-size: 12px; color: #2b6cb0; }
+
+/* File → Protect, and opening a protected document. */
+.password-dialog { width: min(420px, 92vw); display: grid; gap: 10px; }
+.password-dialog label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.password-dialog input { font: inherit; padding: 6px 8px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.password-dialog .hint { margin: 0; font-size: 12px; color: var(--muted); }
+.password-dialog .error { margin: 0; color: #b71c1c; font-size: 12px; }
+.password-dialog .buttons { display: flex; gap: 8px; }
+
+/* Review → Thesaurus: a pane on the right. */
+.thesaurus-pane { position: fixed; right: 0; top: 150px; bottom: 32px; width: 280px; z-index: 31; overflow: auto; display: grid; align-content: start; gap: 8px;
+  background: #fafbfd; border-left: 1px solid var(--chrome-border); padding: 10px 12px; }
+.thesaurus-pane header { display: flex; justify-content: space-between; align-items: center; }
+.thes-search { display: flex; gap: 4px; }
+.thes-search input { flex: 1; min-width: 0; font: inherit; padding: 5px 7px; border: 1px solid var(--chrome-border); border-radius: 4px; }
+.thes-groups section { border-top: 1px solid var(--chrome-border); padding-top: 6px; }
+.thes-groups h4 { margin: 2px 0 4px; font-size: 13px; }
+.thes-groups h4 span { color: var(--muted); font-weight: normal; font-size: 12px; }
+.thes-groups ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.thes-groups li { display: flex; justify-content: space-between; align-items: center; }
+.thes-word { border: none; background: none; padding: 2px 4px; color: #2b579a; cursor: pointer; text-align: left; }
+.thes-word:hover { text-decoration: underline; }
+.thes-insert { font-size: 11px; padding: 1px 6px; opacity: 0; }
+.thes-groups li:hover .thes-insert, .thes-insert:focus { opacity: 1; }
+.thes-ant { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.thes-note, .thes-credit { margin: 0; font-size: 12px; color: var(--muted); }

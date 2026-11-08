@@ -1,6 +1,7 @@
-import { type DocumentProperties, readDocx, readProperties, withProperties, writeDocx } from "@prime/docx";
+import { Fragment, type Node as PmNode } from "prosemirror-model";
+import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
+  blankDocument, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -36,7 +37,10 @@ import { openPdfForView } from "./pdfImport";
 import { PrintDialog, type ViewPdf } from "./PrintDialog";
 import { ReadMode } from "./ReadMode";
 import { PropertiesDialog } from "./PropertiesDialog";
-import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, saveDocument } from "./platform";
+import { PasswordDialog } from "./PasswordDialog";
+import { ReadAloud, speakPlugin } from "./ReadAloud";
+import { ThesaurusPane } from "./Thesaurus";
+import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, type OpenedFile, saveDocument, type SaveFormat } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
 import { FONTS, LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
 import { ContextMenu } from "./ContextMenu";
@@ -128,6 +132,8 @@ export function App() {
   const [overflow, setOverflow] = useState<Set<number>>(new Set());
   const [find, setFind] = useState<"find" | "replace" | null>(null);
   const [info, setInfo] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [thesaurusOpen, setThesaurusOpen] = useState(false);
   // The Print dialog or Read Mode, over the PDF of the document's pages.
   const [pdfView, setPdfView] = useState<{ kind: "print" | "read"; pdf: ViewPdf; pages: number; current: number } | null>(null);
   // The navigation pane: open or not (remembered), and a counter that puts the cursor in its search box (Ctrl+F).
@@ -189,6 +195,18 @@ export function App() {
   const fileRef = useRef(file);
   fileRef.current = file;
   const dirtyRef = useRef(dirty);
+  /** Documents in .rtf, .odt or .txt the user chose to keep saving in that format (asked once each). */
+  const keptFormat = useRef(new Set<string>());
+  /**
+   * The open document's password (it is saved encrypted with it), in memory only, and only for that
+   * document: another one opened or started is not saved with it.
+   */
+  const passwordFor = useRef<{ base: PrimeDocument; password: string } | undefined>(undefined);
+  const currentPassword = () => (passwordFor.current && passwordFor.current.base === fileRef.current.base ? passwordFor.current.password : undefined);
+  const [, setPasswordVersion] = useState(0);
+  const setPassword = (base: PrimeDocument, password: string | undefined) => { passwordFor.current = password ? { base, password } : undefined; setPasswordVersion((n) => n + 1); };
+  /** A protected document waiting for its password, or the Protect dialog. */
+  const [passwordAsk, setPasswordAsk] = useState<{ mode: "open"; bytes: Uint8Array; name: string; location?: DocumentLocation } | { mode: "set" } | null>(null);
   dirtyRef.current = dirty;
   const measurerRef = useRef<CanvasMeasurer>();
   const snapshotTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -198,6 +216,8 @@ export function App() {
   const snapshot = useCallback(() => {
     const v = view.current;
     if (!v || !dirtyRef.current) return;
+    // A protected document: no recovery copy (it would be kept without its password).
+    if (currentPassword()) return;
     const { base, name, location, warnings } = fileRef.current;
     void saveSnapshot({
       id: SESSION, name, savedAt: Date.now(), warnings, doc: fromProseMirror(v.state.doc, base),
@@ -228,10 +248,29 @@ export function App() {
       const model = fromProseMirror(v.state.doc, base);
       // Page numbers in contents and cross-references as laid out now, so other programs show them right.
       if (hasPageRefs(v.state.doc) && measurerRef.current) refreshPageRefs(model, layoutDocument(model, measurerRef.current).bookmarks);
-      const bytes = writeDocx(model);
+      // Each format from the same model: .docx with everything; .rtf, .odt, .txt with what they hold.
+      const props = readProperties(base);
+      const make = async (format: SaveFormat) => {
+        const pw = currentPassword();
+        if (format === "docx") return pw ? encryptDocx(writeDocx(model), pw) : writeDocx(model);
+        if (pw) throw new Error(`A document protected with a password can only be saved as a Word document (.docx): .${format} files cannot hold a password. Remove the password (File → Protect) to save it as .${format}.`);
+        return writeFormat(model, format, { title: props.title, author: props.author });
+      };
+      const ext = extensionOf(name);
+      let target = name;
+      let where = saveAs ? undefined : location;
+      // A .doc cannot be written: saved as .docx (a new file). An .rtf, .odt or .txt: asked once whether to keep it.
+      if (where && ext === "doc") { target = name.replace(/\.doc$/i, ".docx"); where = undefined; }
+      else if (where && (ext === "rtf" || ext === "odt" || ext === "txt") && !keptFormat.current.has(name)) {
+        const keep = await confirmAction(
+          `Keep saving ${name} as ${FORMAT_NAMES[ext]}?\n\nSome of what the document holds (styles, comments, tracked changes, headers and footers${ext === "txt" ? ", all formatting" : ""}) is not kept in this format.\n\nYes: keep the .${ext} format.\nNo: save it as a Word document (.docx).`,
+          "Keep the format?");
+        if (keep) keptFormat.current.add(name);
+        else { target = name.replace(/\.[a-z]+$/i, ".docx"); where = undefined; }
+      }
       let saved;
       try {
-        saved = await saveDocument(bytes, name, saveAs ? undefined : location);
+        saved = await saveDocument(make, target, where);
       } catch (e) {
         if (!(e instanceof ChangedOnDiskError)) throw e;
         // Another program saved this file after we opened it: never overwrite that silently.
@@ -239,7 +278,7 @@ export function App() {
           `${name} was changed by another program after you opened it.\n\n` +
           "Yes: replace it with your version (the other changes are lost).\nNo: save your version as a new file.",
           "File changed on disk");
-        saved = await saveDocument(bytes, name, overwrite ? location : undefined, true);
+        saved = await saveDocument(make, target, overwrite ? where : undefined, true);
       }
       if (!saved) return;
       setFile((f) => ({ ...f, name: saved.name, location: saved.location ?? f.location }));
@@ -274,6 +313,8 @@ export function App() {
           "Mod-p": command(() => window.dispatchEvent(new Event(PRINT_EVENT))),
           "Mod-Enter": insertPageBreak,
           "Mod-Shift-Enter": insertColumnBreak,
+          "Ctrl-Alt-Space": command(() => setReading((r) => !r)),
+          "Shift-F7": command(() => setThesaurusOpen(true)),
           // Outline view: Alt+Shift+Left / Right promote and demote (Word's keys).
           ...(mode === "outline" ? {
             "Alt-Shift-ArrowLeft": changeOutlineLevel(() => fileRef.current.base, -1),
@@ -320,6 +361,7 @@ export function App() {
         columnResizing(),
         reviewPlugin(),
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
+        speakPlugin(),
         ...(mode === "outline" ? [outlinePlugin(() => fileRef.current.base)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
       ],
@@ -332,7 +374,7 @@ export function App() {
       dispatchTransaction(tr) {
         // Track changes on: the edit is recorded (deleted text kept and marked, insertions marked). Not
         // while composing (an input method edits the text in place).
-        if (!v.composing) tr = trackTransaction(v.state, tr, authorName().trim() || "Prime Word user");
+        if (!v.composing && tr.docChanged && trackingOn(v.state)) tr = trackTransaction(v.state, tr, authorName().trim() || "Prime Word user");
         v.updateState(v.state.apply(tr));
         if (tr.docChanged) {
           setDirty(true);
@@ -354,6 +396,13 @@ export function App() {
     if (SELFTEST) {
       (globalThis as { primeView?: EditorView }).primeView = v;
       (globalThis as { primeBase?: () => PrimeDocument }).primeBase = () => fileRef.current.base;
+      // What Save writes as .docx (encrypted when the document has a password).
+      (globalThis as { primeDocxBytes?: () => Promise<Uint8Array> }).primeDocxBytes = async () => {
+        const m = fromProseMirror(v.state.doc, fileRef.current.base);
+        const pw = currentPassword();
+        return pw ? encryptDocx(writeDocx(m), pw) : writeDocx(m);
+      };
+      (globalThis as { primeCompare?: (f: OpenedFile) => Promise<void> }).primeCompare = (f) => compareRef.current(f);
     }
     v.focus();
     refresh();
@@ -466,10 +515,15 @@ export function App() {
     return () => { cancelled = true; };
   }, [file.base]);
 
-  const load = (bytes: Uint8Array, name: string, location?: DocumentLocation) => {
+  const load = (bytes: Uint8Array, name: string, location?: DocumentLocation, password?: string) => {
+    // Protected with a password: asked for first.
+    if (isEncrypted(bytes)) { setPasswordAsk({ mode: "open", bytes, name, location }); return; }
     try {
-      const { doc, warnings } = readDocx(bytes);
+      // Word (.docx, .doc), Rich Text, OpenDocument or plain text: by its contents.
+      const { doc, warnings, format } = readAnyFormat(bytes, name);
+      if (format !== "docx" && warnings.length) warnings.unshift(`Opened from ${FORMAT_NAMES[format]} (.${format}): what Prime Word could not read is listed here.`);
       setFile({ base: doc, name, location, warnings, fonts: 0 });
+      setPassword(doc, password);
       setDirty(false);
       leaveHome();
       setConversion(undefined);
@@ -477,6 +531,50 @@ export function App() {
       alert(`Prime Word could not open ${name}:\n${(e as Error).message}`);
     }
   };
+
+  /**
+   * Review → Compare: the current document (the revised version) against an original the user picks;
+   * the result, the revised document with the differences as tracked changes, replaces it (unsaved).
+   */
+  const compareWith = async (picked?: OpenedFile) => {
+    const v = view.current;
+    if (!v) return;
+    const other = picked ?? await openDocument();
+    if (!other) return;
+    try {
+      const original = readAnyFormat(other.bytes, other.name).doc;
+      const base = fileRef.current.base;
+      // Pictures the two share a name for but not the picture: the original's renamed (a deleted one shows its own).
+      const renamed: Record<string, string> = {};
+      const images = { ...base.images };
+      for (const [id, img] of Object.entries(original.images)) {
+        if (!base.images[id]) images[id] = img;
+        else if (base.images[id].data !== img.data) { renamed[id] = `cmp-${id}`; images[`cmp-${id}`] = img; }
+      }
+      const rename = (n: PmNode): PmNode => {
+        if (n.type.name === "image" && renamed[n.attrs.imageId]) return n.type.create({ ...n.attrs, imageId: renamed[n.attrs.imageId] }, n.content, n.marks);
+        if (n.isLeaf || n.isText) return n;
+        const kids: PmNode[] = [];
+        n.forEach((c) => kids.push(rename(c)));
+        return n.copy(Fragment.fromArray(kids));
+      };
+      const originalPm = rename(toProseMirror(original, v.state.schema));
+      const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      const result = compareDocuments(originalPm, v.state.doc, authorName().trim() || "Prime Word user", now);
+      const model = fromProseMirror(result, { ...base, images });
+      if (!(await discardCurrent())) return;
+      const name = `Comparison of ${other.name.replace(/\.docx$/i, "")} and ${fileRef.current.name.replace(/\.docx$/i, "")}.docx`;
+      setFile({ base: readDocx(writeDocx(model)).doc, name, location: undefined, warnings: [], fonts: 0 });
+      setDirty(true);
+      dirtyRef.current = true;
+      flash("Compared: the differences are shown as tracked changes (Review → Accept / Reject).");
+    } catch (e) {
+      alert(`Prime Word could not compare the documents:\n${(e as Error).message}`);
+    }
+  };
+
+  const compareRef = useRef(compareWith);
+  compareRef.current = compareWith;
 
   /** Replacing the current document: ask first if it has unsaved changes, then drop its snapshot. */
   const discardCurrent = async () => {
@@ -533,7 +631,7 @@ export function App() {
   /** Saves a converted PDF straight to a .docx, without opening it. */
   const saveConverted = async (result: ConversionResult, pdfName: string) => {
     try {
-      const saved = await saveDocument(writeDocx(result.doc), pdfName.replace(/\.pdf$/i, ".docx"));
+      const saved = await saveDocument((f) => (f === "docx" ? writeDocx(result.doc) : writeFormat(result.doc, f)), pdfName.replace(/\.pdf$/i, ".docx"));
       if (saved) flash(`Saved ${saved.name}`);
     } catch (e) {
       alert(`Prime Word could not save the converted document:\n${(e as Error).message}`);
@@ -676,7 +774,7 @@ export function App() {
     const wanted = new URLSearchParams(location.search).get("file");
     if (wanted && !wanted.replace(/\\/g, "/").endsWith(`/${file.name}`)) return;
     automationDone.current = true;
-    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest, navPaneSelfTest, printReadSelfTest, outlineSelfTest }) => {
+    void import("./selftest").then(({ pasteSelfTest, copySelfTest, spellSelfTest, perfSelfTest, alignSelfTest, alignScanSelfTest, scrollSelfTest, linesSelfTest, floatDragSelfTest, reviewSelfTest, keyboardSelfTest, pictureSelfTest, rotateSelfTest, dragBlockSelfTest, letterheadSelfTest, signatureSelfTest, blocksSelfTest, autoCorrectSelfTest, wave1SelfTest, fileTabSelfTest, referencesSelfTest, notesSelfTest, citationsSelfTest, equationSelfTest, tablesSelfTest, sectionsSelfTest, designSelfTest, lineNumbersSelfTest, hyphenationSelfTest, stylesSelfTest, styleSetsSelfTest, dropCapSelfTest, columnsSelfTest, driftSelfTest, trackChangesSelfTest, navPaneSelfTest, printReadSelfTest, outlineSelfTest, readAloudSelfTest, grammarSelfTest, compareSelfTest }) => {
       const v = view.current;
       if (!v) return;
       if (test === "paste") pasteSelfTest(v, () => fileRef.current.base);
@@ -703,6 +801,9 @@ export function App() {
       if (test === "citations") citationsSelfTest(v);
       if (test === "equation") equationSelfTest(v);
       if (test === "tables") tablesSelfTest(v);
+      if (test === "compare") compareSelfTest();
+      if (test === "grammar") grammarSelfTest(v);
+      if (test === "readaloud") readAloudSelfTest(v);
       if (test === "outline") outlineSelfTest(() => (globalThis as { primeView?: EditorView }).primeView!);
       if (test === "printread") printReadSelfTest();
       if (test === "nav") navPaneSelfTest(v, () => fileRef.current.base);
@@ -808,7 +909,10 @@ export function App() {
         }}
         onFontDialog={() => setDialog("font")} onSymbol={() => setDialog("symbol")} onEquation={() => setDialog("equation")} onDateTime={() => setDialog("datetime")}
         showMarks={marksOn} onShowMarks={toggleMarks}
-        onInfo={() => setInfo(true)}
+        onCompare={() => void compareWith()}
+        onProtect={() => setPasswordAsk({ mode: "set" })}
+        onThesaurus={() => setThesaurusOpen(true)}
+        onInfo={() => setInfo(true)} onReadAloud={() => setReading((r) => !r)}
         navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
         onToc={(levels) => { if (v) { insertToc(baseOf, { levels }, pagesRef.current)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
@@ -853,7 +957,7 @@ export function App() {
         const v2 = view.current;
         if (!v2 || !v2.dom.contains(e.target as Node)) return;
         const pos = v2.posAtCoords({ left: e.clientX, top: e.clientY })?.pos;
-        const issue = pos !== undefined && speller.current && (e.target as HTMLElement).closest(".pw-misspelled") ? misspellingAt(v2, pos) : undefined;
+        const issue = pos !== undefined && speller.current && (e.target as HTMLElement).closest(".pw-misspelled, .pw-grammar") ? misspellingAt(v2, pos) : undefined;
         e.preventDefault();
         if (issue) { setSpellMenu({ issue, x: e.clientX, y: e.clientY }); return; }
         // A right-click outside the selection moves the cursor there first (as in Word).
@@ -912,6 +1016,36 @@ export function App() {
         <NotesPane key={notesPane.focus ? `${notesPane.focus.kind}-${notesPane.focus.id}` : "all"} view={v} base={baseOf} measurer={measurerRef.current}
           focus={notesPane.focus} onClose={() => { setNotesPane(undefined); v.focus(); }} />
       )}
+      {passwordAsk && (
+        <PasswordDialog mode={passwordAsk.mode} name={passwordAsk.mode === "open" ? passwordAsk.name : file.name} hasPassword={passwordFor.current?.base === file.base}
+          onSubmit={async (pw) => {
+            if (passwordAsk.mode === "set") {
+              setPassword(fileRef.current.base, pw);
+              setDirty(true);
+              dirtyRef.current = true;
+              setPasswordAsk(null);
+              void deleteSnapshot(SESSION);
+              flash("Protected: the password applies when you save.");
+              return undefined;
+            }
+            try {
+              const docx = await decryptDocx(passwordAsk.bytes, pw);
+              setPasswordAsk(null);
+              load(docx, passwordAsk.name, passwordAsk.location, pw);
+              return undefined;
+            } catch (e) {
+              return e instanceof WrongPasswordError ? "The password is not correct. Passwords are case-sensitive." : (e as Error).message;
+            }
+          }}
+          onRemove={() => { setPassword(fileRef.current.base, undefined); setDirty(true); dirtyRef.current = true; setPasswordAsk(null); flash("The password is removed when you save."); }}
+          onClose={() => setPasswordAsk(null)} />
+      )}
+      {thesaurusOpen && (
+        <ThesaurusPane view={() => view.current ?? undefined} onClose={() => { setThesaurusOpen(false); view.current?.focus(); }} />
+      )}
+      {reading && (
+        <ReadAloud view={() => view.current ?? undefined} onClose={() => { setReading(false); view.current?.focus(); }} />
+      )}
       {info && v && (
         <PropertiesDialog base={fileRef.current.base} doc={v.state.doc} pages={layout?.pages.length} fileName={file.name}
           onSave={(p: DocumentProperties) => {
@@ -943,7 +1077,7 @@ export function App() {
         {mode === "print" && layout && <span>Page {v ? pageAt(v.state) : 1} of {layout.pages.length}</span>}
         <span>{v ? countWords(v.state.doc) : 0} words</span>
         <button className="link" onClick={() => setSpelling((on) => !on)} title="Turn spell checking on or off">
-          {spelling ? `Spelling: ${v ? (spellKey.getState(v.state)?.issues.length ?? 0) : 0} to review` : "Spelling: off"}
+          {spelling ? `Spelling & grammar: ${v ? (spellKey.getState(v.state)?.issues.length ?? 0) : 0} to review` : "Spelling & grammar: off"}
         </button>
         <span className={dirty ? "unsaved" : "saved"}>{dirty ? "Unsaved changes (autosaved for recovery)" : "Saved"}</span>
         {notice && <span className="notice">{notice}</span>}

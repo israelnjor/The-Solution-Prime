@@ -1,9 +1,11 @@
 /**
  * Spell checking, offline: Hunspell dictionaries (SCOWL, en-GB / en-US) shipped with the app, checked
- * with nspell. Misspelled words get a red wavy underline; right-click offers suggestions.
+ * with nspell. Misspelled words get a red wavy underline; right-click offers suggestions. Grammar
+ * issues (grammar.ts) are found with them and get a blue double underline.
  */
 import { timed } from "@prime/editor";
 import type { PrimeDocument } from "@prime/pdm";
+import { grammarIssues } from "./grammar";
 import nspell from "nspell";
 import type { Node } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
@@ -51,6 +53,8 @@ export interface Misspelling {
   from: number;
   to: number;
   word: string;
+  /** A grammar issue (not a spelling one): what is wrong, what to put instead. */
+  grammar?: { rule: string; message: string; replacements: string[] };
 }
 
 const WORD = /\p{L}[\p{L}'’]*\p{L}|\p{L}/gu;
@@ -80,7 +84,7 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
     // A paragraph checked before and unchanged since (the same node): its results, moved to where it is now.
     const known = cap ? undefined : paragraphs?.get(node);
     if (known) {
-      for (const m of known) out.push({ from: pos + m.from, to: pos + m.to, word: m.word });
+      for (const m of known) out.push({ ...m, from: pos + m.from, to: pos + m.to });
       return false;
     }
     const first = out.length;
@@ -92,7 +96,8 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
     node.forEach((child, offset) => {
       // Tracked deletions are not checked, and the text either side joins (as in Word).
       if (child.marks.some((m) => m.type.name === "revision" && m.attrs.kind === "del")) return;
-      const s = child.isText ? child.text! : " ";
+      // (A picture, field mark or other object: one character that is neither a letter nor a space.)
+      const s = child.isText ? child.text! : String.fromCharCode(0xfffc);
       const linked = child.marks.some((m) => m.type.name === "link" || m.type.name === "field");
       for (let i = 0; i < s.length; i++) { at.push(pos + 1 + offset + i); skip.push(linked); }
       text += s;
@@ -113,7 +118,19 @@ export function findMisspellings(doc: Node, speller: Speller, ignored: Set<strin
       if (correct(word) || correct(word.toLowerCase())) continue;
       out.push({ from: at[m.index!], to: at[m.index! + raw.length - 1] + 1, word });
     }
-    if (!cap) paragraphs?.set(node, out.slice(first).map((m) => ({ from: m.from - pos, to: m.to - pos, word: m.word })));
+    // Grammar, on the same text (not in links, fields or addresses; not where a misspelling is).
+    for (const g of grammarIssues(text)) {
+      const end = g.index + g.length - 1;
+      if (skip[g.index] || skip[end] || at[g.index] === undefined || at[end] === undefined) continue;
+      const word = text.slice(g.index, g.index + g.length);
+      if (ignored.has(`grammar:${g.rule}:${word}`)) continue;
+      const from = at[g.index];
+      const to = at[end] + 1;
+      if (out.slice(first).some((o) => !o.grammar && o.from < to && from < o.to)) continue;
+      out.push({ from, to, word, grammar: { rule: g.rule, message: g.message, replacements: g.replacements } });
+    }
+    out.sort((a, b) => a.from - b.from);
+    if (!cap) paragraphs?.set(node, out.slice(first).map((m) => ({ ...m, from: m.from - pos, to: m.to - pos })));
     return false;
   });
   return out;
@@ -135,7 +152,7 @@ export function spellPlugin(getSpeller: () => Speller | undefined, ignored: Set<
     const speller = getSpeller();
     if (!speller) return { issues: [], decorations: DecorationSet.empty };
     const issues = timed("spelling", () => findMisspellings(doc, speller, ignored, cache, paragraphs));
-    return { issues, decorations: DecorationSet.create(doc, issues.map((i) => Decoration.inline(i.from, i.to, { class: "pw-misspelled" }))) };
+    return { issues, decorations: DecorationSet.create(doc, issues.map((i) => Decoration.inline(i.from, i.to, { class: i.grammar ? "pw-grammar" : "pw-misspelled" }))) };
   };
   return new Plugin<SpellState>({
     key: spellKey,

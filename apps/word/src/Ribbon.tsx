@@ -85,6 +85,10 @@ export interface RibbonProps {
   onNavPane(): void;
   onReadMode(): void;
   onInfo(): void;
+  onThesaurus(): void;
+  onProtect(): void;
+  onCompare(): void;
+  onReadAloud(): void;
   onZoomFit(fit: "page" | "width"): void;
   /** References: a table of contents (levels), updating fields, captions, a table of figures, cross-references. */
   onToc(levels: number): void;
@@ -136,7 +140,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -224,10 +228,11 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group" aria-label="Document">
               <button onClick={onHome} title="The home screen: templates, recent documents, My templates">Home screen</button>
               <button onClick={onNew} title="New document (from a template)">New</button>
-              <button onClick={onOpen} title="Open a .docx (Ctrl+O)">Open</button>
+              <button onClick={onOpen} title="Open a document: Word (.docx, .doc), Rich Text (.rtf), OpenDocument (.odt) or plain text (.txt) (Ctrl+O)">Open</button>
               <RecentMenu onOpen={onOpenRecent} />
               <button onClick={onConvertPdf} title="Turn a PDF into an editable Word document">Convert PDF</button>
               <button onClick={onInfo} title="Document properties (title, author, tags) and statistics">Info</button>
+              <button onClick={onProtect} title="Protect the document with a password (or remove it)">Protect</button>
             </div>
             <div className="group" aria-label="Save">
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
@@ -696,6 +701,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </div>
             <div className="group" aria-label="Proofing">
               <button onClick={onAutoCorrect} title="Choose what is corrected as you type, and add your own replacements">AutoCorrect…</button>
+              <button onClick={onThesaurus} title="Words of like meaning for the word at the cursor (Shift+F7)">Thesaurus</button>
+              <button onClick={onReadAloud} title="Read the document aloud from the cursor (Ctrl+Alt+Space)">Read Aloud</button>
             </div>
             <div className="group" aria-label="Tracking">
               <button className={state && trackingOn(state) ? "on" : ""} aria-pressed={!!(state && trackingOn(state))} onClick={() => state && run(setTracking(!trackingOn(state)))()}
@@ -708,6 +715,9 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={run(acceptOrReject(false))} title="Reject the change at the cursor">Reject</button>
               <button onClick={run(acceptOrReject(true, true))} title="Accept every change in the document">Accept All</button>
               <button onClick={run(acceptOrReject(false, true))} title="Reject every change in the document">Reject All</button>
+            </div>
+            <div className="group" aria-label="Compare">
+              <button onClick={onCompare} title="Compare this document with an earlier version: the differences as tracked changes">Compare…</button>
             </div>
             <div className="group">
               <select value={markup} onChange={(e) => onMarkup(e.target.value as Markup)} title="How tracked changes are shown" aria-label="Markup">

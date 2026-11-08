@@ -1949,3 +1949,128 @@ export function outlineSelfTest(view: () => EditorView) {
     console.log("[selftest] align", JSON.stringify(out));
   })();
 }
+
+/** Read Aloud with a stand-in voice (a test browser cannot speak): paragraphs read in turn from the cursor, each word highlighted. */
+export function readAloudSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const out: Record<string, unknown> = { spoken: [] as string[], highlighted: [] as string[] };
+  // The stand-in: says each utterance's words (boundary events), then ends it.
+  const fake = {
+    speaking: false, paused: false, pending: false,
+    getVoices: () => [], addEventListener() {}, removeEventListener() {}, cancel() { this.cancelled++; }, cancelled: 0,
+    pause() {}, resume() {},
+    speak(u: SpeechSynthesisUtterance) {
+      (out.spoken as string[]).push(u.text.slice(0, 30));
+      void (async () => {
+        for (const m of u.text.slice(0, 40).matchAll(/\S+/g)) {
+          await wait(30);
+          u.onboundary?.({ name: "word", charIndex: m.index!, charLength: m[0].length } as unknown as SpeechSynthesisEvent);
+          const hl = view.dom.querySelector(".pw-speaking")?.textContent;
+          if (hl) (out.highlighted as string[]).push(hl);
+        }
+        if ((out.spoken as string[]).length < 3) u.onend?.({} as SpeechSynthesisEvent);
+      })();
+    },
+  };
+  Object.defineProperty(window, "speechSynthesis", { value: fake, configurable: true });
+  void (async () => {
+    await wait(1500);
+    let para = -1;
+    view.state.doc.forEach((n, pos) => { if (para < 0 && n.type.name === "paragraph" && n.textContent.length > 80) para = pos; });
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, para + 1)));
+    [...document.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent === "Review")?.click();
+    await wait(150);
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Read Aloud")?.click();
+    await wait(2500);
+    out.player = !!document.querySelector(".read-aloud");
+    out.firstParagraph = view.state.doc.nodeAt(para)!.textContent.slice(0, 30);
+    out.highlighted = (out.highlighted as string[]).slice(0, 8);
+    document.querySelector<HTMLButtonElement>('.read-aloud button[aria-label="Stop"]')?.click();
+    await wait(200);
+    out.stopped = { highlight: !!view.dom.querySelector(".pw-speaking"), cancelled: fake.cancelled > 0 };
+    document.querySelector<HTMLButtonElement>('button[aria-label="Close read aloud"]')?.click();
+    await wait(200);
+    out.closed = !document.querySelector(".read-aloud");
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/** Grammar: issues typed into a paragraph are underlined; the right-click menu explains and fixes one. */
+export function grammarSelfTest(view: EditorView) {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const out: Record<string, unknown> = {};
+  void (async () => {
+    await wait(3000);
+    let para = -1;
+    view.state.doc.forEach((n, pos) => { if (para < 0 && n.type.name === "paragraph" && n.textContent.length > 80) para = pos; });
+    const at = para + view.state.doc.nodeAt(para)!.nodeSize - 1;
+    view.dispatch(view.state.tr.insertText(" We saw a elephant in the the park. then i left.", at));
+    await wait(1500);
+    const marks = [...view.dom.querySelectorAll(".pw-grammar")].map((e) => e.textContent);
+    out.underlined = marks;
+    const el = [...view.dom.querySelectorAll<HTMLElement>(".pw-grammar")].find((e) => e.textContent === "a");
+    if (el) {
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+      await wait(300);
+      out.menu = { message: document.querySelector(".spell-menu .grammar-message")?.textContent, options: [...document.querySelectorAll(".spell-menu .suggestion")].map((b) => b.textContent) };
+      document.querySelector<HTMLButtonElement>(".spell-menu .suggestion")?.click();
+      await wait(1200);
+      out.fixed = view.state.doc.nodeAt(para)!.textContent.includes("saw an elephant");
+    }
+    out.status = document.querySelector("footer .link")?.textContent;
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}
+
+/**
+ * Compare: an "original" made from the open document (a word changed, one deleted, a paragraph
+ * removed, one added), compared with it. Accepting every change must give the revised text exactly;
+ * rejecting every change, the original's.
+ */
+export function compareSelfTest() {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const out: Record<string, unknown> = {};
+  const g = globalThis as unknown as { primeView: EditorView; primeBase: () => PrimeDocument; primeCompare: (f: { bytes: Uint8Array; name: string }) => Promise<void> };
+  void (async () => {
+    const ed = await import("@prime/editor");
+    const { writeDocx } = await import("@prime/docx");
+    await wait(2500);
+    const v = g.primeView;
+    const revisedText = (d: import("prosemirror-model").Node) => { const t: string[] = []; d.forEach((n) => t.push(n.textContent)); return t.join("\n"); };
+    const revised = revisedText(v.state.doc);
+    // The original: the open document, edited.
+    let tr = v.state.tr;
+    const paras: number[] = [];
+    v.state.doc.forEach((n, pos) => { if (n.type.name === "paragraph" && n.textContent.length > 60) paras.push(pos); });
+    const p1 = paras[3];
+    const t1 = v.state.doc.nodeAt(p1)!.textContent;
+    const w = t1.indexOf("preserve");
+    tr = tr.insertText("keep", p1 + 1 + w, p1 + 1 + w + "preserve".length);            // a word changed
+    const p2 = tr.mapping.map(paras[6]);
+    tr = tr.delete(p2 + 1, p2 + 1 + 6);                                                    // a word deleted (the original lacks it: an insertion)
+    const p3 = tr.mapping.map(paras[9]);
+    tr = tr.delete(p3, p3 + tr.doc.nodeAt(p3)!.nodeSize);                                  // a paragraph the original lacks
+    const p4 = tr.mapping.map(paras[12]);
+    tr = tr.insert(p4, v.state.schema.nodes.paragraph.create({}, v.state.schema.text("A paragraph only the original had.")));
+    const original = revisedText(tr.doc);
+    const bytes = writeDocx(ed.fromProseMirror(tr.doc, g.primeBase()));
+    await g.primeCompare({ bytes, name: "original.docx" });
+    await wait(4000);
+    const v2 = (globalThis as unknown as { primeView: EditorView }).primeView;
+    const list = ed.changes(v2.state.doc).map((c) => `${c.kind}:${c.paragraph !== undefined ? "¶" : v2.state.doc.textBetween(c.from, c.to).slice(0, 40)}`);
+    out.changes = list;
+    const all = (accept: boolean) => { let st = v2.state; ed.acceptOrReject(accept, true)(st, (t) => { st = st.apply(t); }); return revisedText(st.doc); };
+    const accepted = all(true);
+    const rejected = all(false);
+    out.acceptAllIsRevised = accepted === revised;
+    out.rejectAllIsOriginal = rejected === original;
+    if (!out.rejectAllIsOriginal) {
+      const a = rejected.split("\n"); const b = original.split("\n");
+      out.firstDiff = a.findIndex((x, i) => x !== b[i]);
+      out.lines = [a[out.firstDiff as number]?.slice(0, 80), b[out.firstDiff as number]?.slice(0, 80)];
+    }
+    out.name = document.querySelector("footer.status span")?.textContent;
+    console.log("[selftest] align", JSON.stringify(out));
+  })();
+}

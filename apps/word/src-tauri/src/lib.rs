@@ -12,11 +12,17 @@ use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
 
-/// The .docx passed on the command line ("Open with", double-click), if any: its path and bytes.
+/// Documents Prime Word opens: Word (.docx, .doc), Rich Text, OpenDocument and plain text.
+fn is_document(path: &str) -> bool {
+    let p = path.to_lowercase();
+    [".docx", ".doc", ".rtf", ".odt", ".txt"].iter().any(|ext| p.ends_with(ext))
+}
+
+/// The document passed on the command line ("Open with", double-click), if any: its path and bytes.
 /// That one file is added to the app's file scope so Save can write back to it.
 #[tauri::command]
 fn startup_document(app: AppHandle) -> Option<(String, Vec<u8>)> {
-    let path = std::env::args().skip(1).find(|a| a.to_lowercase().ends_with(".docx"))?;
+    let path = std::env::args().skip(1).find(|a| is_document(a))?;
     let bytes = fs::read(&path).ok()?;
     let _ = app.fs_scope().allow_file(&path);
     remember(&app, &path);
@@ -52,7 +58,7 @@ fn same_path(a: &str, b: &str) -> bool {
 }
 
 fn remember(app: &AppHandle, path: &str) {
-    if !path.to_lowercase().ends_with(".docx") {
+    if !is_document(path) {
         return; // e.g. a PDF export written through save_document
     }
     let mut list = recent_list(app);
@@ -74,7 +80,7 @@ fn modified_ms(path: &Path) -> Option<u64> {
 
 /// Files the user chose (dialog, "Open with") or documents opened before (recent list) — nothing else.
 fn may_access(app: &AppHandle, path: &str) -> bool {
-    app.fs_scope().is_allowed(path) || (path.to_lowercase().ends_with(".docx") && is_recent(app, path))
+    app.fs_scope().is_allowed(path) || (is_document(path) && is_recent(app, path))
 }
 
 #[derive(serde::Serialize)]

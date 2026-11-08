@@ -6,15 +6,15 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-07, after Waves 0–4): about 66%
+## Where we are (2026-11-08, after Waves 0–5): about 72%
 
 | Area | Feature | Status |
 |---|---|---|
 | **File** | New from templates, Open .docx, Recent, Save / Save As, autosave + crash recovery | ✅ |
-| | Export PDF, Print (via PDF), PDF → Word converter | ✅ |
-| | Print dialog (printer, pages, copies), print preview | ❌ |
-| | Open/save .doc, .rtf, .odt, .txt | ❌ |
-| | Document properties, password protection, version history | ❌ |
+| | Export PDF, PDF → Word converter; Print dialog (pages, preview; printer, copies and two-sided in the system's window) | ✅ |
+| | Open .doc, .rtf, .odt, .txt; save as .rtf, .odt, .txt (and .docx) | ✅ |
+| | Document properties (File → Info: title, author, tags, statistics), password protection (Word's encryption: opens Word's, Word opens ours) | ✅ |
+| | Save as .doc, version history | ❌ |
 | **Home: font** | Font, size, colour, highlight, bold/italic/underline/strike | ✅ |
 | | Superscript/subscript, grow/shrink font, change case, clear formatting, underline styles, character spacing, font dialog | ✅ |
 | | Small caps (saved, not drawn), text effects (shadow, outline, glow) | ❌ |
@@ -43,9 +43,11 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | **References** | Insert/update table of contents, footnotes and endnotes (laid out at the foot of the page / after the text, editable), captions, table of figures, cross-references, citations & bibliography (APA, Harvard, IEEE; Word's own sources), Update Field (F9) | ✅ |
 | | Index, table of authorities, footnote options (numbering format, restart per page) | ❌ |
 | **Review** | Spelling, word count, comments, track changes (record insertions, deletions, paragraph breaks and formatting; show/accept/reject) | ✅ |
-| | Grammar, thesaurus, compare, read aloud, protect | ❌ |
+| | Grammar (basic rules), thesaurus (WordNet, offline), compare documents (as tracked changes), read aloud (the computer's own voices) | ✅ |
+| | Restrict editing, full grammar and style checking | ❌ |
 | **View** | Print / Web layout, zoom, ruler, formatting marks, navigation pane (headings: jump, collapse, drag to move a section) | ✅ |
-| | Read mode, outline, vertical ruler, multiple pages, dark mode | ❌ |
+| | Read mode (one or two pages side by side), outline view (levels, promote/demote, show level, fold), One Page / Page Width zoom | ✅ |
+| | Pages side by side while editing, vertical ruler, dark mode | ❌ |
 | **Tables** | Insert, add/delete rows and columns, Tab navigation, merge/split cells, borders & shading per cell, table styles (Word's conditional formats: header/total row, banding, first/last column) with options, cell alignment, column resize by dragging, distribute/AutoFit, repeat header rows, sort, text↔table | ✅ |
 | | Row height, cell margins, nested-table tools, formulas, draw table | ❌ |
 | **Pictures** | Insert, inline/floating display, wrap options, drag anywhere, crop, rotate, alt text | ✅ |
@@ -59,7 +61,7 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 - **PDF → Word built in**, offline, free — Word needs Acrobat or online services for good results.
 - **Offline and private**: nothing leaves the computer; no account, no subscription.
 - **Fast on long documents** (145 pages: ~28 ms per keystroke until painted, no freezes while typing)
-  and a small installer (5.6 MB, PDF converter included).
+  and a small installer (6.2 MB, PDF converter and thesaurus included).
 - **Faithful to Word's layout**: same pages, same line positions (measured against Word itself).
 - **Make it yours**: design a letterhead in a minute; turn a phone photo of a signature into a clean
   e-signature; keep signature blocks, addresses and company stamps and insert them left, centre or
@@ -89,9 +91,15 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    hyphenation; create/modify styles, style sets, theme fonts and colours; drop cap. Each checked
    against Word (same pages and positions; Word reads ours as its own). On screen, a document shows one
    column count (its first): a section with a different count shows as one column (it prints right).
-5. **Review, view and files** — record tracked changes ✅ (2026-11-07: insertions, deletions and paragraph breaks, Word's rules: your own insertions delete outright, typing goes at the cursor; character and paragraph formatting kept as Word keeps it, "Formatted: Bold"), navigation pane ✅ (2026-11-07: headings to jump to, collapse and drag; Ctrl+F search with a results list), compare documents, read
-   mode, outline view, multiple pages, print dialog, document properties, password protection,
-   .doc/.rtf/.odt/.txt open and save, thesaurus, read aloud, grammar (basic).
+5. **Review, view and files** ✅ (2026-11-08) — record tracked changes (insertions, deletions, paragraph
+   breaks and formatting, by Word's rules); navigation pane (headings: jump, collapse, drag to move a
+   section; Ctrl+F search with results); compare documents (the differences as tracked changes: accepting
+   all gives the revised text, rejecting all the original); read mode (one or two pages side by side);
+   outline view; One Page / Page Width zoom; Print dialog with preview; document properties; password
+   protection (Word's Agile Encryption, AES-256: each opens the other's); open .doc, .rtf, .odt, .txt and
+   save .rtf, .odt, .txt (checked: Word opens what we write, and we read what Word writes); thesaurus
+   (WordNet 3.0, offline); read aloud (installed voices only); basic grammar. Not done: saving .doc
+   (.docx is read everywhere), pages side by side while editing (read mode has them).
 6. **Objects** — shapes and text boxes (insert and edit), simple charts.
 7. **Release** — text recognition for scanned PDFs, code signing, automatic updates, About/version,
    user guide.

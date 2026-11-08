@@ -38,8 +38,23 @@ type PickerWindow = Window & {
 };
 const browser = window as PickerWindow;
 const MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const PICKER_TYPES = [{ description: "Word document", accept: { [MIME]: [".docx"] } }];
-const FILTERS = [{ name: "Word document", extensions: ["docx"] }];
+/** What can be opened: Word documents (.docx, .doc), Rich Text, OpenDocument text, plain text. */
+const PICKER_TYPES = [{ description: "Documents", accept: { [MIME]: [".docx"], "application/msword": [".doc"], "application/rtf": [".rtf"], "application/vnd.oasis.opendocument.text": [".odt"], "text/plain": [".txt"] } }];
+const FILTERS = [{ name: "Documents", extensions: ["docx", "doc", "rtf", "odt", "txt"] }, { name: "Word document", extensions: ["docx", "doc"] }];
+/** What a document can be saved as, in Save As's list. */
+export type SaveFormat = "docx" | "rtf" | "odt" | "txt";
+const SAVE_TYPES: Record<SaveFormat, { name: string; mime: string }> = {
+  docx: { name: "Word document", mime: MIME },
+  rtf: { name: "Rich Text Format", mime: "application/rtf" },
+  odt: { name: "OpenDocument text", mime: "application/vnd.oasis.opendocument.text" },
+  txt: { name: "Plain text", mime: "text/plain" },
+};
+const saveFormatOf = (name: string): SaveFormat | undefined => {
+  const ext = /\.([a-z]+)$/i.exec(name)?.[1]?.toLowerCase();
+  return ext === "docx" || ext === "rtf" || ext === "odt" || ext === "txt" ? ext : undefined;
+};
+/** The formats in Save As's list: the document's own first. */
+const saveOrder = (name: string): SaveFormat[] => { const own = saveFormatOf(name) ?? "docx"; return [own, ...(["docx", "rtf", "odt", "txt"] as SaveFormat[]).filter((f) => f !== own)]; };
 // PDFs are not opened: they are converted, in the PDF converter (choosePdf).
 const PDF_FILTERS = [{ name: "PDF", extensions: ["pdf"] }];
 
@@ -102,7 +117,7 @@ export async function openDocument(): Promise<OpenedFile | undefined> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".docx";
+    input.accept = ".docx,.doc,.rtf,.odt,.txt";
     input.onchange = async () => {
       const f = input.files?.[0];
       resolve(f ? { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name } : undefined);
@@ -112,20 +127,22 @@ export async function openDocument(): Promise<OpenedFile | undefined> {
 }
 
 /**
- * Saves to `location`, or asks where to save (Save As) when there is none.
+ * Saves to `location`, or asks where to save (Save As) when there is none; `make` writes the document
+ * in the format of the name chosen (.docx, .rtf, .odt, .txt).
  * Returns the new location and name, or undefined when the user cancels. Throws ChangedOnDiskError when
  * the file changed since `location.modified`, unless `overwrite` is set.
  */
-export async function saveDocument(bytes: Uint8Array, name: string, location?: DocumentLocation, overwrite = false):
+export async function saveDocument(make: (format: SaveFormat) => Uint8Array | Promise<Uint8Array>, name: string, location?: DocumentLocation, overwrite = false):
   Promise<{ location?: DocumentLocation; name: string } | undefined> {
   const known = overwrite ? undefined : location?.modified;
   if (isDesktop) {
     let path = location?.kind === "path" ? location.path : undefined;
     if (!path) {
-      path = (await saveDialog({ defaultPath: name, filters: FILTERS })) ?? undefined;
+      path = (await saveDialog({ defaultPath: name, filters: saveOrder(name).map((f) => ({ name: SAVE_TYPES[f].name, extensions: [f] })) })) ?? undefined;
       if (!path) return undefined;
-      if (!/\.docx$/i.test(path)) path += ".docx";
+      if (!saveFormatOf(path)) path += ".docx";
     }
+    const bytes = await make(saveFormatOf(path) ?? "docx");
     // Atomic save (temporary file, flushed, renamed over the original) — see save_document in lib.rs.
     let modified: number;
     try {
@@ -137,11 +154,13 @@ export async function saveDocument(bytes: Uint8Array, name: string, location?: D
     }
     return { location: { kind: "path", path, modified }, name: baseName(path) };
   }
-  const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: MIME });
   let handle = location?.kind === "handle" ? location.handle : undefined;
   if (!handle && browser.showSaveFilePicker) {
-    try { handle = await browser.showSaveFilePicker({ suggestedName: name, types: PICKER_TYPES }); } catch { return undefined; }
+    const types = saveOrder(name).map((f) => ({ description: SAVE_TYPES[f].name, accept: { [SAVE_TYPES[f].mime]: [`.${f}`] } }));
+    try { handle = await browser.showSaveFilePicker({ suggestedName: name, types }); } catch { return undefined; }
   }
+  const format = saveFormatOf(handle?.name ?? name) ?? "docx";
+  const blob = new Blob([(await make(format)) as Uint8Array<ArrayBuffer>], { type: SAVE_TYPES[format].mime });
   if (handle) {
     if (known && handle === (location?.kind === "handle" ? location.handle : undefined) && (await handle.getFile()).lastModified > known) {
       throw new ChangedOnDiskError();
