@@ -10,6 +10,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { isDesktop } from "./platform";
 
+/** Font names the browser itself takes as another font (as Chromium does on Windows). */
+const ALIASES: Record<string, string> = { helvetica: "Arial", times: "Times New Roman", courier: "Courier New" };
+
 const keyOf = (f: FontKey) => `${f.family}|${f.bold}|${f.italic}`;
 
 /** Lays out and renders the document; returns the PDF bytes and the page count. */
@@ -20,7 +23,12 @@ export async function makePdf(doc: PrimeDocument, measurer: Measurer): Promise<{
     const wanted = new Map<string, FontKey>();
     for (const page of layout.pages) for (const line of page.lines) for (const s of line.segments) wanted.set(keyOf(s.font), s.font);
     for (const [key, font] of wanted) {
-      const found = await invoke<[string, number] | null>("font_lookup", { family: font.family, bold: font.bold, italic: font.italic });
+      // A font not installed was laid out in the browser's default, Times New Roman: the PDF uses it too
+      // (in the same style), so the words sit where the layout put them.
+      const lookup = (family: string) => invoke<[string, number] | null>("font_lookup", { family, bold: font.bold, italic: font.italic });
+      const alias = ALIASES[font.family.toLowerCase()];
+      const found = await lookup(font.family) ?? (alias ? await lookup(alias) : null)
+        ?? await invoke<[string, number] | null>("font_lookup", { family: "Times New Roman", bold: font.bold, italic: font.italic });
       if (!found) continue;
       const file = new Uint8Array(await invoke<ArrayBuffer>("font_bytes", { path: found[0] }));
       fonts.set(key, extractFont(file, found[1]));

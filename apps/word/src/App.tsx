@@ -1,7 +1,7 @@
 import { Fragment, type Node as PmNode } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
+  blankDocument, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -353,7 +353,7 @@ export function App() {
         paragraphStyles(file.base, measurer),
         findPlugin(),
         pastePlugin(() => fileRef.current.base),
-        floatEditing(),
+        floatEditing(), inlinePictureResizing(),
         blockHandle(),
         pasteOptions(),
         showMarks(),

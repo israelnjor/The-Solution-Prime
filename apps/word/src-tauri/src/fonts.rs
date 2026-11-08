@@ -23,6 +23,8 @@ struct Face {
 #[derive(Default)]
 pub struct FontIndex(Mutex<Option<HashMap<String, Vec<Face>>>>);
 
+/// The folders fonts are installed in: Windows's (and Office's cloud fonts), macOS's and Linux's.
+/// Folders that do not exist on this system are skipped when indexing.
 fn font_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(windir) = std::env::var("WINDIR") {
@@ -36,7 +38,37 @@ fn font_dirs() -> Vec<PathBuf> {
             dirs.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
         }
     }
+    // macOS: the system's, all users', the user's, and Office's (Calibri, Cambria… when Office is installed).
+    dirs.push(PathBuf::from("/System/Library/Fonts"));
+    dirs.push(PathBuf::from("/Library/Fonts"));
+    dirs.push(PathBuf::from("/Applications/Microsoft Word.app/Contents/Resources/DFonts"));
+    // Linux: the system's and the user's (nested in folders per package).
+    dirs.push(PathBuf::from("/usr/share/fonts"));
+    dirs.push(PathBuf::from("/usr/local/share/fonts"));
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join("Library").join("Fonts"));
+        dirs.push(home.join(".local").join("share").join("fonts"));
+        dirs.push(home.join(".fonts"));
+    }
     dirs
+}
+
+/// Font files in a folder and its subfolders (Linux keeps fonts nested a few levels deep).
+fn font_files(dir: &PathBuf, depth: u32, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for path in entries.flatten().map(|e| e.path()) {
+        if path.is_dir() {
+            if depth < 4 {
+                font_files(&path, depth + 1, out);
+            }
+        } else {
+            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if ["ttf", "otf", "ttc"].contains(&ext.as_str()) {
+                out.push(path);
+            }
+        }
+    }
 }
 
 fn u16_at(b: &[u8], at: usize) -> Option<u16> {
@@ -91,32 +123,29 @@ fn names(f: &mut File, offset: u64) -> Option<(String, String)> {
 
 fn build() -> HashMap<String, Vec<Face>> {
     let mut index: HashMap<String, Vec<Face>> = HashMap::new();
+    let mut files = Vec::new();
     for dir in font_dirs() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for path in entries.flatten().map(|e| e.path()) {
-            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if !["ttf", "otf", "ttc"].contains(&ext.as_str()) {
-                continue;
-            }
-            let Ok(mut f) = File::open(&path) else { continue };
-            let Some(head) = read_at(&mut f, 0, 12) else { continue };
-            // A collection lists the offsets of its faces' table directories.
-            let offsets: Vec<u64> = if &head[0..4] == b"ttcf" {
-                let n = u32_at(&head, 8).unwrap_or(0).min(64) as usize;
-                read_at(&mut f, 12, 4 * n).map_or(vec![], |b| (0..n).filter_map(|i| u32_at(&b, 4 * i).map(u64::from)).collect())
-            } else {
-                vec![0]
-            };
-            for (i, offset) in offsets.into_iter().enumerate() {
-                if let Some((family, sub)) = names(&mut f, offset) {
-                    let s = sub.to_lowercase();
-                    index.entry(family.to_lowercase()).or_default().push(Face {
-                        path: path.clone(),
-                        index: i as u32,
-                        bold: s.contains("bold") || s.contains("black") || s.contains("heavy"),
-                        italic: s.contains("italic") || s.contains("oblique"),
-                    });
-                }
+        font_files(&dir, 0, &mut files);
+    }
+    for path in files {
+        let Ok(mut f) = File::open(&path) else { continue };
+        let Some(head) = read_at(&mut f, 0, 12) else { continue };
+        // A collection lists the offsets of its faces' table directories.
+        let offsets: Vec<u64> = if &head[0..4] == b"ttcf" {
+            let n = u32_at(&head, 8).unwrap_or(0).min(64) as usize;
+            read_at(&mut f, 12, 4 * n).map_or(vec![], |b| (0..n).filter_map(|i| u32_at(&b, 4 * i).map(u64::from)).collect())
+        } else {
+            vec![0]
+        };
+        for (i, offset) in offsets.into_iter().enumerate() {
+            if let Some((family, sub)) = names(&mut f, offset) {
+                let s = sub.to_lowercase();
+                index.entry(family.to_lowercase()).or_default().push(Face {
+                    path: path.clone(),
+                    index: i as u32,
+                    bold: s.contains("bold") || s.contains("black") || s.contains("heavy"),
+                    italic: s.contains("italic") || s.contains("oblique"),
+                });
             }
         }
     }

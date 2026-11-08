@@ -5,7 +5,7 @@ export { isActive, paragraphProp, setParagraph, toggleRun, wordCount } from "./c
 export { blankDocument } from "./blank.js";
 export { resolvePageStarts, type ResolvedStart } from "./pages.js";
 export {
-  deleteFloat, floatAt, floatEditing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
+  deleteFloat, floatAt, floatEditing, inlinePictureResizing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
   setPictureWrap, withBox, type FloatBox,
 } from "./floats.js";
 export { PAGE_GAP, pageAt, pageTops, pagination, paginationKey, type PagedOptions, mark, sectionOffsets, timed } from "./paged.js";

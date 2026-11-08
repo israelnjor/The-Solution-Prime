@@ -52,9 +52,9 @@ fn store_recent(app: &AppHandle, list: &[String]) {
     }
 }
 
-/// Windows paths are case-insensitive.
+/// Paths on Windows and macOS are case-insensitive; on Linux they are not.
 fn same_path(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
+    if cfg!(target_os = "linux") { a == b } else { a.eq_ignore_ascii_case(b) }
 }
 
 fn remember(app: &AppHandle, path: &str) {
@@ -345,8 +345,10 @@ fn open_pdf(request: Request) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.pdf", name.trim_end_matches(".docx")));
     atomic_write(&path, raw_body(&request)?).map_err(|e| e.to_string())?;
-    // Explorer opens a file with its default application; the path is our own temp file.
-    std::process::Command::new("explorer").arg(&path).spawn().map_err(|e| e.to_string())?;
+    // Opened with its default application (Explorer on Windows, open on macOS, xdg-open on Linux); the
+    // path is our own temporary file.
+    let opener = if cfg!(target_os = "windows") { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(opener).arg(&path).spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 

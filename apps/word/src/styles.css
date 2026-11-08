@@ -693,3 +693,15 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .thes-groups li:hover .thes-insert, .thes-insert:focus { opacity: 1; }
 .thes-ant { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 .thes-note, .thes-credit { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* Resize handles on a selected picture in line with the text. */
+.pw-resize-box { position: fixed; z-index: 25; pointer-events: none; outline: 1px solid #2b579a; }
+.pw-resize-handle { position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px; background: #fff; border: 1px solid #2b579a; border-radius: 2px; pointer-events: auto; }
+.pw-resize-handle.h-nw { left: 0; top: 0; cursor: nwse-resize; }
+.pw-resize-handle.h-n { left: 50%; top: 0; cursor: ns-resize; }
+.pw-resize-handle.h-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.pw-resize-handle.h-e { left: 100%; top: 50%; cursor: ew-resize; }
+.pw-resize-handle.h-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.pw-resize-handle.h-s { left: 50%; top: 100%; cursor: ns-resize; }
+.pw-resize-handle.h-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.pw-resize-handle.h-w { left: 0; top: 50%; cursor: ew-resize; }

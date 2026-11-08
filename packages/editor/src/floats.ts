@@ -278,3 +278,116 @@ export function setAltText(text: string): Command {
     return true;
   };
 }
+
+/**
+ * Resize handles on a selected picture in line with the text (Word's eight): a corner keeps the
+ * picture's proportions, a side stretches it one way. The new size is set when the drag ends (one
+ * undo step); the outline shows the size while dragging.
+ */
+export function inlinePictureResizing(): Plugin {
+  return new Plugin({
+    view(view) {
+      const box = document.createElement("div");
+      box.className = "pw-resize-box";
+      box.style.display = "none";
+      const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+      for (const h of HANDLES) {
+        const el = document.createElement("span");
+        el.className = `pw-resize-handle h-${h}`;
+        el.dataset.handle = h;
+        box.append(el);
+      }
+      document.body.append(box);
+      // A picture of ours, or one kept from Word as it was (its drawing XML, sized by wp:extent).
+      const target = () => {
+        const sel = view.state.selection;
+        if (!(sel instanceof NodeSelection) || sel.node.attrs.float) return undefined;
+        const kept = sel.node.type.name === "run_preserved" && /<wp:inline[ >][\s\S]*?<wp:extent /.test(sel.node.attrs.preserved?.xml ?? "");
+        if (sel.node.type.name !== "image" && !kept) return undefined;
+        const dom = view.nodeDOM(sel.from) as HTMLElement | null;
+        const img = dom?.tagName === "IMG" ? dom : dom?.querySelector?.("img");
+        return img ? { pos: sel.from, node: sel.node, img: img as HTMLImageElement, kept } : undefined;
+      };
+      const place = () => {
+        const t = target();
+        if (!t) { if (!box.dataset.dragging) box.style.display = "none"; return; }
+        const r = t.img.getBoundingClientRect();
+        if (!r.width) { box.style.display = "none"; return; }
+        Object.assign(box.style, { display: "block", left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+      };
+      const down = (e: PointerEvent) => {
+        const h = (e.target as HTMLElement).dataset.handle;
+        const t = target();
+        if (!h || !t) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const start = t.img.getBoundingClientRect();
+        const ptWidth = t.kept ? Number(/<wp:extent cx="(\d+)"/.exec(t.node.attrs.preserved.xml)?.[1] ?? 0) / 12700 : t.node.attrs.width;
+        const px = start.width / (ptWidth || start.width); // screen pixels per point (zoom included)
+        const ratio = start.width / start.height;
+        const x0 = e.clientX;
+        const y0 = e.clientY;
+        let w = start.width;
+        let hh = start.height;
+        box.dataset.dragging = "1";
+        const move = (ev: PointerEvent) => {
+          const dx = (ev.clientX - x0) * (h.includes("w") ? -1 : 1);
+          const dy = (ev.clientY - y0) * (h.includes("n") ? -1 : 1);
+          w = start.width;
+          hh = start.height;
+          if (h.length === 2) {
+            // A corner: proportions kept, by whichever way the pointer went further.
+            const k = Math.max((start.width + dx) / start.width, (start.height + dy) / start.height);
+            w = start.width * k;
+            hh = w / ratio;
+          } else if (h === "e" || h === "w") w = start.width + dx;
+          else hh = start.height + dy;
+          w = Math.max(8, w);
+          hh = Math.max(8, hh);
+          Object.assign(box.style, {
+            width: `${w}px`, height: `${hh}px`,
+            left: `${h.includes("w") ? start.right - w : start.left}px`, top: `${h.includes("n") ? start.bottom - hh : start.top}px`,
+          });
+        };
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          delete box.dataset.dragging;
+          const now = target();
+          if (now && (Math.abs(w - start.width) > 1 || Math.abs(hh - start.height) > 1)) {
+            const width = Math.round((w / px) * 10) / 10;
+            const height = Math.round((hh / px) * 10) / 10;
+            let attrs: Record<string, unknown> = { ...now.node.attrs, width, height };
+            if (now.kept) {
+              // A drawing kept from Word: its size in EMU, in the inline extent and the picture's own transform.
+              const cx = Math.round(width * 12700);
+              const cy = Math.round(height * 12700);
+              const xml = (now.node.attrs.preserved.xml as string)
+                .replace(/(<wp:extent )cx="\d+" cy="\d+"/, `$1cx="${cx}" cy="${cy}"`)
+                .replace(/(<a:xfrm\b[^>]*>[\s\S]*?<a:ext )cx="\d+" cy="\d+"/, `$1cx="${cx}" cy="${cy}"`);
+              attrs = { ...now.node.attrs, preserved: { ...now.node.attrs.preserved, xml } };
+            }
+            const tr = view.state.tr.setNodeMarkup(now.pos, undefined, attrs);
+            view.dispatch(tr.setSelection(NodeSelection.create(tr.doc, now.pos)));
+          }
+          view.focus();
+          requestAnimationFrame(place);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      };
+      box.addEventListener("pointerdown", down);
+      const onScroll = () => requestAnimationFrame(place);
+      window.addEventListener("scroll", onScroll, true);
+      window.addEventListener("resize", onScroll);
+      return {
+        update: () => requestAnimationFrame(place),
+        destroy() {
+          window.removeEventListener("scroll", onScroll, true);
+          window.removeEventListener("resize", onScroll);
+          box.remove();
+        },
+      };
+    },
+  });
+}

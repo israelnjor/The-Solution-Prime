@@ -743,7 +743,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                   <option value="inFront">In front of text</option>
                 </select>
               </label>
-              {pictureWrap(picture.node) !== "inline" && <span className="hint">Drag the picture to move it; drag a corner to resize.</span>}
+              <span className="hint">{pictureWrap(picture.node) !== "inline" ? "Drag the picture to move it; drag a corner to resize." : "Drag a corner to resize (keeps its shape), or a side to stretch it."}</span>
             </div>
             <div className="group">
               <button onClick={onEditPicture} disabled={picture.kept} title={picture.kept ? "Pictures with effects from Word cannot be cropped yet" : "Crop and rotate"}>Crop &amp; Rotate…</button>

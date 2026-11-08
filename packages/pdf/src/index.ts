@@ -48,9 +48,12 @@ class Renderer {
     let font = this.fonts.get(id);
     if (!font) {
       const data = this.source.fontData(key);
+      // A font with no file: Times, as the layout measured it (a missing font is measured in the
+      // browser's default, Times New Roman); Helvetica, much wider, ran the words together.
+      const standard = key.bold && key.italic ? StandardFonts.TimesRomanBoldItalic : key.bold ? StandardFonts.TimesRomanBold : key.italic ? StandardFonts.TimesRomanItalic : StandardFonts.TimesRoman;
       font = data
-        ? this.pdf.embedFont(data, { subset: true }).catch(() => this.pdf.embedFont(StandardFonts.Helvetica))
-        : this.pdf.embedFont(StandardFonts.Helvetica);
+        ? this.pdf.embedFont(data, { subset: true }).catch(() => this.pdf.embedFont(standard))
+        : this.pdf.embedFont(standard);
       this.fonts.set(id, font);
     }
     return font;
