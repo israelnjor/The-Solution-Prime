@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 
 /// Documents Prime Word opens: Word (.docx, .doc), Rich Text, OpenDocument and plain text.
@@ -355,6 +355,19 @@ fn open_pdf(request: Request) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // One Prime Word: a document opened again (double-click, "Open with") while it runs goes to the
+        // running app, as a new tab, and its window comes to the front. First, before the other plugins.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(path) = argv.iter().skip(1).find(|a| is_document(a)) {
+                let _ = app.fs_scope().allow_file(path);
+                remember(app, path);
+                let _ = app.emit("open-document", path.clone());
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(fonts::FontIndex::default())

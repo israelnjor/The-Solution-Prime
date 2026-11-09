@@ -70,7 +70,7 @@ export async function orphanedSnapshots(): Promise<Snapshot[]> {
     if (isDesktop) {
       const list = await invoke<[string, number][]>("recovery_list");
       for (const [id] of list) {
-        if (id === SESSION) continue;
+        if (id === SESSION || id.startsWith(`${SESSION}-`)) continue; // this session's (one per open document)
         try {
           const bytes = new Uint8Array(await invoke<ArrayBuffer>("recovery_load", { id }));
           out.push(JSON.parse(new TextDecoder().decode(bytes)) as Snapshot);
@@ -80,7 +80,7 @@ export async function orphanedSnapshots(): Promise<Snapshot[]> {
       }
     } else {
       const all = await idbDo<Snapshot[]>("readonly", (store) => store.getAll() as IDBRequest<Snapshot[]>);
-      out.push(...all.filter((s) => s.id !== SESSION));
+      out.push(...all.filter((s) => s.id !== SESSION && !s.id.startsWith(`${SESSION}-`)));
     }
   } catch {
     // Recovery storage unavailable: nothing to offer.

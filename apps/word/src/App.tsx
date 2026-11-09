@@ -1,4 +1,4 @@
-import { Fragment, type Node as PmNode } from "prosemirror-model";
+import { Fragment, type Node as PmNode, type Schema } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
   blankDocument, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
@@ -16,7 +16,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { baseKeymap, chainCommands } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
-import { type Command, EditorState, NodeSelection, TextSelection } from "prosemirror-state";
+import { type Command, EditorState, NodeSelection, Selection, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { Profiler, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { FindPanel } from "./FindPanel";
@@ -42,6 +42,8 @@ import { ReadAloud, speakPlugin } from "./ReadAloud";
 import { ThesaurusPane } from "./Thesaurus";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, type OpenedFile, saveDocument, type SaveFormat } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
+import { DocTabs } from "./DocTabs";
+import { listen } from "@tauri-apps/api/event";
 import { FONTS, LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
 import { ContextMenu } from "./ContextMenu";
 import { DateTimeDialog } from "./DateTimeDialog";
@@ -117,6 +119,21 @@ export function App() {
   const view = useRef<EditorView | null>(null);
   const [file, setFile] = useState<Loaded>({ base: blankDocument(), name: "Document1.docx", warnings: [], fonts: 0 });
   const [dirty, setDirty] = useState(false);
+  /**
+   * Open documents, one tab each. The current one's document and unsaved state are `file` and `dirty`
+   * (kept in its tab as they change); the others keep theirs, and their editor states (editors below).
+   */
+  const [tabs, setTabs] = useState<{ id: number; file: Loaded; dirty: boolean; scroll: number }[]>(() => [{ id: 1, file, dirty: false, scroll: 0 }]);
+  const [activeTab, setActiveTab] = useState(1);
+  const activeRef = useRef(1);
+  activeRef.current = activeTab;
+  /** This tab's recovery snapshot (one per open document). */
+  const snapId = (tab = activeRef.current) => `${SESSION}-t${tab}`;
+  /**
+   * Each open document's editor: its schema and measurer, and its last state (text, selection, undo
+   * history) while another document or view is shown — the editor is rebuilt from it, not from the file.
+   */
+  const editors = useRef(new Map<PrimeDocument, { fonts: number; measurer: CanvasMeasurer; schema: Schema; state?: EditorState; carry?: { doc: unknown; selection: unknown } }>());
   const [showWarnings, setShowWarnings] = useState(false);
   /** Print Layout shows pages as they will print; Web Layout is one continuous column. */
   // (Dev: ?mode=web opens in Web Layout.)
@@ -201,10 +218,13 @@ export function App() {
    * The open document's password (it is saved encrypted with it), in memory only, and only for that
    * document: another one opened or started is not saved with it.
    */
-  const passwordFor = useRef<{ base: PrimeDocument; password: string } | undefined>(undefined);
-  const currentPassword = () => (passwordFor.current && passwordFor.current.base === fileRef.current.base ? passwordFor.current.password : undefined);
+  const passwordFor = useRef(new Map<PrimeDocument, string>());
+  const currentPassword = () => passwordFor.current.get(fileRef.current.base);
   const [, setPasswordVersion] = useState(0);
-  const setPassword = (base: PrimeDocument, password: string | undefined) => { passwordFor.current = password ? { base, password } : undefined; setPasswordVersion((n) => n + 1); };
+  const setPassword = (base: PrimeDocument, password: string | undefined) => {
+    if (password) passwordFor.current.set(base, password); else passwordFor.current.delete(base);
+    setPasswordVersion((n) => n + 1);
+  };
   /** A protected document waiting for its password, or the Protect dialog. */
   const [passwordAsk, setPasswordAsk] = useState<{ mode: "open"; bytes: Uint8Array; name: string; location?: DocumentLocation } | { mode: "set" } | null>(null);
   dirtyRef.current = dirty;
@@ -220,7 +240,7 @@ export function App() {
     if (currentPassword()) return;
     const { base, name, location, warnings } = fileRef.current;
     void saveSnapshot({
-      id: SESSION, name, savedAt: Date.now(), warnings, doc: fromProseMirror(v.state.doc, base),
+      id: snapId(), name, savedAt: Date.now(), warnings, doc: fromProseMirror(v.state.doc, base),
       ...(location?.kind === "path" ? { path: location.path } : {}),
     }).catch(() => undefined);
   }, []);
@@ -284,7 +304,7 @@ export function App() {
       setFile((f) => ({ ...f, name: saved.name, location: saved.location ?? f.location }));
       setDirty(false);
       clearTimeout(snapshotTimer.current);
-      void deleteSnapshot(SESSION);
+      void deleteSnapshot(snapId());
     } catch (e) {
       alert(`Prime Word could not save ${name}:\n${(e as Error).message}`);
     }
@@ -293,13 +313,19 @@ export function App() {
   // (Re)create the editor whenever a different document is loaded, its fonts arrive, or the view changes.
   useEffect(() => {
     if (!mount.current) return;
-    const measurer = new CanvasMeasurer();
+    // The document's schema (rebuilt when fonts arrive: text is measured again); its text as it was left.
+    let entry = editors.current.get(file.base);
+    if (!entry || entry.fonts !== file.fonts) {
+      const m = new CanvasMeasurer();
+      const old = entry?.state;
+      entry = { fonts: file.fonts, measurer: m, schema: createSchema(createRender(file.base, m)), ...(old ? { carry: { doc: old.doc.toJSON(), selection: old.selection.toJSON() } } : {}) };
+      editors.current.set(file.base, entry);
+    }
+    const editor = entry;
+    const { measurer, schema } = editor;
     measurerRef.current = measurer;
-    const schema = createSchema(createRender(file.base, measurer));
     const command = (fn: () => void): Command => () => { fn(); return true; };
-    const state = EditorState.create({
-      doc: toProseMirror(file.base, schema),
-      plugins: [
+    const plugins = [
         history(),
         // Before the keymaps: it handles Enter (to correct the last word) and Backspace after a change.
         autoFormat(() => autoCorrect.current, () => fileRef.current.base),
@@ -364,8 +390,17 @@ export function App() {
         speakPlugin(),
         ...(mode === "outline" ? [outlinePlugin(() => fileRef.current.base)] : []),
         ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
-      ],
-    });
+    ];
+    // Back to a document (another tab, another view): as it was left, its undo history too. New: from the file.
+    let state: EditorState;
+    if (editor.state) state = editor.state.reconfigure({ plugins });
+    else {
+      const doc = editor.carry ? schema.nodeFromJSON(editor.carry.doc) : toProseMirror(file.base, schema);
+      let selection: Selection | undefined;
+      try { selection = editor.carry ? Selection.fromJSON(doc, editor.carry.selection) : undefined; } catch { selection = undefined; }
+      state = EditorState.create({ doc, plugins, ...(selection ? { selection } : {}) });
+      editor.carry = undefined;
+    }
     const v = new EditorView(mount.current, {
       state,
       // Our own checker underlines misspellings; turn off the browser's so words are not underlined twice.
@@ -406,8 +441,11 @@ export function App() {
     }
     v.focus();
     refresh();
-    return () => v.destroy();
+    return () => { editor.state = v.state; v.destroy(); };
   }, [file.base, file.fonts, save, mode, snapshot, spelling]);
+
+  // The current tab follows its document's name and unsaved state.
+  useEffect(() => { setTabs((ts) => ts.map((t) => (t.id === activeTab && (t.file !== file || t.dirty !== dirty) ? { ...t, file, dirty } : t))); }, [file, dirty, activeTab]);
 
   useEffect(() => { if (layout) pagesRef.current = layout.bookmarks ?? {}; }, [layout]);
   /** A new contents table's page numbers come from the next layout: update the fields once it is ready. */
@@ -515,6 +553,126 @@ export function App() {
     return () => { cancelled = true; };
   }, [file.base]);
 
+  /**
+   * A document opened, made or recovered: in a new tab — or, for a file opened, in place of the current
+   * one when that is a new document nobody has typed in (as Word replaces its empty Document1). Returns the tab.
+   */
+  const openTab = (next: Loaded, unsaved = false, replaceUntouched = false): number => {
+    const cur = fileRef.current;
+    const scroll = document.querySelector<HTMLElement>("main.canvas")?.scrollTop ?? 0;
+    const untouched = replaceUntouched && !dirtyRef.current && !cur.location && /^Document\d+\.docx$/.test(cur.name) && cur.warnings.length === 0;
+    let id = activeRef.current;
+    if (untouched) {
+      editors.current.delete(cur.base);
+      void deleteSnapshot(snapId(id));
+      setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, file: next, dirty: unsaved, scroll: 0 } : t)));
+    } else {
+      id = Math.max(0, ...tabsRef.current.map((t) => t.id)) + 1;
+      const from = activeRef.current;
+      setTabs((ts) => [...ts.map((t) => (t.id === from ? { ...t, file: cur, dirty: dirtyRef.current, scroll } : t)), { id, file: next, dirty: unsaved, scroll: 0 }]);
+    }
+    activeRef.current = id;
+    setActiveTab(id);
+    setFile(next);
+    setDirty(unsaved);
+    dirtyRef.current = unsaved;
+    setLayout(undefined);
+    setNotesPane(undefined);
+    leaveHome();
+    return id;
+  };
+
+  /** Shows another open document (as it was left: text, cursor, undo history, place on the page). */
+  const switchTab = (id: number) => {
+    if (id === activeRef.current) return;
+    const target = tabsRef.current.find((t) => t.id === id);
+    if (!target) return;
+    const from = activeRef.current;
+    const scroll = document.querySelector<HTMLElement>("main.canvas")?.scrollTop ?? 0;
+    clearTimeout(snapshotTimer.current);
+    snapshot();
+    setTabs((ts) => ts.map((t) => (t.id === from ? { ...t, file: fileRef.current, dirty: dirtyRef.current, scroll } : t)));
+    activeRef.current = id;
+    setActiveTab(id);
+    setFile(target.file);
+    setDirty(target.dirty);
+    dirtyRef.current = target.dirty;
+    setLayout(undefined);
+    setNotesPane(undefined);
+    setConversion(undefined);
+    setMenu(undefined);
+    setSpellMenu(undefined);
+    leaveHome();
+    // Its place on the page, once its pages are drawn again.
+    for (const ms of [60, 400, 1200]) setTimeout(() => { if (activeRef.current === id) { const c = document.querySelector<HTMLElement>("main.canvas"); if (c && target.scroll && Math.abs(c.scrollTop - target.scroll) > 4) c.scrollTop = target.scroll; } }, ms);
+  };
+
+  /** Closes a tab (asking first about unsaved changes); the last one closed leaves a new blank document. */
+  const closeTab = async (id: number) => {
+    const isActive = id === activeRef.current;
+    const t = tabsRef.current.find((x) => x.id === id);
+    if (!t) return;
+    const f = isActive ? fileRef.current : t.file;
+    const unsaved = isActive ? dirtyRef.current : t.dirty;
+    if (unsaved && !(await confirmAction(`Close ${f.name} without saving? Your changes to it are lost.`, "Unsaved changes"))) return;
+    editors.current.delete(f.base);
+    passwordFor.current.delete(f.base);
+    void deleteSnapshot(snapId(id));
+    const rest = tabsRef.current.filter((x) => x.id !== id);
+    if (!rest.length) {
+      // The last one: a new blank document in its place.
+      const blank: Loaded = { base: blankDocument(), name: "Document1.docx", warnings: [], fonts: 0 };
+      const nid = id + 1;
+      setTabs([{ id: nid, file: blank, dirty: false, scroll: 0 }]);
+      activeRef.current = nid;
+      setActiveTab(nid);
+      setFile(blank);
+      setDirty(false);
+      dirtyRef.current = false;
+      setLayout(undefined);
+      return;
+    }
+    if (isActive) {
+      const i = tabsRef.current.findIndex((x) => x.id === id);
+      const next = rest[Math.min(i, rest.length - 1)];
+      setTabs(rest);
+      activeRef.current = next.id;
+      setActiveTab(next.id);
+      setFile(next.file);
+      setDirty(next.dirty);
+      dirtyRef.current = next.dirty;
+      setLayout(undefined);
+      setNotesPane(undefined);
+      for (const ms of [60, 400, 1200]) setTimeout(() => { if (activeRef.current === next.id) { const c = document.querySelector<HTMLElement>("main.canvas"); if (c && next.scroll) c.scrollTop = next.scroll; } }, ms);
+    } else setTabs(rest);
+  };
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  // Ctrl+Tab / Ctrl+Shift+Tab: the next / previous tab; Ctrl+W or Ctrl+F4: close this one; Ctrl+N: a new document.
+  const tabKeys = useRef({ switchTab, closeTab, newDocument: () => void newDocument() });
+  tabKeys.current = { switchTab, closeTab, newDocument: () => void newDocument() };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "tab") {
+        const ts = tabsRef.current;
+        if (ts.length < 2) return;
+        e.preventDefault();
+        const i = ts.findIndex((t) => t.id === activeRef.current);
+        tabKeys.current.switchTab(ts[(i + (e.shiftKey ? ts.length - 1 : 1)) % ts.length].id);
+      } else if ((k === "w" || k === "f4") && !e.shiftKey) {
+        e.preventDefault();
+        void tabKeys.current.closeTab(activeRef.current);
+      } else if (k === "n" && !e.shiftKey) {
+        e.preventDefault();
+        tabKeys.current.newDocument();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   const load = (bytes: Uint8Array, name: string, location?: DocumentLocation, password?: string) => {
     // Protected with a password: asked for first.
     if (isEncrypted(bytes)) { setPasswordAsk({ mode: "open", bytes, name, location }); return; }
@@ -522,10 +680,11 @@ export function App() {
       // Word (.docx, .doc), Rich Text, OpenDocument or plain text: by its contents.
       const { doc, warnings, format } = readAnyFormat(bytes, name);
       if (format !== "docx" && warnings.length) warnings.unshift(`Opened from ${FORMAT_NAMES[format]} (.${format}): what Prime Word could not read is listed here.`);
-      setFile({ base: doc, name, location, warnings, fonts: 0 });
+      // Already open: shown, not opened twice.
+      const already = location?.kind === "path" ? tabsRef.current.find((t) => t.file.location?.kind === "path" && t.file.location.path.toLowerCase() === location.path.toLowerCase()) : undefined;
+      if (already) { switchTab(already.id); return; }
+      openTab({ base: doc, name, location, warnings, fonts: 0 }, false, true);
       setPassword(doc, password);
-      setDirty(false);
-      leaveHome();
       setConversion(undefined);
     } catch (e) {
       alert(`Prime Word could not open ${name}:\n${(e as Error).message}`);
@@ -562,11 +721,9 @@ export function App() {
       const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
       const result = compareDocuments(originalPm, v.state.doc, authorName().trim() || "Prime Word user", now);
       const model = fromProseMirror(result, { ...base, images });
-      if (!(await discardCurrent())) return;
       const name = `Comparison of ${other.name.replace(/\.docx$/i, "")} and ${fileRef.current.name.replace(/\.docx$/i, "")}.docx`;
-      setFile({ base: readDocx(writeDocx(model)).doc, name, location: undefined, warnings: [], fonts: 0 });
-      setDirty(true);
-      dirtyRef.current = true;
+      // In a tab of its own, beside the document compared.
+      openTab({ base: readDocx(writeDocx(model)).doc, name, location: undefined, warnings: [], fonts: 0 }, true);
       flash("Compared: the differences are shown as tracked changes (Review → Accept / Reject).");
     } catch (e) {
       alert(`Prime Word could not compare the documents:\n${(e as Error).message}`);
@@ -576,29 +733,17 @@ export function App() {
   const compareRef = useRef(compareWith);
   compareRef.current = compareWith;
 
-  /** Replacing the current document: ask first if it has unsaved changes, then drop its snapshot. */
-  const discardCurrent = async () => {
-    if (dirtyRef.current && !(await confirmAction(`Discard unsaved changes to ${fileRef.current.name}?`))) return false;
-    clearTimeout(snapshotTimer.current);
-    await deleteSnapshot(SESSION);
-    return true;
-  };
-
   const open = async () => {
     const opened = await openDocument();
-    if (opened && (await discardCurrent())) load(opened.bytes, opened.name, opened.location);
+    if (opened) load(opened.bytes, opened.name, opened.location);
   };
 
   /** A converted PDF opens as a new, unsaved Word document (the PDF itself is not changed). */
   const openConverted = async (result: ConversionResult, pdfName: string) => {
-    if (!(await discardCurrent())) return;
     const { doc, warnings } = result;
-    setFile({ base: doc, name: pdfName.replace(/\.pdf$/i, ".docx"), warnings: [], fonts: 0 });
-    setDirty(true);
-    dirtyRef.current = true;
+    openTab({ base: doc, name: pdfName.replace(/\.pdf$/i, ".docx"), warnings: [], fonts: 0 }, true, true);
     setConversion({ from: pdfName, warnings });
     setConverter(undefined);
-    leaveHome();
     if (SELFTEST) {
       // Dev self-test: what the editor shows once the converted document is laid out.
       setTimeout(() => console.info(`[selftest] align ${JSON.stringify({
@@ -639,7 +784,6 @@ export function App() {
   };
 
   const openRecent = async (path: string) => {
-    if (!(await discardCurrent())) return;
     try {
       const opened = await openPath(path);
       load(opened.bytes, opened.name, opened.location);
@@ -650,22 +794,20 @@ export function App() {
 
   /** A new, unsaved document from a template (blank by default). */
   const newDocument = async (template?: Template) => {
-    if (!(await discardCurrent())) return;
     const base = template ? template.create() : blankDocument();
-    const name = template && template.id !== "blank" ? `${template.name.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim()}1.docx` : "Document1.docx";
-    setFile({ base, name, warnings: [], fonts: 0 });
-    setDirty(false);
-    leaveHome();
+    const stem = template && template.id !== "blank" ? template.name.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim() : "Document";
+    // The next free number among the open documents (Document2, Document3…).
+    const taken = new Set(tabsRef.current.map((t) => (t.id === activeRef.current ? fileRef.current.name : t.file.name)));
+    let n = 1;
+    while (taken.has(`${stem}${n}.docx`)) n++;
+    openTab({ base, name: `${stem}${n}.docx`, warnings: [], fonts: 0 });
     setConversion(undefined);
   };
 
   /** Restores unsaved work from an earlier session (kept as unsaved: nothing is overwritten). */
   const restore = async (s: Snapshot) => {
-    if (!(await discardCurrent())) return;
-    setFile({ base: s.doc, name: s.name, warnings: s.warnings, fonts: 0, ...(s.path ? { location: { kind: "path" as const, path: s.path, modified: s.savedAt } } : {}) });
-    setDirty(true);
-    dirtyRef.current = true;
-    await saveSnapshot({ ...s, id: SESSION, savedAt: Date.now() }); // now this session's
+    const id = openTab({ base: s.doc, name: s.name, warnings: s.warnings, fonts: 0, ...(s.path ? { location: { kind: "path" as const, path: s.path, modified: s.savedAt } } : {}) }, true, true);
+    await saveSnapshot({ ...s, id: snapId(id), savedAt: Date.now() }); // now this session's
     await deleteSnapshot(s.id);
     setRecovery((r) => r.filter((x) => x.id !== s.id));
     leaveHome();
@@ -696,18 +838,31 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Desktop: a document opened again while Prime Word runs (double-click, "Open with") comes here, in a tab.
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => {
+    if (!isDesktop) return;
+    const pending = listen<string>("open-document", (e) => {
+      void openPath(e.payload).then((opened) => loadRef.current(opened.bytes, opened.name, opened.location))
+        .catch((err) => alert(`Prime Word could not open ${e.payload}:\n${String(err)}`));
+    });
+    return () => { void pending.then((unlisten) => unlisten()); };
+  }, []);
+
   // Offer unsaved work from a session that did not close cleanly.
   useEffect(() => { void orphanedSnapshots().then(setRecovery); }, []);
 
-  // Desktop: closing the window asks about unsaved changes; a clean close removes the snapshot.
+  // Desktop: closing the window asks about unsaved changes (in any tab); a clean close removes the snapshots.
   useEffect(() => {
     if (!isDesktop) return;
     const pending = getCurrentWindow().onCloseRequested(async (event) => {
-      if (dirtyRef.current && !(await confirmAction(`Close without saving ${fileRef.current.name}?`))) {
+      const unsaved = tabsRef.current.filter((t) => (t.id === activeRef.current ? dirtyRef.current : t.dirty)).map((t) => (t.id === activeRef.current ? fileRef.current.name : t.file.name));
+      if (unsaved.length && !(await confirmAction(`Close without saving ${unsaved.length === 1 ? unsaved[0] : `${unsaved.length} documents (${unsaved.join(", ")})`}?`))) {
         event.preventDefault();
         return;
       }
-      await deleteSnapshot(SESSION);
+      for (const t of tabsRef.current) await deleteSnapshot(snapId(t.id));
     });
     return () => { void pending.then((unlisten) => unlisten()); };
   }, []);
@@ -890,6 +1045,11 @@ export function App() {
   return (
     <Profiler id="app" onRender={(_id, _phase, ms) => { if (SELFTEST) performance.measure("pw:render", { start: performance.now() - ms, end: performance.now() }); }}>
     <div className={`app${navPane ? " with-nav" : ""}`}>
+      <div className="app-top">
+      {tabs.length > 1 && (
+        <DocTabs tabs={tabs.map((t) => (t.id === activeTab ? { id: t.id, name: file.name, dirty } : { id: t.id, name: t.file.name, dirty: t.dirty }))}
+          active={activeTab} onSelect={switchTab} onClose={(id) => void closeTab(id)} onNew={() => void newDocument()} />
+      )}
       <Ribbon
         view={v} doc={v?.state.doc.attrs.styles ? { ...file.base, styles: v.state.doc.attrs.styles } : file.base} mode={mode}
         onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)} onSave={(saveAs) => void save(saveAs)}
@@ -949,6 +1109,7 @@ export function App() {
           setComments("writing");
         }}
       />
+      </div>
 
       {rulerOn && mode === "print" && v && (
         <Ruler view={v} doc={file.base} pageWidth={section.pageWidth ?? 612} margins={{ left: margins.left ?? 72, right: margins.right ?? 72 }} />
@@ -1017,14 +1178,14 @@ export function App() {
           focus={notesPane.focus} onClose={() => { setNotesPane(undefined); v.focus(); }} />
       )}
       {passwordAsk && (
-        <PasswordDialog mode={passwordAsk.mode} name={passwordAsk.mode === "open" ? passwordAsk.name : file.name} hasPassword={passwordFor.current?.base === file.base}
+        <PasswordDialog mode={passwordAsk.mode} name={passwordAsk.mode === "open" ? passwordAsk.name : file.name} hasPassword={passwordFor.current.has(file.base)}
           onSubmit={async (pw) => {
             if (passwordAsk.mode === "set") {
               setPassword(fileRef.current.base, pw);
               setDirty(true);
               dirtyRef.current = true;
               setPasswordAsk(null);
-              void deleteSnapshot(SESSION);
+              void deleteSnapshot(snapId());
               flash("Protected: the password applies when you save.");
               return undefined;
             }

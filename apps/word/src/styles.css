@@ -712,3 +712,18 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .pw-resize-handle.h-s { left: 50%; top: 100%; cursor: ns-resize; }
 .pw-resize-handle.h-sw { left: 0; top: 100%; cursor: nesw-resize; }
 .pw-resize-handle.h-w { left: 0; top: 50%; cursor: ew-resize; }
+
+/* Open documents as tabs, above the ribbon (shown once more than one is open). */
+.app-top { display: flex; flex-direction: column; min-width: 0; }
+.doc-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: #dfe3ea; border-bottom: 1px solid var(--chrome-border); overflow-x: auto; scrollbar-width: thin; }
+.doc-tab { display: flex; align-items: center; gap: 4px; flex: 0 1 200px; min-width: 90px; height: 28px; padding: 0 6px 0 12px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: #3d4452; font-size: 12.5px; cursor: pointer; user-select: none; }
+.doc-tab:hover { background: #eef1f6; }
+.doc-tab.on { background: var(--chrome, #fff); border-color: var(--chrome-border); color: #1d2433; font-weight: 600; margin-bottom: -1px; height: 29px; }
+.doc-tab:focus-visible { outline: 2px solid #8cb4ff; outline-offset: -2px; }
+.doc-tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-tab-dirty { color: #2b579a; font-size: 16px; line-height: 1; }
+.doc-tab-close { flex: none; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: none; color: #6b7280; font-size: 15px; line-height: 1; opacity: 0; }
+.doc-tab:hover .doc-tab-close, .doc-tab.on .doc-tab-close, .doc-tab-close:focus-visible { opacity: 1; }
+.doc-tab-close:hover { background: #d5dae3; color: #1d2433; }
+.doc-tab-new { flex: none; width: 28px; height: 26px; margin: 0 0 2px 4px; padding: 0; border: none; border-radius: 6px; background: none; color: #3d4452; font-size: 18px; line-height: 1; }
+.doc-tab-new:hover { background: #eef1f6; }
