@@ -95,11 +95,23 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         </section>
 
         <section aria-label="Convert PDF" className="home-convert">
-          <div>
+          {/* A PDF page turning into a Word page. */}
+          <svg className="home-convert-icon" viewBox="0 0 120 64" aria-hidden="true">
+            <path d="M8 4h26l12 12v44H8z" fill="#fff" stroke="#d93025" strokeWidth="2.5" strokeLinejoin="round" />
+            <path d="M34 4v12h12" fill="#fde3e1" stroke="#d93025" strokeWidth="2.5" strokeLinejoin="round" />
+            <rect x="3" y="30" width="36" height="16" rx="3" fill="#d93025" />
+            <text x="21" y="42.5" textAnchor="middle" fontFamily="Segoe UI, Arial, sans-serif" fontWeight="700" fontSize="12" fill="#fff">PDF</text>
+            <path d="M54 32h14m-6-7 7 7-7 7" fill="none" stroke="#8a94a6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M78 4h26l12 12v44H78z" fill="#fff" stroke="#2b579a" strokeWidth="2.5" strokeLinejoin="round" />
+            <path d="M104 4v12h12" fill="#dce6f4" stroke="#2b579a" strokeWidth="2.5" strokeLinejoin="round" />
+            <rect x="71" y="30" width="40" height="16" rx="3" fill="#2b579a" />
+            <text x="91" y="42.5" textAnchor="middle" fontFamily="Segoe UI, Arial, sans-serif" fontWeight="700" fontSize="10" fill="#fff">DOCX</text>
+          </svg>
+          <div className="home-convert-text">
             <h2>Convert a PDF</h2>
             <p>Turn a PDF into an editable Word document: compare it page by page with the original, then edit or save it.</p>
           </div>
-          <button className="primary" onClick={onConvertPdf}>Convert PDF to Word…</button>
+          <button className="home-convert-button" onClick={onConvertPdf}>Convert PDF to Word…</button>
         </section>
 
         <section aria-label="Recent">
