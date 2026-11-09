@@ -318,6 +318,12 @@ class Writer {
       case "image":
         return run(this.drawing(i, rels));
       case "runPreserved":
+        // A text box edited in Prime Word: its text from its paragraphs (in the drawing and in any older
+        // fallback copy of it); otherwise the object as it was read.
+        if (i.float?.kind === "textbox" && i.float.edited && i.float.blocks) {
+          const body = this.blocks(i.float.blocks, rels) || "<w:p/>";
+          return run(i.preserved.xml.replace(/<w:txbxContent\b[^>]*>[\s\S]*?<\/w:txbxContent>/g, `<w:txbxContent>${body}</w:txbxContent>`));
+        }
         return run(i.preserved.xml);
       case "preserved":
         return i.preserved.xml;

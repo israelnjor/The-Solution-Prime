@@ -195,6 +195,20 @@ export interface FloatInfo {
   autoHeight?: boolean;
   /** Ink (pen strokes): x, y pairs relative to the box (0–1 each way), pen width in pt, colour. */
   ink?: { strokes: number[][]; width: number; color: string };
+  /** A shape or text box: its outline (Word's preset geometry), fill and line, for drawing. */
+  shape?: ShapeStyle;
+  /** A text box whose text was edited in Prime Word: its text is written from `blocks` when saving. */
+  edited?: boolean;
+}
+
+/** How a shape is drawn (wps:spPr, or its theme style): fill and line colours RRGGBB, line width in pt. */
+export interface ShapeStyle {
+  /** Word's preset geometry: "rect", "roundRect", "ellipse", "triangle", "rightArrow", "line"… */
+  geometry: string;
+  /** No fill: undefined. */
+  fill?: string;
+  /** No line: undefined. */
+  line?: { color: string; width: number; dash?: string };
 }
 
 /** Unsupported paragraph-level content (e.g. bookmarks), kept verbatim. */

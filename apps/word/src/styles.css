@@ -727,3 +727,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .doc-tab-close:hover { background: #d5dae3; color: #1d2433; }
 .doc-tab-new { flex: none; width: 28px; height: 26px; margin: 0 0 2px 4px; padding: 0; border: none; border-radius: 6px; background: none; color: #3d4452; font-size: 18px; line-height: 1; }
 .doc-tab-new:hover { background: #eef1f6; }
+
+/* Shapes and text box fills and borders, drawn beneath their text. */
+.pw-shape { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.pw-float .pw-float-text { z-index: 1; }

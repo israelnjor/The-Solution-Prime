@@ -4,3 +4,4 @@ export { readParagraphProps, readRunProps, writeParagraphProps, writeRunProps } 
 export { type DocumentProperties, readProperties, withProperties } from "./properties.js";
 export { isCfb, readCfb, writeCfb } from "./cfb.js";
 export { decryptDocx, encryptDocx, isEncrypted, WrongPasswordError } from "./encryption.js";
+export { DEFAULT_THEME, type NewShape, newShapeXml, readShapeStyle, themeColors, withShapeFill, withShapeLine } from "./shapes.js";

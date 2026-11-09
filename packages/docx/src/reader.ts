@@ -5,6 +5,7 @@ import {
   type Relationship, SCHEMA_VERSION, type Section, type Story, type Table, type TableRow,
 } from "@prime/pdm";
 import { readInk } from "./inkml.js";
+import { readShapeStyle, themeColors } from "./shapes.js";
 import { IMAGE_TYPES, MODELED_REL_TYPES, RelType, EMU_PER_PT } from "./ooxml.js";
 import { readCellProps, readParagraphProps, readRowProps, readRunProps, readSectionProps, readTableProps } from "./props.js";
 import { readNumbering, readStyles } from "./styles.js";
@@ -78,6 +79,15 @@ class StoryContext {
 
 class Reader {
   private files: Record<string, Uint8Array>;
+  /** The document theme's colours (for shapes coloured by theme), read when first needed. */
+  private theme?: Record<string, string>;
+  private themeColors(): Record<string, string> {
+    if (!this.theme) {
+      const name = Object.keys(this.files).find((n) => /^word\/theme\/theme\d*\.xml$/.test(n));
+      this.theme = themeColors(name ? this.decoder.decode(this.files[name]) : undefined);
+    }
+    return this.theme;
+  }
   private decoder = new TextDecoder();
   private warnCounts = new Map<string, number>();
   private images: PrimeDocument["images"] = {};
@@ -382,7 +392,8 @@ class Reader {
     const anchor = drawing && child(drawing, "wp:anchor");
     const float = anchor && this.readFloat(anchor, ctx);
     if (!float) return undefined;
-    return { ...this.runPreserved(e, ctx, qname(e), float.kind !== "shape"), float };
+    // Shapes are drawn (when their outline is known); others are kept unchanged.
+    return { ...this.runPreserved(e, ctx, qname(e), float.kind !== "shape" || !!float.shape), float };
   }
 
   readFloat(anchor: Element, ctx: StoryContext): FloatInfo | undefined {
@@ -434,12 +445,16 @@ class Reader {
     }
     const shape = data && child(data, "wps:wsp");
     const content = shape && child(shape, "wps:txbx") && child(child(shape, "wps:txbx")!, "w:txbxContent");
+    // Its outline, fill and line (a text box's border and background too).
+    const style = shape ? readShapeStyle(shape, this.themeColors()) : undefined;
+    if (shape && !content) return { ...float, shape: style };
     if (shape && content) {
       const body = child(shape, "wps:bodyPr");
       const inset = (name: string, fallback: number) => (body?.getAttribute(name) != null ? pt(body.getAttribute(name)) : fallback);
       return {
         ...float,
         kind: "textbox",
+        ...(style ? { shape: style } : {}),
         blocks: this.readBlocks(elements(content), ctx),
         // Word's default inner margins: 0.1" left and right, 0.05" top and bottom.
         insets: { left: inset("lIns", 7.2), right: inset("rIns", 7.2), top: inset("tIns", 3.6), bottom: inset("bIns", 3.6) },

@@ -4,7 +4,7 @@
  */
 import fontkit from "@pdf-lib/fontkit";
 import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, degrees, rgb, setCharacterSpacing } from "pdf-lib";
-import type { FontKey, ImageSource, LayoutResult, Page, PageBorderLine, Segment, Watermark } from "@prime/layout";
+import { type FontKey, type ImageSource, isLineShape, type LayoutResult, type Page, type PageBorderLine, type Segment, shapePath, type Watermark } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 
 /** Supplies font files for embedding, and splits text into runs per drawing font (glyph fallback). */
@@ -93,7 +93,10 @@ class Renderer {
         if (r.sides.right) line(r.x + r.width, r.y, r.x + r.width, r.y + r.height);
       }
     }
+    // Shapes set behind the text first.
+    for (const line of p.lines) if (line.shape?.behind) this.shape(out, p, line);
     for (const line of p.lines) {
+      if (line.shape && !line.shape.behind) this.shape(out, p, line);
       for (const img of line.images) {
         const embedded = await this.image(img);
         if (embedded) out.drawImage(embedded, { x: img.x, y: Y(img.y + img.height), width: img.width, height: img.height });
@@ -113,6 +116,16 @@ class Renderer {
       }
     }
     if (p.decor?.borders) this.borders(out, p, p.decor.borders);
+  }
+
+  /** A shape, or a text box's fill and border: its outline filled and stroked. */
+  private shape(out: PDFPage, p: Page, line: Page["lines"][number]) {
+    const s = line.shape!;
+    const st = s.style;
+    const fill = st.fill && !isLineShape(st.geometry) ? { color: color(st.fill) } : {};
+    const stroke = st.line ? { borderColor: color(st.line.color), borderWidth: st.line.width } : {};
+    if (!("color" in fill) && !("borderColor" in stroke)) return;
+    out.drawSvgPath(shapePath(st.geometry, s.width, line.height), { x: line.x, y: p.height - line.y, ...fill, ...stroke });
   }
 
   /** Text across the page, rotated about its centre, semi-transparent. */

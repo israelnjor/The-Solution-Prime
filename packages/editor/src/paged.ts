@@ -4,8 +4,8 @@
  * are sized from the real screen positions, so every page's content starts exactly at the top of
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
-import { type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver, sectionColumns } from "@prime/layout";
-import type { PrimeDocument, SectionProps } from "@prime/pdm";
+import { isLineShape, type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver, sectionColumns, shapePath } from "@prime/layout";
+import type { PrimeDocument, SectionProps, ShapeStyle } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
@@ -211,6 +211,8 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
       h.dataset.handle = corner;
       el.appendChild(h);
     }
+    // A shape, or a text box's fill and border (beneath its text).
+    if (f.shape) el.appendChild(shapeSvg(f.shape, f.width, f.height));
     const src = f.image?.part ? imageUrl(base, f.image.part) : f.image?.imageId ? resourceUrl(base, f.image.imageId) : undefined;
     if (src) {
       const img = document.createElement("img");
@@ -233,6 +235,25 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
     }
     return el;
   };
+}
+
+/** A shape drawn as SVG in its box (the same outline the PDF draws). */
+function shapeSvg(style: ShapeStyle, w: number, h: number): SVGSVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "pw-shape");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("overflow", "visible");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", shapePath(style.geometry, w, h));
+  path.setAttribute("fill", style.fill && !isLineShape(style.geometry) ? `#${style.fill}` : "none");
+  if (style.line) {
+    path.setAttribute("stroke", `#${style.line.color}`);
+    path.setAttribute("stroke-width", String(style.line.width));
+  }
+  svg.appendChild(path);
+  return svg;
 }
 
 /** A soft hyphen: where the layout hyphenated a word, the screen may break it too (and nowhere else). */

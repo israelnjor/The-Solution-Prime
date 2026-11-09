@@ -177,6 +177,9 @@ export const PageSheets = memo(function PageSheets({ layout, doc, gap, overflow,
         width: `${first ? first.bodyRight - first.bodyLeft : pages[0].width - (margins.left ?? 72) - (margins.right ?? 72)}pt`,
         overflow: "clip",
         ...({ overflowClipMargin: `${clip}pt` } as Record<string, string>),
+        // Down to the last page's bottom: objects placed below the last line (a text box under short text)
+        // are not cut off where the text ends.
+        minHeight: `${Math.max(0, total - (first?.bodyTop ?? margins.top ?? 72))}pt`,
       }}>
         {children}
       </div>

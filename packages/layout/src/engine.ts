@@ -10,7 +10,7 @@
  */
 import {
   type Block, type FloatInfo, type Inline, type Paragraph, type PrimeDocument, type RunProps, type Relationship, type Section, type SectionProps, type Story, type Table,
-  paragraphText,
+  paragraphText, type ShapeStyle,
 } from "@prime/pdm";
 import { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 import type { FontKey, Measurer } from "./measure.js";
@@ -93,6 +93,8 @@ export interface PositionedLine {
   story?: "header" | "footer" | "float" | "footnote" | "endnote" | "lineNumber";
   /** Pen strokes (ink): x, y pairs on the page, pen width in pt, colour. */
   strokes?: { points: number[]; width: number; color: string }[];
+  /** A shape (or a text box's background and border) in the line's box (x, y, width, height). */
+  shape?: { style: ShapeStyle; width: number; behind?: boolean };
 }
 
 export interface Page {
@@ -152,6 +154,8 @@ export interface PlacedFloat {
   lines: PositionedLine[];
   /** Ink: strokes relative to the box (0–1 each way). */
   ink?: FloatInfo["ink"];
+  /** A shape, or a text box's fill and border. */
+  shape?: ShapeStyle;
 }
 
 /**
@@ -1481,6 +1485,11 @@ export class LayoutEngine {
       const fy = at(f.y, vArea, height);
       const from = page.lines.length;
       const source = f.imagePart ? { part: f.imagePart } : f.imageId ? { imageId: f.imageId } : undefined;
+      // A shape, or a text box's fill and border: beneath its text.
+      if (f.shape && (f.kind === "shape" || f.kind === "textbox")) {
+        page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
+          shape: { style: f.shape, width: f.width, ...(f.behind ? { behind: true } : {}) } });
+      }
       if (f.kind === "picture" && source) {
         page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [],
           images: [{ ...source, x, y: fy, width: f.width, height }] });
@@ -1504,7 +1513,8 @@ export class LayoutEngine {
         page: page.number, path, index, x: x - column[0], y: fy - paraTop, width: f.width, height,
         ...(f.kind === "picture" && source ? { image: source } : {}),
         ...(f.kind === "ink" && f.ink ? { ink: f.ink } : {}),
-        lines: f.kind === "textbox" ? page.lines.slice(from).map(shift) : [],
+        ...(f.shape ? { shape: f.shape } : {}),
+        lines: f.kind === "textbox" ? page.lines.slice(from).filter((l) => !l.shape).map(shift) : [],
       });
       if (f.wrap === "none") return undefined;
       const span = f.wrap === "topAndBottom" ? { x1: -Infinity, x2: Infinity } : { x1: x - f.dist.left, x2: x + f.width + f.dist.right };
