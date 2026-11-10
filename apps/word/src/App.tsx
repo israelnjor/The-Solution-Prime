@@ -221,9 +221,7 @@ export function App() {
   // Zoom (percent). ?zoom= sets the initial value (handy for overview screenshots).
   const [zoom, setZoom] = useState(() => Number(new URLSearchParams(location.search).get("zoom")) || 100);
   /** Unsaved work found from an earlier session that did not close cleanly. */
-  const [recovery, setRecovery] = useState<Snapshot[]>([]);
-  const [recoveryNoteHidden, setRecoveryNoteHidden] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [recovery, setRecovery] = useState<Snapshot[]>([]);  const [notice, setNotice] = useState("");
   const [, refresh] = useReducer((x: number) => x + 1, 0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout>>();
   const fileRef = useRef(file);
@@ -1242,14 +1240,6 @@ ${String(e)}`));
             {conversion.warnings.length > 0 && <ul>{conversion.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
             <button className="primary" onClick={() => void save(true)}>Save as Word document…</button>
             <button className="link" onClick={() => setConversion(undefined)}>Dismiss</button>
-          </div>
-        )}
-        {/* Unsaved work from an earlier session: one quiet line; the choices are on Home → Recovered. */}
-        {recovery.length > 0 && !recoveryNoteHidden && (
-          <div className="recovery-note" role="status">
-            <span>{recovery.length === 1 ? `${recovery[0].name} has` : `${recovery.length} documents have`} unsaved changes from an earlier session.</span>
-            <button className="link" onClick={() => { setHomeView({ page: "recovered" }); setHome(true); }}>Review</button>
-            <button className="recovery-note-close" aria-label="Hide" title="Hide (they stay under Home → Recovered)" onClick={() => setRecoveryNoteHidden(true)}>×</button>
           </div>
         )}
         {find && <FindPanel view={v} replace={find === "replace"} onClose={() => setFind(null)} />}
