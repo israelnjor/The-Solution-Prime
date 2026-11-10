@@ -41,7 +41,11 @@ export function PageThumb({ doc, width = 120 }: { doc: PrimeDocument; width?: nu
 }
 
 /** Saved templates and letterheads, to start from; with delete. */
-export function MyTemplates({ onPick, refresh = 0 }: { onPick(t: Template): void; refresh?: number }) {
+export function MyTemplates({ onPick, refresh = 0, limit, onCount }: {
+  onPick(t: Template): void; refresh?: number;
+  /** Show only the newest few (the home screen's one row); onCount hears how many there are in all. */
+  limit?: number; onCount?(n: number): void;
+}) {
   const [items, setItems] = useState<{ entry: SavedTemplate; doc: PrimeDocument }[]>();
   const load = () => void listEntries<SavedTemplate["data"]>("templates").then((list) => {
     setItems(list.flatMap((entry) => {
@@ -49,11 +53,12 @@ export function MyTemplates({ onPick, refresh = 0 }: { onPick(t: Template): void
     }));
   }).catch(() => setItems([]));
   useEffect(load, [refresh]);
+  useEffect(() => { if (items) onCount?.(items.length); }, [items, onCount]);
   if (!items) return null;
   if (!items.length) return <p className="recent-empty">Templates and letterheads you save appear here.</p>;
   return (
     <div className="template-grid">
-      {items.map(({ entry, doc }) => (
+      {(limit ? items.slice(0, limit) : items).map(({ entry, doc }) => (
         <div key={entry.id} className="template-card mine">
           <button className="mine-open" onClick={() => onPick({ ...asTemplate(entry), create: () => structuredClone(doc) })} title={`New document from ${entry.name}`}>
             <PageThumb doc={doc} />

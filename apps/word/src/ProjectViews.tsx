@@ -41,36 +41,14 @@ export function ProjectCard({ p, onOpen }: { p: ProjectSummary; onOpen(): void }
   );
 }
 
-/** Home's projects: the latest few as cards, and New project. */
-export function ProjectsStrip({ projects, onOpen, onNew, onAll }: {
-  projects: ProjectSummary[]; onOpen(p: ProjectSummary): void; onNew(): void; onAll(): void;
-}) {
-  return (
-    <section aria-label="Projects">
-      <div className="home-row">
-        <h2>Projects</h2>
-        <button onClick={onNew}>New project…</button>
-        {projects.length > 4 && <button onClick={onAll}>All projects ({projects.length})</button>}
-      </div>
-      {projects.length ? (
-        <div className="project-grid">
-          {projects.slice(0, 4).map((p) => <ProjectCard key={p.path} p={p} onOpen={() => onOpen(p)} />)}
-        </div>
-      ) : (
-        <p className="home-hint">Keep everything for a piece of work together — a thesis, a client, a property sale. A project is a
-          folder on your computer: its documents, PDFs and pictures stay there, where you and your backups can find them.</p>
-      )}
-    </section>
-  );
-}
-
 /** All projects (the rail's Projects page). */
 export function ProjectsPage({ projects, onOpen, onNew }: { projects: ProjectSummary[]; onOpen(p: ProjectSummary): void; onNew(): void }) {
   const [query, setQuery] = useState("");
   const shown = projects.filter((p) => p.meta.name.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <main className="home-main">
-      <div className="home-row">
+      <div className="home-content">
+      <div className="home-title">
         <h1>Projects</h1>
         <button className="primary" onClick={onNew}>New project…</button>
       </div>
@@ -80,6 +58,7 @@ export function ProjectsPage({ projects, onOpen, onNew }: { projects: ProjectSum
       ) : (
         <p className="home-hint">{projects.length ? "No project has that name." : "No projects yet. A project is a folder that keeps a piece of work together: its documents, the PDFs that came with it, pictures and anything else."}</p>
       )}
+      </div>
     </main>
   );
 }
@@ -209,6 +188,7 @@ A new document is saved in this project; the PDF stays as it is.`, "Convert PDF"
   };
   return (
     <main className="home-main project-page" style={{ ["--project" as string]: `#${meta.color}` }}>
+      <div className="home-content">
       <button className="project-back" onClick={onBack}>← All projects</button>
       <div className="project-head">
         <span className="project-dot" aria-hidden="true" />
@@ -293,6 +273,7 @@ A new document is saved in this project; the PDF stays as it is.`, "Convert PDF"
           })}
         </>
       )}
+      </div>
     </main>
   );
 }

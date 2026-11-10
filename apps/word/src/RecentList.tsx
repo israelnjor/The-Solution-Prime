@@ -4,7 +4,7 @@ import { forgetRecent, isDesktop, type RecentDocument, recentDocuments } from ".
 const folderOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")));
 
 /** Recently opened or saved documents. Missing files are shown greyed out, with a way to remove them. */
-export function RecentList({ onOpen }: { onOpen(path: string): void }) {
+export function RecentList({ onOpen, limit, columns }: { onOpen(path: string): void; limit?: number; columns?: boolean }) {
   const [items, setItems] = useState<RecentDocument[]>();
   const refresh = () => void recentDocuments().then(setItems).catch(() => setItems([]));
   useEffect(refresh, []);
@@ -12,8 +12,8 @@ export function RecentList({ onOpen }: { onOpen(path: string): void }) {
   if (!items) return null;
   if (!items.length) return <p className="recent-empty">Documents you open or save will appear here.</p>;
   return (
-    <ul className="recent-list">
-      {items.map((d) => (
+    <ul className={`recent-list${columns ? " two" : ""}`}>
+      {(limit ? items.slice(0, limit) : items).map((d) => (
         <li key={d.path} className={d.exists ? "" : "missing"}>
           <button className="recent-open" disabled={!d.exists} onClick={() => onOpen(d.path)}
             title={d.exists ? d.path : `${d.path} (not found: moved, renamed or deleted)`}>
