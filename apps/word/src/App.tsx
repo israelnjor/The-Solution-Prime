@@ -44,6 +44,9 @@ import { ChartDialog } from "./ChartDialog";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, type OpenedFile, saveDocument, type SaveFormat } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
 import { DocTabs } from "./DocTabs";
+import type { HomeView } from "./Home";
+import type { ProjectActions } from "./ProjectViews";
+import { listProjects, newPathIn, projectOf, type ProjectSummary } from "./projects";
 import { listen } from "@tauri-apps/api/event";
 import { FONTS, LINK_EVENT, type Markup, Ribbon } from "./Ribbon";
 import { ContextMenu } from "./ContextMenu";
@@ -195,7 +198,12 @@ export function App() {
   // Bumped when a template is saved, so the template lists reload.
   const [templatesVersion, setTemplatesVersion] = useState(0);
   // PDF → Word: the PDF being converted, then what the converted document came from.
-  const [converter, setConverter] = useState<{ initial?: { bytes: Uint8Array; name: string } }>();
+  /** The PDF converter: a PDF to convert at once, and the project (folder) the result is saved into. */
+  const [converter, setConverter] = useState<{ initial?: { bytes: Uint8Array; name: string }; project?: string }>();
+  /** The person's projects (desktop), and the home screen's page (kept while it is closed). */
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [homeView, setHomeView] = useState<HomeView>({ page: "home" });
+  const refreshProjects = () => { void listProjects().then(setProjects, () => undefined); };
   const [conversion, setConversion] = useState<{ from: string; warnings: string[] }>();
   // The home screen: at start (unless a document was given, or a dev test runs), and from the Prime Word button.
   const [home, setHome] = useState(() => !/[?&](selftest|file)=/.test(location.search));
@@ -751,10 +759,16 @@ export function App() {
     if (opened) load(opened.bytes, opened.name, opened.location);
   };
 
-  /** A converted PDF opens as a new, unsaved Word document (the PDF itself is not changed). */
+  /**
+   * A converted PDF opens as a new, unsaved Word document (the PDF itself is not changed) — or, converted
+   * for a project, saved in the project's folder first.
+   */
   const openConverted = async (result: ConversionResult, pdfName: string) => {
     const { doc, warnings } = result;
-    openTab({ base: doc, name: pdfName.replace(/\.pdf$/i, ".docx"), warnings: [], fonts: 0 }, true, true);
+    const name = pdfName.replace(/\.pdf$/i, ".docx");
+    const saved = converter?.project ? await saveIntoProject(converter.project, name, () => writeDocx(doc)) : undefined;
+    if (converter?.project && !saved) return;
+    openTab({ base: doc, name: saved?.name ?? name, ...(saved?.location ? { location: saved.location } : {}), warnings: [], fonts: 0 }, !saved, true);
     setConversion({ from: pdfName, warnings });
     setConverter(undefined);
     if (SELFTEST) {
@@ -786,8 +800,50 @@ export function App() {
     v2.focus();
   };
 
-  /** Saves a converted PDF straight to a .docx, without opening it. */
+  /** Writes a new file into a project's folder ("(2)" added when the name is taken); undefined on failure. */
+  const saveIntoProject = async (folder: string, name: string, bytes: () => Uint8Array) => {
+    try {
+      const path = await newPathIn(folder, name);
+      const saved = await saveDocument(bytes, name, { kind: "path", path });
+      refreshProjects();
+      return saved;
+    } catch (e) {
+      alert(`Prime Word could not save ${name} in the project:
+${(e as Error).message ?? e}`);
+      return undefined;
+    }
+  };
+
+  /** What a project page does: open, create, convert into the project. */
+  const projectActions: ProjectActions = {
+    openDocument: (path) => void openRecent(path),
+    newDocument: async (folder, name, template) => {
+      const base = template.create();
+      const saved = await saveIntoProject(folder, `${name.replace(/.docx$/i, "")}.docx`, () => writeDocx(base));
+      if (saved?.location) openTab({ base, name: saved.name, location: saved.location, warnings: [], fonts: 0 }, false, true);
+    },
+    convertPdf: (folder, pdfPath) => {
+      if (!pdfPath) { setConverter({ project: folder }); return; }
+      void openPath(pdfPath).then((f) => setConverter({ initial: { bytes: f.bytes, name: f.name }, project: folder }),
+        (e) => alert(`Prime Word could not read ${pdfPath}:
+${String(e)}`));
+    },
+    openAll: async (paths) => {
+      for (const path of paths) {
+        await openRecent(path);
+        // The tab list is read from the last render: let it happen before the next.
+        await new Promise((r) => setTimeout(r, 40));
+      }
+    },
+  };
+
+  /** Saves a converted PDF straight to a .docx, without opening it (into the project, when converting for one). */
   const saveConverted = async (result: ConversionResult, pdfName: string) => {
+    if (converter?.project) {
+      const saved = await saveIntoProject(converter.project, pdfName.replace(/.pdf$/i, ".docx"), () => writeDocx(result.doc));
+      if (saved) { flash(`Saved ${saved.name} in the project`); setConverter(undefined); }
+      return;
+    }
     try {
       const saved = await saveDocument((f) => (f === "docx" ? writeDocx(result.doc) : writeFormat(result.doc, f)), pdfName.replace(/\.pdf$/i, ".docx"));
       if (saved) flash(`Saved ${saved.name}`);
@@ -1036,10 +1092,15 @@ export function App() {
   }, [dirty]);
 
   useEffect(() => {
-    const title = `${dirty ? "• " : ""}${file.name} — Prime Word`;
+    const project = projectOf(projects, file.location?.kind === "path" ? file.location.path : undefined);
+    const title = `${dirty ? "• " : ""}${file.name}${project ? ` — ${project.meta.name}` : ""} — Prime Word`;
     document.title = title;
     if (isDesktop) void getCurrentWindow().setTitle(title);
-  }, [file.name, dirty]);
+  }, [file.name, file.location, dirty, projects]);
+
+  // The projects list: when the app starts and each time the home screen opens.
+  useEffect(() => { if (home) refreshProjects(); }, [home]);
+  useEffect(() => { refreshProjects(); }, []);
 
   // Automation (desktop command line): --pw-type=<text> edits the opened document;
   // --pw-export-pdf=<path> exports it as PDF and closes the app. Used by end-to-end tests.
@@ -1086,7 +1147,11 @@ export function App() {
     <div className={`app${navPane ? " with-nav" : ""}`}>
       <div className="app-top">
       {tabs.length > 1 && (
-        <DocTabs tabs={tabs.map((t) => (t.id === activeTab ? { id: t.id, name: file.name, dirty } : { id: t.id, name: t.file.name, dirty: t.dirty }))}
+        <DocTabs tabs={tabs.map((t) => {
+          const f = t.id === activeTab ? file : t.file;
+          const project = projectOf(projects, f.location?.kind === "path" ? f.location.path : undefined);
+          return { id: t.id, name: f.name, dirty: t.id === activeTab ? dirty : t.dirty, ...(project ? { project: project.meta.name, color: project.meta.color } : {}) };
+        })}
           active={activeTab} onSelect={switchTab} onClose={(id) => void closeTab(id)} onNew={() => void newDocument()} />
       )}
       <Ribbon
@@ -1332,7 +1397,8 @@ export function App() {
         <Home recovery={recovery} onPick={(t) => void newDocument(t)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)}
           onRestore={(s) => void restore(s)} onDiscard={(s) => void discardRecovery(s)}
           {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})}
-          onLetterhead={() => setDesigningLetterhead(true)} templatesVersion={templatesVersion} />
+          onLetterhead={() => setDesigningLetterhead(true)} templatesVersion={templatesVersion}
+          view={homeView} onView={setHomeView} projects={projects} onProjectsChanged={refreshProjects} projectActions={projectActions} />
       )}
       {pickingTemplate && (
         <TemplatePicker templatesVersion={templatesVersion} onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />

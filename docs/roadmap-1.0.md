@@ -106,7 +106,13 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    from a small table and edited by double-click, saved as real Word charts with their spreadsheet (Word's
    Edit Data works), and Word's charts shown. Checked against Word (same shapes, colours, sizes; Word's
    charts drawn alike; Word reads ours as its own).
-7. **Release** — text recognition for PDFs without text ✅ (2026-11-10: scanned pages and pages printed
+7. **Projects** — phase 1 ✅ (2026-11-10): a project is an ordinary folder (files stay where the person and
+   their backups can see them; a hidden .primeword/project.json keeps name and colour and travels with it).
+   Home shows project cards; a project page lists its documents, PDFs, pictures and other files; new
+   documents and converted PDFs are saved straight into it; files can be copied in; tabs and the window
+   title show the project. Next: version history per document (restore, compare) and zip backup (phase 2);
+   notes, checklist, activity and search across a project (phase 3); project templates (phase 4).
+8. **Release** — text recognition for PDFs without text ✅ (2026-11-10: scanned pages and pages printed
    as outlines, e.g. by Microsoft Print to PDF, read by Windows' own offline recogniser — about half a
    second a page; macOS and Linux not yet), code signing, automatic updates, About/version, user guide.
 

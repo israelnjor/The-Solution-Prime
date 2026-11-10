@@ -4,6 +4,11 @@ import { isDesktop } from "./platform";
 import { RecentList } from "./RecentList";
 import { MyTemplates } from "./MyTemplates";
 import type { Snapshot } from "./recovery";
+import { NewProjectDialog, type ProjectActions, ProjectPage, ProjectsPage, ProjectsStrip } from "./ProjectViews";
+import { projectsAvailable, type ProjectSummary } from "./projects";
+
+/** Which page of the home screen is showing (kept by the app, so Home comes back where it was left). */
+export type HomeView = { page: "home" | "templates" | "projects"; project?: string };
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -12,9 +17,10 @@ const greeting = () => {
 
 /**
  * The home screen: shown when Prime Word starts without a document, and from the Prime Word button.
- * New (templates), Open, recent documents, and unsaved work to recover.
+ * New (templates), Open, projects, recent documents, and unsaved work to recover.
  */
-export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf, onLetterhead, templatesVersion }: {
+export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf, onLetterhead, templatesVersion,
+  view, onView, projects, onProjectsChanged, projectActions }: {
   recovery: Snapshot[];
   onPick(t: Template): void;
   onOpen(): void;
@@ -26,11 +32,21 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
   onConvertPdf(): void;
   onLetterhead(): void;
   templatesVersion: number;
+  view: HomeView;
+  onView(v: HomeView): void;
+  /** The person's projects (desktop), most recently used first. */
+  projects: ProjectSummary[];
+  onProjectsChanged(): void;
+  projectActions: ProjectActions;
 }) {
   const first = useRef<HTMLButtonElement>(null);
-  /** The rail's pages: everything at a glance, or the person's own templates. */
-  const [page, setPage] = useState<"home" | "templates">("home");
+  /** The rail's pages: everything at a glance, the person's own templates, their projects. */
+  const page = view.page;
+  const setPage = (p: HomeView["page"]) => onView({ page: p });
+  const [creating, setCreating] = useState(false);
   useEffect(() => { first.current?.focus(); }, [page]);
+  const current = view.project ? projects.find((p) => p.path === view.project) : undefined;
+  const openProject = (p: ProjectSummary) => onView({ page: "projects", project: p.path });
   return (
     <div className="home" role="dialog" aria-label="Prime Word home" onKeyDown={(e) => {
       if (e.key === "Escape" && onClose) onClose();
@@ -40,13 +56,19 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         <div className="home-logo">Prime Word</div>
         {onClose && <button onClick={onClose}>← Back to document</button>}
         <button className={page === "home" ? "on" : ""} aria-current={page === "home" ? "page" : undefined} onClick={() => setPage("home")}>Home</button>
+        {projectsAvailable() && <button className={page === "projects" ? "on" : ""} aria-current={page === "projects" ? "page" : undefined} onClick={() => setPage("projects")}>Projects</button>}
         <button className={page === "templates" ? "on" : ""} aria-current={page === "templates" ? "page" : undefined} onClick={() => setPage("templates")}>My templates</button>
         <button onClick={() => onPick(TEMPLATES[0])}>New blank document</button>
         <button onClick={onOpen}>Open… <kbd>Ctrl+O</kbd></button>
         <button onClick={onConvertPdf}>Convert PDF to Word…</button>
         <div className="home-rail-foot">Prime Productivity</div>
       </nav>
-      {page === "templates" ? (
+      {page === "projects" ? (current ? (
+        <ProjectPage key={current.path} project={current} actions={projectActions} onBack={() => onView({ page: "projects" })}
+          onChanged={onProjectsChanged} onForgotten={() => { onProjectsChanged(); onView({ page: "projects" }); }} />
+      ) : (
+        <ProjectsPage projects={projects} onOpen={openProject} onNew={() => setCreating(true)} />
+      )) : page === "templates" ? (
         <main className="home-main">
           <div className="home-row">
             <h1>My templates</h1>
@@ -72,6 +94,8 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
             ))}
           </section>
         )}
+
+        {projectsAvailable() && <ProjectsStrip projects={projects} onOpen={openProject} onNew={() => setCreating(true)} onAll={() => setPage("projects")} />}
 
         <section aria-label="New">
           <h2>New</h2>
@@ -124,6 +148,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         </section>
       </main>
       )}
+      {creating && <NewProjectDialog onClose={() => setCreating(false)} onCreated={(p) => { setCreating(false); onProjectsChanged(); onView({ page: "projects", project: p.path }); }} />}
     </div>
   );
 }

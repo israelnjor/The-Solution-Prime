@@ -4,6 +4,7 @@
 
 mod fonts;
 pub mod ocr;
+mod projects;
 
 use std::fs;
 use std::io::Write;
@@ -79,9 +80,10 @@ fn modified_ms(path: &Path) -> Option<u64> {
     Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
 }
 
-/// Files the user chose (dialog, "Open with") or documents opened before (recent list) — nothing else.
+/// Files the user chose (dialog, "Open with"), documents opened before (recent list), and files in the
+/// person's project folders — nothing else.
 fn may_access(app: &AppHandle, path: &str) -> bool {
-    app.fs_scope().is_allowed(path) || (is_document(path) && is_recent(app, path))
+    app.fs_scope().is_allowed(path) || (is_document(path) && is_recent(app, path)) || projects::in_a_project(app, path)
 }
 
 #[derive(serde::Serialize)]
@@ -392,6 +394,14 @@ pub fn run() {
         .manage(fonts::FontIndex::default())
         .invoke_handler(tauri::generate_handler![
             recognize_text,
+            projects::project_list,
+            projects::project_add,
+            projects::project_files,
+            projects::project_save,
+            projects::project_forget,
+            projects::project_new_path,
+            projects::project_import,
+            projects::project_open_external,
             recognition_limit,
             startup_document,
             recent_documents,

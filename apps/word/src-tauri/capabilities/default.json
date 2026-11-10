@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Prime Word: native dialogs; read/write only files the user picks (atomic saves via app commands); app recovery folder; installed fonts for PDF export; Office cloud fonts.",
+  "description": "Prime Word: native dialogs; read/write only files the user picks or keeps in a project folder they chose (atomic saves via app commands); app recovery folder; installed fonts for PDF export; Office cloud fonts.",
   "windows": [
     "main"
   ],
