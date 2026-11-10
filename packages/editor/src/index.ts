@@ -1,11 +1,11 @@
-export { createSchema, CONTAINER_MARKS, type Render } from "./schema.js";
+export { createSchema, CONTAINER_MARKS, type Render, typingParser } from "./schema.js";
 export { fromProseMirror, toProseMirror } from "./convert.js";
 export { createRender, paragraphStyles, runCss } from "./render.js";
 export { isActive, paragraphProp, setParagraph, toggleRun, wordCount } from "./commands.js";
 export { blankDocument } from "./blank.js";
 export { resolvePageStarts, type ResolvedStart } from "./pages.js";
 export {
-  deleteFloat, floatAt, floatEditing, inlinePictureResizing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
+  deleteFloat, floatAt, floatEditing, floatNodeOf, inlinePictureResizing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
   setPictureWrap, withBox, type FloatBox,
 } from "./floats.js";
 export { PAGE_GAP, pageAt, pageTops, pagination, paginationKey, type PagedOptions, mark, sectionOffsets, timed } from "./paged.js";
@@ -51,3 +51,5 @@ export { moveSection, outline, outlineIndexAt, type OutlineItem } from "./naviga
 export { BODY, changeOutlineLevel, outlineKey, outlineLevelAt, outlinePlugin, outlineShown, setOutlineLevel } from "./outline.js";
 export { compareDocuments } from "./compare.js";
 export { extensionOf, type FileFormat, FORMAT_NAMES, formatOf, readAnyFormat, WRITABLE, writeFormat } from "./formats/index.js";
+export { insertShape, type ShapeChoice, SHAPES, setShapeFill, setShapeLine, shapeAt } from "./shapes.js";
+export { chartAt, insertChart, SAMPLE_CHART, setChartData } from "./charts.js";

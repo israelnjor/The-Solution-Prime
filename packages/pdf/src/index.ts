@@ -4,7 +4,7 @@
  */
 import fontkit from "@pdf-lib/fontkit";
 import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, degrees, rgb, setCharacterSpacing } from "pdf-lib";
-import { type FontKey, type ImageSource, isLineShape, type LayoutResult, type Page, type PageBorderLine, type Segment, shapePath, type Watermark } from "@prime/layout";
+import { chartShapes, chartTheme, type FontKey, type ImageSource, isLineShape, parseChart, type LayoutResult, type Page, type PageBorderLine, type Segment, shapePath, type Watermark } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 
 /** Supplies font files for embedding, and splits text into runs per drawing font (glyph fallback). */
@@ -95,9 +95,12 @@ class Renderer {
     }
     // Shapes set behind the text first.
     for (const line of p.lines) if (line.shape?.behind) this.shape(out, p, line);
-    for (const line of p.lines) {
+    // Objects in front of the text last, over it.
+    const ordered = [...p.lines.filter((l) => !l.front), ...p.lines.filter((l) => l.front)];
+    for (const line of ordered) {
       if (line.shape && !line.shape.behind) this.shape(out, p, line);
       for (const img of line.images) {
+        if (img.chart) { await this.chart(out, p, img); continue; }
         const embedded = await this.image(img);
         if (embedded) out.drawImage(embedded, { x: img.x, y: Y(img.y + img.height), width: img.width, height: img.height });
         else out.drawRectangle({ x: img.x, y: Y(img.y + img.height), width: img.width, height: img.height, borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5 });
@@ -116,6 +119,31 @@ class Renderer {
       }
     }
     if (p.decor?.borders) this.borders(out, p, p.decor.borders);
+  }
+
+  /** A chart: its shapes as vector graphics (text in the document's chart font, Calibri). */
+  private async chart(out: PDFPage, p: Page, img: Page["lines"][number]["images"][number]) {
+    const part = this.doc.package.parts.find((x) => x.name === img.chart);
+    const themePart = this.doc.package.parts.find((x) => /^word\/theme\/theme\d*\.xml$/.test(x.name));
+    const spec = part ? parseChart(new TextDecoder().decode(fromBase64(part.data)), chartTheme(themePart ? new TextDecoder().decode(fromBase64(themePart.data)) : undefined)) : undefined;
+    const ox = img.x;
+    const oy = p.height - img.y; // the box's top, in PDF coordinates
+    if (!spec) {
+      out.drawRectangle({ x: ox, y: oy - img.height, width: img.width, height: img.height, borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5 });
+      return;
+    }
+    const font = await this.font({ family: "Calibri", bold: false, italic: false } as FontKey);
+    for (const s of chartShapes(spec, img.width, img.height)) {
+      if (s.kind === "rect") out.drawRectangle({ x: ox + s.x, y: oy - s.y - s.h, width: s.w, height: s.h, color: color(s.fill) });
+      else if (s.kind === "line") out.drawLine({ start: { x: ox + s.x1, y: oy - s.y1 }, end: { x: ox + s.x2, y: oy - s.y2 }, thickness: s.width, color: color(s.color) });
+      else if (s.kind === "path") out.drawSvgPath(s.d, { x: ox, y: oy, ...(s.fill ? { color: color(s.fill) } : {}), ...(s.stroke ? { borderColor: color(s.stroke), borderWidth: s.width ?? 1 } : {}) });
+      else {
+        let w = 0;
+        try { w = font.widthOfTextAtSize(s.text, s.size); } catch { continue; }
+        const x = s.anchor === "middle" ? s.x - w / 2 : s.anchor === "end" ? s.x - w : s.x;
+        try { out.drawText(s.text, { x: ox + x, y: oy - s.y, size: s.size, font, color: color(s.color) }); } catch { /* a character the font lacks */ }
+      }
+    }
   }
 
   /** A shape, or a text box's fill and border: its outline filled and stroked. */

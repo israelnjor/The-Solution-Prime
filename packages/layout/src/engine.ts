@@ -57,6 +57,8 @@ export interface Rule {
 export interface ImageSource {
   imageId?: string;
   part?: string;
+  /** A chart: its part (word/charts/chartN.xml), drawn from what it holds. */
+  chart?: string;
 }
 
 export interface PlacedImage extends ImageSource {
@@ -95,6 +97,8 @@ export interface PositionedLine {
   strokes?: { points: number[]; width: number; color: string }[];
   /** A shape (or a text box's background and border) in the line's box (x, y, width, height). */
   shape?: { style: ShapeStyle; width: number; behind?: boolean };
+  /** Part of an object in front of the text (Wrap Text → In Front of Text): drawn over the text. */
+  front?: boolean;
 }
 
 export interface Page {
@@ -156,6 +160,8 @@ export interface PlacedFloat {
   ink?: FloatInfo["ink"];
   /** A shape, or a text box's fill and border. */
   shape?: ShapeStyle;
+  /** A text box (its text can be edited). */
+  textbox?: boolean;
 }
 
 /**
@@ -538,11 +544,14 @@ export class LayoutEngine {
           if (extent) {
             const relId = /r:embed="([^"]+)"/.exec(i.preserved.xml)?.[1];
             const rel = this.rels.find((r) => r.id === relId && !r.external);
+            // A chart (c:chart r:id): drawn from its part.
+            const chartId = /<c:chart\b[^>]*\br:id="([^"]+)"/.exec(i.preserved.xml)?.[1];
+            const chartRel = chartId ? this.rels.find((r) => r.id === chartId && !r.external) : undefined;
             out.push({
               kind: "image",
               width: (Number(extent[1]) + effect[0] + effect[2]) / 12700,
               height: (Number(extent[2]) + effect[1] + effect[3]) / 12700,
-              src: rel ? { part: rel.target } : {},
+              src: chartRel ? { chart: chartRel.target } : rel ? { part: rel.target } : {},
               offset,
             });
           }
@@ -1499,6 +1508,7 @@ export class LayoutEngine {
         page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
           strokes: f.ink.strokes.map((s) => ({ points: s.map((v, i) => (i % 2 ? fy + v * height : x + v * f.width)), width: f.ink!.width, color: f.ink!.color })) });
       }
+      if (f.wrap === "none" && !f.behind) for (let i = from; i < page.lines.length; i++) page.lines[i] = { ...page.lines[i], front: true };
       // The same, relative to the anchor paragraph and the object's box, for the editor.
       const shift = (l: PositionedLine): PositionedLine => ({
         ...l, x: l.x - x, y: l.y - fy, baseline: l.baseline - fy,
@@ -1514,6 +1524,7 @@ export class LayoutEngine {
         ...(f.kind === "picture" && source ? { image: source } : {}),
         ...(f.kind === "ink" && f.ink ? { ink: f.ink } : {}),
         ...(f.shape ? { shape: f.shape } : {}),
+        ...(f.kind === "textbox" ? { textbox: true } : {}),
         lines: f.kind === "textbox" ? page.lines.slice(from).filter((l) => !l.shape).map(shift) : [],
       });
       if (f.wrap === "none") return undefined;

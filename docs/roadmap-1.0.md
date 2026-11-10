@@ -6,7 +6,7 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-08, after Waves 0–5): about 72%
+## Where we are (2026-11-10, after Waves 0–6): about 75%
 
 | Area | Feature | Status |
 |---|---|---|
@@ -31,10 +31,10 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Find options (formatting, wildcards), Go To | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
 | | Equations: insert and edit (LaTeX notation, live preview, saved as Word equations) | ✅ |
-| | Text boxes (shown, moved; not editable) | 🟡 |
+| | Text boxes (insert, type in them, move, resize, fill and border), shapes (13 everyday shapes: insert, fill, outline, wrap), charts (column, bar, line, pie: insert, edit data; Word's charts shown) | ✅ |
 | | Symbol (with ₵ and ₦), date & time (as text or a DATE field) | ✅ |
 | | Section and column breaks, drop cap | ✅ |
-| | Shapes, charts, SmartArt, WordArt | ❌ |
+| | SmartArt, WordArt, other chart kinds (area, scatter, 3-D), shape effects | ❌ |
 | **Design** | Style sets, theme fonts and colours, watermark, page colour, page borders | ✅ |
 | **Layout** | Margins, orientation, size, indents/spacing | ✅ |
 | | Floating objects: move/resize | ✅ |
@@ -100,7 +100,12 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    save .rtf, .odt, .txt (checked: Word opens what we write, and we read what Word writes); thesaurus
    (WordNet 3.0, offline); read aloud (installed voices only); basic grammar. Not done: saving .doc
    (.docx is read everywhere), pages side by side while editing (read mode has them).
-6. **Objects** — shapes and text boxes (insert and edit), simple charts.
+6. **Objects** ✅ (2026-11-10) — text boxes (insert; double-click to type, with formatting; fill and border),
+   shapes (rectangle, oval, arrows, triangle, star, line…: insert, fill, outline, wrap), drawn on screen and in
+   the PDF from Word's own description (theme colours included); charts (column, bar, line, pie) inserted
+   from a small table and edited by double-click, saved as real Word charts with their spreadsheet (Word's
+   Edit Data works), and Word's charts shown. Checked against Word (same shapes, colours, sizes; Word's
+   charts drawn alike; Word reads ours as its own).
 7. **Release** — text recognition for scanned PDFs, code signing, automatic updates, About/version,
    user guide.
 

@@ -9,7 +9,7 @@
  * copying within Prime Word is lossless. HTML from elsewhere (Word, the web) is parsed into
  * temporary "x_" marks which paste.ts merges into run formatting after the paste.
  */
-import { type DOMOutputSpec, type Mark, type Node, Schema, type TagParseRule } from "prosemirror-model";
+import { type DOMOutputSpec, DOMParser, type Mark, type Node, Schema, type TagParseRule } from "prosemirror-model";
 import { cellFromHtml, paragraphFromHtml, tableFromHtml } from "./paste.js";
 
 /** Rendering hooks supplied by the app (browser). Without them, nodes render as plain elements. */
@@ -272,3 +272,14 @@ export function createSchema(render?: Render): Schema {
 
 /** Container marks, outermost first. */
 export const CONTAINER_MARKS = ["revision", "inline_control", "link", "field"] as const;
+
+/**
+ * Reading what is typed: the document's own HTML only, without the rules for pasted web formatting
+ * (x_bold, x_style…). Those match our own runs' inline styles (font-weight: 700…): typing re-read a
+ * whole formatted word as different, replaced it, and the formatting for the next text (bold turned off)
+ * spread over the word before. Pasting keeps every rule (clipboardParser).
+ */
+export function typingParser(schema: Schema): DOMParser {
+  const all = DOMParser.fromSchema(schema);
+  return new DOMParser(schema, all.rules.filter((r) => !("mark" in r && r.mark?.startsWith("x_"))));
+}

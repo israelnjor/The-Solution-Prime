@@ -7,7 +7,7 @@ import {
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
   insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
-  toggleSuppressLineNumbers, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  toggleSuppressLineNumbers, insertShape, SHAPES, setShapeFill, setShapeLine, shapeAt, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
@@ -86,6 +86,7 @@ export interface RibbonProps {
   onReadMode(): void;
   onInfo(): void;
   onThesaurus(): void;
+  onChart(): void;
   onProtect(): void;
   onCompare(): void;
   onReadAloud(): void;
@@ -140,7 +141,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -178,6 +179,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
   const fonts = [...new Set([...FONTS, ...(effective ? [effective.font] : [])])].sort();
   const tableActive = !!state && inTable(state);
   const picture = state ? pictureAt(state) : undefined;
+  // A shape or text box selected: its own tab (Shape Format), in the picture tab's place.
+  const shape = state ? shapeAt(state) : undefined;
   const activeTab = ((tab === "table" || tab === "tableDesign") && !tableActive) || (tab === "picture" && !picture) ? "home" : tab === "outlining" && mode !== "outline" ? "view" : tab;
   // Outline view opens on its Outlining tab.
   useEffect(() => { if (mode === "outline") setTab("outlining"); }, [mode]);
@@ -215,7 +218,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         ))}
         {tableActive && <button className={`contextual ${activeTab === "tableDesign" ? "on" : ""}`} onClick={() => setTab("tableDesign")}>Table Design</button>}
         {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table Layout</button>}
-        {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>Picture</button>}
+        {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>{shape ? "Shape Format" : "Picture"}</button>}
         {mode === "outline" && <button className={`contextual ${activeTab === "outlining" ? "on" : ""}`} onClick={() => setTab("outlining")}>Outlining</button>}
         <span className="spacer" />
         <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
@@ -335,6 +338,15 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
           <>
             <div className="group">
               <button onClick={run(insertPageBreak)} title="Page break (Ctrl+Enter)">Page Break</button>
+            </div>
+            <div className="group" aria-label="Text box and shapes">
+              <button onClick={() => { run(insertShape("textbox"))(); setTab("picture"); }} title="A box of text you can place anywhere on the page">Text Box</button>
+              <button onClick={onChart} title="A column, bar, line or pie chart from a small table of numbers (double-click a chart to change it)">Chart…</button>
+              <select value="" aria-label="Shapes" title="Insert a shape"
+                onChange={(e) => { if (e.target.value) { run(insertShape("shape", e.target.value))(); setTab("picture"); } }}>
+                <option value="">Shapes…</option>
+                {SHAPES.map((sh) => <option key={sh.geometry} value={sh.geometry}>{sh.label}</option>)}
+              </select>
             </div>
             <div className="group" aria-label="Drop Cap">
               <select value={state ? dropCapOf(state) : "none"} aria-label="Drop Cap" title="A large first letter beside the paragraph's first lines"
@@ -731,6 +743,25 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
 
         {activeTab === "picture" && picture && (
           <>
+            {shape && (
+              <div className="group" aria-label="Shape styles">
+                <label className="field">Fill{" "}
+                  <input type="color" aria-label="Shape fill" value={`#${shape.float.shape.fill ?? "FFFFFF"}`}
+                    onChange={(e) => run(setShapeFill(e.target.value.slice(1).toUpperCase()))()} disabled={shape.float.shape.geometry === "line"} />
+                </label>
+                <button onClick={run(setShapeFill(undefined))} disabled={!shape.float.shape.fill} title="No fill (see-through)">No Fill</button>
+                <label className="field">Outline{" "}
+                  <input type="color" aria-label="Shape outline" value={`#${shape.float.shape.line?.color ?? "000000"}`}
+                    onChange={(e) => run(setShapeLine({ color: e.target.value.slice(1).toUpperCase(), width: shape.float.shape.line?.width ?? 0.75 }))()} />
+                </label>
+                <select aria-label="Outline weight" title="Outline weight" value={String(shape.float.shape.line?.width ?? "")}
+                  onChange={(e) => run(setShapeLine({ color: shape.float.shape.line?.color ?? "000000", width: Number(e.target.value) }))()}>
+                  {!shape.float.shape.line && <option value="">—</option>}
+                  {[0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6].map((w) => <option key={w} value={w}>{w} pt</option>)}
+                </select>
+                <button onClick={run(setShapeLine(undefined))} disabled={!shape.float.shape.line} title="No outline">No Outline</button>
+              </div>
+            )}
             <div className="group">
               <label className="field">Wrap text{" "}
                 <select value={pictureWrap(picture.node)} onChange={(e) => run(setPictureWrap(e.target.value as PictureWrap))()}
@@ -743,16 +774,21 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                   <option value="inFront">In front of text</option>
                 </select>
               </label>
-              <span className="hint">{pictureWrap(picture.node) !== "inline" ? "Drag the picture to move it; drag a corner to resize." : "Drag a corner to resize (keeps its shape), or a side to stretch it."}</span>
+              <span className="hint">{shape ? (shape.float.kind === "textbox" ? "Drag to move, a corner to resize; double-click to type in it." : "Drag to move; drag a corner to resize.") : pictureWrap(picture.node) !== "inline" ? "Drag the picture to move it; drag a corner to resize." : "Drag a corner to resize (keeps its shape), or a side to stretch it."}</span>
             </div>
-            <div className="group">
+            {!shape && <div className="group">
               <button onClick={onEditPicture} disabled={picture.kept} title={picture.kept ? "Pictures with effects from Word cannot be cropped yet" : "Crop and rotate"}>Crop &amp; Rotate…</button>
               <button disabled={picture.kept} onClick={() => {
                 const text = window.prompt("Alternative text (read aloud by screen readers):", picture.node.attrs.description ?? "");
                 if (text !== null) run(setAltText(text))();
               }}>Alt Text…</button>
               <button onClick={() => v && (v.dispatch(v.state.tr.deleteSelection()), v.focus())}>Delete</button>
-            </div>
+            </div>}
+            {shape && (
+              <div className="group">
+                <button onClick={() => v && (v.dispatch(v.state.tr.deleteSelection()), v.focus())}>Delete</button>
+              </div>
+            )}
           </>
         )}
 

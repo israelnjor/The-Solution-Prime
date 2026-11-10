@@ -191,6 +191,13 @@ function resourceUrl(base: PrimeDocument, id: string): string | undefined {
   return url;
 }
 
+/** What a float layer shows (redrawn when it changes: its place, size, picture, text, fill or outline). */
+function floatKey(f: PlacedFloat, left: number): string {
+  const text = f.lines.map((l) => l.segments.map((g) => `${g.text}${g.font.bold ? "b" : ""}${g.font.italic ? "i" : ""}${g.color ?? ""}`).join("")).join("|");
+  const style = f.shape ? `${f.shape.geometry}:${f.shape.fill ?? ""}:${f.shape.line ? `${f.shape.line.color}@${f.shape.line.width}` : ""}` : "";
+  return `float-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.image?.imageId ?? ""}-${left}-${style}-${text}`;
+}
+
 /**
  * A floating picture or text box, drawn inside its anchor paragraph where the layout put it, so it
  * moves with its text on screen. `left` is the paragraph's left indent (the layer's origin).
@@ -203,7 +210,7 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
     el.style.cssText = `left:${f.x - left}pt;top:${f.y}pt;width:${f.width}pt;height:${f.height}pt`;
     // For moving and resizing (floats.ts): which float, and its box in layout terms.
     // Pictures and ink keep their proportions when resized; text boxes do not.
-    Object.assign(el.dataset, { index: String(f.index), x: String(f.x), y: String(f.y), w: String(f.width), h: String(f.height), kind: f.image || f.ink ? "picture" : "textbox" });
+    Object.assign(el.dataset, { index: String(f.index), x: String(f.x), y: String(f.y), w: String(f.width), h: String(f.height), kind: f.image || f.ink ? "picture" : f.textbox ? "textbox" : "shape" });
     el.title = "Drag to move; drag a corner to resize; Delete to remove";
     for (const corner of ["nw", "ne", "sw", "se"]) {
       const h = document.createElement("span");
@@ -319,7 +326,7 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
       if (!para || para.type.name !== "paragraph") continue;
       const left = resolver.paragraph({ type: "paragraph", props: para.attrs.props, content: [] }).left;
       out.push(Decoration.node(f.pos, f.pos + para.nodeSize, { style: "position:relative" }));
-      out.push(Decoration.widget(f.pos + 1, floatLayer(f, base, left), { side: -1, key: `float-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.lines.length}-${left}` }));
+      out.push(Decoration.widget(f.pos + 1, floatLayer(f, base, left), { side: -1, key: floatKey(f, left) }));
     }
   }
   for (const w of wraps) {

@@ -1,7 +1,7 @@
+import { DOMParser as PmDOMParser } from "prosemirror-model";
 import {
   createRender, createSchema, insertField, ownStory, paragraphStyles, sectionInfo, setStory, setTitlePage, storyAt,
-  storyFromProseMirror, storyToProseMirror, toggleRun,
-} from "@prime/editor";
+  storyFromProseMirror, storyToProseMirror, toggleRun, typingParser } from "@prime/editor";
 import type { Measurer } from "@prime/layout";
 import type { Block, HeaderFooterKind, PrimeDocument, Story } from "@prime/pdm";
 import { baseKeymap } from "prosemirror-commands";
@@ -24,6 +24,8 @@ function StoryEditor({ label, doc, measurer, blocks, onChange, disabled }: {
     if (!mount.current) return;
     const schema = createSchema(createRender(doc, measurer));
     const v = new EditorView(mount.current, {
+      // Typing read with the document's own rules; pasting with all of them (web formatting too).
+      domParser: typingParser(schema), clipboardParser: PmDOMParser.fromSchema(schema),
       state: EditorState.create({
         doc: storyToProseMirror(blocks, schema),
         plugins: [

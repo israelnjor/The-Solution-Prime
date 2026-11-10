@@ -1,7 +1,7 @@
+import { DOMParser as PmDOMParser } from "prosemirror-model";
 import {
   createRender, createSchema, deleteNote, gotoNoteRef, noteList, type NoteEntry, paragraphStyles, setNoteText, storyFromProseMirror,
-  storyToProseMirror, toggleRun,
-} from "@prime/editor";
+  storyToProseMirror, toggleRun, typingParser } from "@prime/editor";
 import type { Measurer } from "@prime/layout";
 import type { Block, NoteKind, PrimeDocument } from "@prime/pdm";
 import { baseKeymap } from "prosemirror-commands";
@@ -32,6 +32,8 @@ function NoteEditor({ entry, doc, measurer, focus, onChange }: {
     if (!mount.current) return;
     const schema = createSchema(createRender(doc, measurer));
     const v = new EditorView(mount.current, {
+      // Typing read with the document's own rules; pasting with all of them (web formatting too).
+      domParser: typingParser(schema), clipboardParser: PmDOMParser.fromSchema(schema),
       state: EditorState.create({
         doc: storyToProseMirror(entry.note.blocks, schema),
         plugins: [

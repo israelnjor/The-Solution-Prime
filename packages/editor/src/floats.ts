@@ -98,6 +98,12 @@ function locate(view: EditorView, el: HTMLElement): { paraPos: number; index: nu
   return { paraPos: $pos.before($pos.depth), index: Number(el.dataset.index) };
 }
 
+/** The floating object (its node and position) a layer on the page shows. */
+export function floatNodeOf(view: EditorView, el: HTMLElement): { pos: number; node: Node } | undefined {
+  const where = locate(view, el);
+  return where ? floatAt(view.state.doc, where.paraPos, where.index) : undefined;
+}
+
 /**
  * Click a floating object to select it; drag it to move it; drag a corner handle to resize it
  * (pictures keep their proportions); Delete removes it, Escape deselects.

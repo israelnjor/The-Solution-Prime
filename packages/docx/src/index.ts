@@ -5,3 +5,4 @@ export { type DocumentProperties, readProperties, withProperties } from "./prope
 export { isCfb, readCfb, writeCfb } from "./cfb.js";
 export { decryptDocx, encryptDocx, isEncrypted, WrongPasswordError } from "./encryption.js";
 export { DEFAULT_THEME, type NewShape, newShapeXml, readShapeStyle, themeColors, withShapeFill, withShapeLine } from "./shapes.js";
+export { addChart, type ChartData, chartWorkbook, chartXml, NEW_CHART_COLORS, updateChart } from "./charts.js";

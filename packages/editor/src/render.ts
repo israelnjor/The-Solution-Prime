@@ -6,7 +6,7 @@
  * decorations. Runs render their own direct formatting; everything else is inherited via CSS.
  * Equations are drawn as SVG by the math typesetter.
  */
-import { type CellLook, cellLooks, MathTypesetter, type Measurer, type ResolvedRun, Resolver } from "@prime/layout";
+import { type CellLook, cellLooks, chartSvg, chartTheme, MathTypesetter, type Measurer, parseChart, type ResolvedRun, Resolver } from "@prime/layout";
 import { type FloatInfo, type Paragraph, type PrimeDocument, paragraphText, type RunProps, type Table, type TextInline } from "@prime/pdm";
 import { DOMSerializer, type Node } from "prosemirror-model";
 import { Plugin, PluginKey, type Transaction } from "prosemirror-state";
@@ -148,6 +148,25 @@ export function createRender(doc: PrimeDocument, measurer: Measurer): Render {
       if (node.attrs.float) return ["span", { class: "pw-float-anchor", "data-pw-runpreserved": json(node.attrs) }];
       const p = node.attrs.preserved as { name: string; xml: string };
       const extent = /<wp:inline[ >][\s\S]*?<wp:extent cx="(\d+)" cy="(\d+)"/.exec(p.xml);
+      // A chart: drawn from its part (what it shows, as Word caches it).
+      const chartId = /<c:chart\b[^>]*\br:id="([^"]+)"/.exec(p.xml)?.[1];
+      const chartRel = chartId ? doc.package.preservedRels.find((r) => r.id === chartId && !r.external) : undefined;
+      const chartPart = chartRel && doc.package.parts.find((x) => x.name === chartRel.target);
+      if (extent && chartPart) {
+        const w = Number(extent[1]) / 12700;
+        const h = Number(extent[2]) / 12700;
+        const text = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+        const themePart = doc.package.parts.find((x) => /^word\/theme\/theme\d*\.xml$/.test(x.name));
+        const spec = parseChart(text(chartPart.data), chartTheme(themePart ? text(themePart.data) : undefined));
+        const svg = spec ? chartSvg(spec, w, h) : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#f4f6fa" stroke="#bbb"/><text x="${w / 2}" y="${h / 2}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#777">Chart</text></svg>`;
+        return ["img", {
+          src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+          class: "pw-chart",
+          alt: spec?.title ? `Chart: ${spec.title}` : "Chart",
+          style: `width:${pt(w)};height:${pt(h)}`,
+          "data-pw-runpreserved": json(node.attrs),
+        }];
+      }
       const relId = /r:embed="([^"]+)"/.exec(p.xml)?.[1];
       const rel = doc.package.preservedRels.find((r) => r.id === relId && !r.external);
       const part = rel && doc.package.parts.find((x) => x.name === rel.target);

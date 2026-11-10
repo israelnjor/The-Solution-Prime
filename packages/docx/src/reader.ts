@@ -366,7 +366,9 @@ class Reader {
         add({ type: "noteMark", kind: n === "w:footnoteRef" ? "footnote" : "endnote" });
       }
       else if (n === "w:drawing") {
-        add(this.readDrawing(c, ctx) ?? this.floating(c, c, ctx) ?? this.runPreserved(c, ctx, child(c, "wp:inline") ? "w:drawing/inline" : n));
+        // (A chart is drawn from its part: shown, not "kept unchanged".)
+        const chart = c.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/chart", "chart").length > 0;
+        add(this.readDrawing(c, ctx) ?? this.floating(c, c, ctx) ?? this.runPreserved(c, ctx, child(c, "wp:inline") ? "w:drawing/inline" : n, chart));
       } else if (n === "mc:AlternateContent") {
         // Word 2010+ shapes and text boxes: the modern form is the first choice (VML is the fallback).
         const drawing = elements(c).filter((x) => qname(x) === "mc:Choice").map((x) => child(x, "w:drawing")).find(Boolean);

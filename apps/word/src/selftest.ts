@@ -2,7 +2,7 @@
  * Development self-tests that need a real browser (run with ?selftest=paste in the dev build).
  * Results are logged as "[selftest] ..." lines for the test scripts to read.
  */
-import { fromProseMirror, timed } from "@prime/editor";
+import { fromProseMirror, setPictureWrap, timed } from "@prime/editor";
 import { layoutDocument, type Measurer } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 import { NodeSelection, TextSelection } from "prosemirror-state";
@@ -358,7 +358,7 @@ export function linesSelfTest(view: EditorView, base: () => PrimeDocument, measu
 }
 
 /** Drags the first floating picture 60px right and 30px down, then a corner 40px out; logs its box. */
-export function floatDragSelfTest() {
+export function floatDragSelfTest(view?: () => EditorView) {
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const box = (el: HTMLElement) => ["x", "y", "w", "h"].map((k) => Math.round(Number(el.dataset[k]))).join(",");
   const mouse = (type: string, target: EventTarget, x: number, y: number) =>
@@ -367,6 +367,18 @@ export function floatDragSelfTest() {
     await wait(2500);
     const first = () => document.querySelector<HTMLElement>('.pw-float[data-kind="picture"]');
     let el = first();
+    // No floating picture in the file: float its first in-line picture (Wrap Text → Square).
+    const v = view?.();
+    if (!el && v) {
+      let at = -1;
+      v.state.doc.descendants((n, pos) => { if (at < 0 && n.type.name === "image") at = pos; return at < 0; });
+      if (at >= 0) {
+        v.dispatch(v.state.tr.setSelection(NodeSelection.create(v.state.doc, at)));
+        setPictureWrap("square")(v.state, v.dispatch);
+        await wait(1500);
+        el = first();
+      }
+    }
     if (!el) return console.log("[selftest] align", JSON.stringify({ error: "no floating picture" }));
     el.scrollIntoView();
     const before = box(el);

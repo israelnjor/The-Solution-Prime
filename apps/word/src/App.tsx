@@ -1,12 +1,11 @@
-import { Fragment, type Node as PmNode, type Schema } from "prosemirror-model";
+import { Fragment, type Node as PmNode, type Schema, DOMParser as PmDOMParser } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
+  blankDocument, chartAt, insertChart, SAMPLE_CHART, setChartData, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
   insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
-  pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun,
-} from "@prime/editor";
+  pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun, typingParser } from "@prime/editor";
 import { layoutDocument, type LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
 import type { PrimeDocument } from "@prime/pdm";
@@ -40,6 +39,8 @@ import { PropertiesDialog } from "./PropertiesDialog";
 import { PasswordDialog } from "./PasswordDialog";
 import { ReadAloud, speakPlugin } from "./ReadAloud";
 import { ThesaurusPane } from "./Thesaurus";
+import { TextBoxEditor } from "./TextBoxEditor";
+import { ChartDialog } from "./ChartDialog";
 import { ChangedOnDiskError, confirmAction, type DocumentLocation, isDesktop, openDocument, openPath, type OpenedFile, saveDocument, type SaveFormat } from "./platform";
 import { deleteSnapshot, orphanedSnapshots, SESSION, saveSnapshot, type Snapshot } from "./recovery";
 import { DocTabs } from "./DocTabs";
@@ -94,6 +95,9 @@ function fontUsage(doc: PrimeDocument): string {
 /** Dev self-test run (?selftest=…): turns on the "pw:" performance timings the tests read. */
 const SELFTEST = new URLSearchParams(location.search).has("selftest");
 if (SELFTEST) (globalThis as { primeTiming?: boolean }).primeTiming = true;
+
+/** The dev ?file= document was opened (once per page load). */
+let devFileLoaded = false;
 
 /** Word count, remembered per document version (the status bar asks on every render). */
 const wordCounts = new WeakMap<object, number>();
@@ -151,6 +155,10 @@ export function App() {
   const [info, setInfo] = useState(false);
   const [reading, setReading] = useState(false);
   const [thesaurusOpen, setThesaurusOpen] = useState(false);
+  /** A text box being typed in (double-clicked): its position and its layer on the page. */
+  const [editingBox, setEditingBox] = useState<{ pos: number; el: HTMLElement } | null>(null);
+  /** Insert → Chart, or a chart double-clicked (its position) to edit. */
+  const [chartDialog, setChartDialog] = useState<{ pos?: number; data: import("@prime/docx").ChartData } | null>(null);
   // The Print dialog or Read Mode, over the PDF of the document's pages.
   const [pdfView, setPdfView] = useState<{ kind: "print" | "read"; pdf: ViewPdf; pages: number; current: number } | null>(null);
   // The navigation pane: open or not (remembered), and a counter that puts the cursor in its search box (Ctrl+F).
@@ -402,6 +410,8 @@ export function App() {
       editor.carry = undefined;
     }
     const v = new EditorView(mount.current, {
+      // Typing read with the document's own rules; pasting with all of them (web formatting too).
+      domParser: typingParser(schema), clipboardParser: PmDOMParser.fromSchema(schema),
       state,
       // Our own checker underlines misspellings; turn off the browser's so words are not underlined twice.
       // For screen readers: the document is one multi-line text field.
@@ -437,6 +447,9 @@ export function App() {
         const pw = currentPassword();
         return pw ? encryptDocx(writeDocx(m), pw) : writeDocx(m);
       };
+      // What Export → PDF writes (for checking the PDF output).
+      (globalThis as { primePdfBytes?: () => Promise<Uint8Array> }).primePdfBytes = async () =>
+        (await makePdf(fromProseMirror(v.state.doc, fileRef.current.base), measurerRef.current!)).bytes;
       (globalThis as { primeCompare?: (f: OpenedFile) => Promise<void> }).primeCompare = (f) => compareRef.current(f);
     }
     v.focus();
@@ -850,6 +863,30 @@ export function App() {
     return () => { void pending.then((unlisten) => unlisten()); };
   }, []);
 
+  // Double-click a text box: type in it. (On the window: the editor's own handlers stop the event first.)
+  useEffect(() => {
+    const onDouble = (e: MouseEvent) => {
+      const v2 = view.current;
+      // A chart: edit its data.
+      const chart = (e.target as HTMLElement).closest?.<HTMLElement>("img.pw-chart");
+      if (chart && v2 && v2.dom.contains(chart)) {
+        const at = v2.posAtDOM(chart, 0);
+        const c = [at, at - 1].map((p) => chartAt(v2.state.doc, p, fileRef.current.base)).find(Boolean);
+        if (c) {
+          e.preventDefault();
+          setChartDialog({ pos: c.pos, data: c.spec ? { kind: c.spec.kind, ...(c.spec.title ? { title: c.spec.title } : {}), categories: c.spec.categories, series: c.spec.series } : SAMPLE_CHART });
+        }
+        return;
+      }
+      const el = (e.target as HTMLElement).closest?.<HTMLElement>('.pw-float[data-kind="textbox"]');
+      if (!el || !v2) return;
+      const found = floatNodeOf(v2, el);
+      if (found) { e.preventDefault(); setEditingBox({ pos: found.pos, el }); }
+    };
+    window.addEventListener("dblclick", onDouble, true);
+    return () => window.removeEventListener("dblclick", onDouble, true);
+  }, []);
+
   // Offer unsaved work from a session that did not close cleanly.
   useEffect(() => { void orphanedSnapshots().then(setRecovery); }, []);
 
@@ -939,7 +976,7 @@ export function App() {
       if (test === "align") alignSelfTest();
       if (test === "alignscan") alignScanSelfTest();
       if (test === "scroll") scrollSelfTest();
-      if (test === "floatdrag") floatDragSelfTest();
+      if (test === "floatdrag") floatDragSelfTest(() => (globalThis as { primeView?: EditorView }).primeView!);
       if (test === "review") reviewSelfTest(v);
       if (test === "keyboard") keyboardSelfTest();
       if (test === "picture") pictureSelfTest(v);
@@ -979,7 +1016,9 @@ export function App() {
   // Dev convenience (browser only): ?file=<absolute path> opens a document from disk.
   useEffect(() => {
     const path = new URLSearchParams(location.search).get("file");
-    if (path && !isDesktop) {
+    // Once (React runs effects twice in development: a second load would open a second tab).
+    if (path && !isDesktop && !devFileLoaded) {
+      devFileLoaded = true;
       void fetch(`/@fs/${path.replace(/\\/g, "/")}`).then(async (r) => {
         if (!r.ok) return;
         const bytes = new Uint8Array(await r.arrayBuffer());
@@ -1071,7 +1110,7 @@ export function App() {
         showMarks={marksOn} onShowMarks={toggleMarks}
         onCompare={() => void compareWith()}
         onProtect={() => setPasswordAsk({ mode: "set" })}
-        onThesaurus={() => setThesaurusOpen(true)}
+        onThesaurus={() => setThesaurusOpen(true)} onChart={() => setChartDialog({ data: SAMPLE_CHART })}
         onInfo={() => setInfo(true)} onReadAloud={() => setReading((r) => !r)}
         navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
@@ -1200,6 +1239,22 @@ export function App() {
           }}
           onRemove={() => { setPassword(fileRef.current.base, undefined); setDirty(true); dirtyRef.current = true; setPasswordAsk(null); flash("The password is removed when you save."); }}
           onClose={() => setPasswordAsk(null)} />
+      )}
+      {chartDialog && v && (
+        <ChartDialog initial={chartDialog.data} editing={chartDialog.pos !== undefined}
+          onOk={(data) => {
+            const base = () => fileRef.current.base;
+            if (chartDialog.pos !== undefined) setChartData(base, chartDialog.pos, data)(v.state, v.dispatch);
+            else insertChart(base, data)(v.state, v.dispatch);
+            setChartDialog(null);
+            v.focus();
+          }}
+          onClose={() => { setChartDialog(null); v.focus(); }} />
+      )}
+      {editingBox && v && (
+        <TextBoxEditor view={v} pos={editingBox.pos} box={editingBox.el} zoom={zoom}
+          plugins={measurerRef.current ? [paragraphStyles(fileRef.current.base, measurerRef.current)] : []}
+          onDone={() => setEditingBox(null)} />
       )}
       {thesaurusOpen && (
         <ThesaurusPane view={() => view.current ?? undefined} onClose={() => { setThesaurusOpen(false); view.current?.focus(); }} />
