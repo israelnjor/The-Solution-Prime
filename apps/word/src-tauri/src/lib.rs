@@ -3,6 +3,7 @@
 //! capabilities/default.json: documents the user picks, the app's own recovery folder, and fonts.
 
 mod fonts;
+pub mod ocr;
 
 use std::fs;
 use std::io::Write;
@@ -231,6 +232,24 @@ fn save_document(app: AppHandle, request: Request) -> Result<u64, String> {
     Ok(modified_ms(&path).unwrap_or(0))
 }
 
+/// Text recognition (Convert PDF, pages without text): an 8-bit grey image as the body, its size in
+/// `x-width` and `x-height`. Runs off the main thread; the window stays responsive.
+#[tauri::command]
+async fn recognize_text(request: Request<'_>) -> Result<ocr::Recognized, String> {
+    let width: u32 = header(&request, "x-width")?.parse().map_err(|_| "bad width")?;
+    let height: u32 = header(&request, "x-height")?.parse().map_err(|_| "bad height")?;
+    let gray = raw_body(&request)?.to_vec();
+    tauri::async_runtime::spawn_blocking(move || ocr::recognize(&gray, width, height))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The largest image side text recognition takes (pixels); 0 where it is not available.
+#[tauri::command]
+fn recognition_limit() -> u32 {
+    ocr::max_side()
+}
+
 fn recovery_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recovery");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -372,6 +391,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(fonts::FontIndex::default())
         .invoke_handler(tauri::generate_handler![
+            recognize_text,
+            recognition_limit,
             startup_document,
             recent_documents,
             forget_recent,

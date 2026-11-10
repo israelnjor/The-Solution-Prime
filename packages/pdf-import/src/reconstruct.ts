@@ -32,7 +32,12 @@ interface Line {
 
 const top = (l: Line) => l.y - l.size * 0.8;
 const bottom = (l: Line) => l.y + l.size * 0.25;
-const lineText = (l: Line) => l.pieces.map((p) => p.text).join("");
+/** A line's text; a gap between pieces (words placed one by one) reads as a space, as in paragraphs. */
+const lineText = (l: Line) => l.pieces.map((p, i) => {
+  const prev = l.pieces[i - 1];
+  const gap = prev ? p.x - (prev.x + prev.width) > p.size * 0.15 && !/\s$/.test(prev.text) && !/^\s/.test(p.text) : false;
+  return gap ? ` ${p.text}` : p.text;
+}).join("");
 
 /** Spacing accents (as TeX draws them: the accent, then the letter) and their combining forms. */
 const ACCENTS: Record<string, string> = {
@@ -83,7 +88,16 @@ function buildLines(page: PageContent, pieces: TextPiece[]): Line[] {
   const sorted = [...pieces].filter((p) => p.text.length).sort((a, b) => b.size - a.size || a.y - b.y || a.x - b.x);
   const lines: Line[] = [];
   for (const p of sorted) {
-    const line = lines.find((l) => Math.abs(l.y - p.y) < Math.max(l.size, p.size) * 0.45);
+    const line = lines.find((l) => {
+      const dy = Math.abs(l.y - p.y);
+      if (dy >= Math.max(l.size, p.size) * 0.45) return false;
+      // Off the line's baseline (a superscript, a subscript), a piece joins only beside the line's
+      // text; further away it is text of its own (another column, beside a large heading).
+      if (dy <= Math.min(l.size, p.size) * 0.2) return true;
+      const x0 = Math.min(...l.pieces.map((q) => q.x));
+      const x1 = Math.max(...l.pieces.map((q) => q.x + q.width));
+      return p.x <= x1 + l.size * 1.5 && p.x + p.width >= x0 - l.size * 1.5;
+    });
     if (line) line.pieces.push(p);
     else lines.push({ page: page.number, pieces: [p], y: p.y, x0: p.x, x1: p.x + p.width, size: p.size });
   }
@@ -345,6 +359,9 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
 
   // --- items in reading order per page: paragraphs' lines, tables, pictures --------------------
   const items: Item[] = [];
+  /** Pages read by text recognition, and pages without text that could not be read. */
+  const recognized: number[] = [];
+  const textless: number[] = [];
   pages.forEach((page, i) => {
     const grids = findGrids(page.rules, page.fills);
     const lines = bodyLines[i];
@@ -372,11 +389,13 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     // A scanned page: no text, one picture covering most of the page (a full-page screenshot in a typed
     // document has a caption or margins around it).
     const scan = page.pictures.some((pic) => pic.w > page.width * 0.85 && pic.h > page.height * 0.85);
-    if (!page.texts.some((t) => t.text.trim()) && scan) {
-      warnings.push(`Page ${page.number} is a scanned image: its text cannot be edited until text recognition is added.`);
-    }
+    if (page.recognized) recognized.push(page.number);
+    else if (!page.texts.some((t) => t.text.trim()) && (scan || page.textless)) textless.push(page.number);
   });
   items.sort((a, b) => pageOf(a) - pageOf(b) || a.y - b.y);
+  const pageList = (ns: number[]) => (ns.length === 1 ? `Page ${ns[0]}` : `Pages ${ns.slice(0, -1).join(", ")} and ${ns[ns.length - 1]}`);
+  if (recognized.length) warnings.push(`${pageList(recognized)} had no text (printed as outlines, or scanned): the text was read by text recognition. Check names and numbers against the original.`);
+  if (textless.length) warnings.push(`${pageList(textless)} had no text (printed as outlines, or scanned), and text recognition is not available here: the text cannot be edited.`);
   function pageOf(x: Item) { return x.kind === "lines" ? x.lines[0].page : x.page; }
 
   // --- paragraphs from lines --------------------------------------------------------------------

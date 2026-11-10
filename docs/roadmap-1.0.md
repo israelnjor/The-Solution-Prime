@@ -106,7 +106,8 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    from a small table and edited by double-click, saved as real Word charts with their spreadsheet (Word's
    Edit Data works), and Word's charts shown. Checked against Word (same shapes, colours, sizes; Word's
    charts drawn alike; Word reads ours as its own).
-7. **Release** — text recognition for scanned PDFs, code signing, automatic updates, About/version,
-   user guide.
+7. **Release** — text recognition for PDFs without text ✅ (2026-11-10: scanned pages and pages printed
+   as outlines, e.g. by Microsoft Print to PDF, read by Windows' own offline recogniser — about half a
+   second a page; macOS and Linux not yet), code signing, automatic updates, About/version, user guide.
 
 Later (1.x): mailings and mail merge, SmartArt, index, macros, collaboration, AI features.

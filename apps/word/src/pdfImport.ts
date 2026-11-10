@@ -3,8 +3,10 @@
  * our reconstruction (@prime/pdf-import). Loaded only when the converter is used.
  */
 import { type LayoutResult, layoutDocument, type Measurer, type Page } from "@prime/layout";
-import type { ConversionResult } from "@prime/pdf-import";
+import type { ConversionResult, RecognizedWord } from "@prime/pdf-import";
 import type { PrimeDocument } from "@prime/pdm";
+import { invoke } from "@tauri-apps/api/core";
+import { isDesktop } from "./platform";
 
 type PdfJs = typeof import("pdfjs-dist");
 let loaded: Promise<PdfJs> | undefined;
@@ -60,10 +62,106 @@ async function encodePicture(rgba: Uint8Array, width: number, height: number, sh
   return { data: new Uint8Array(await blob.arrayBuffer()), contentType: type as "image/png" | "image/jpeg" };
 }
 
+/** What the system's recogniser returns: lines of words, boxes in the image's pixels. */
+interface Recognized { lines: { words: { text: string; x: number; y: number; w: number; h: number }[] }[] }
+/** Recognises an 8-bit grey image (one byte a pixel). */
+type RecognizeImage = (gray: Uint8Array, width: number, height: number) => Promise<Recognized>;
+
+let recognizer: Promise<{ run: RecognizeImage; limit: number } | undefined> | undefined;
+
+/**
+ * The operating system's text recognition (offline): Windows' own on Windows; none elsewhere yet.
+ * Self-tests put a stand-in at globalThis.primeRecognizeText.
+ */
+function systemRecognizer() {
+  recognizer ??= (async () => {
+    const stand = (globalThis as { primeRecognizeText?: RecognizeImage }).primeRecognizeText;
+    if (stand) return { run: stand, limit: 10_000 };
+    if (!isDesktop) return undefined;
+    const limit = await invoke<number>("recognition_limit").catch(() => 0);
+    if (!limit) return undefined;
+    const run: RecognizeImage = (gray, width, height) =>
+      invoke<Recognized>("recognize_text", gray, { headers: { "x-width": String(width), "x-height": String(height) } });
+    return { run, limit };
+  })();
+  return recognizer;
+}
+
+/** Text recognition resolution: 300 dpi, as scanners use (within the recogniser's largest image). */
+const RECOGNITION_DPI = 300;
+
+/**
+ * Reads a page that has no text: drawn at 300 dpi and recognised (Windows reads light text on dark
+ * bands as well as dark on light), each word's colour and weight taken from its pixels.
+ */
+export async function recognizePage(page: import("pdfjs-dist").PDFPageProxy): Promise<RecognizedWord[] | undefined> {
+  const r = await systemRecognizer();
+  if (!r) return undefined;
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(RECOGNITION_DPI / 72, (r.limit - 1) / Math.max(base.width, base.height));
+  const vp = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(vp.width);
+  canvas.height = Math.round(vp.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvas, canvasContext: ctx, viewport: vp } as Parameters<typeof page.render>[0]).promise;
+  const { width, height } = canvas;
+  const rgba = ctx.getImageData(0, 0, width, height).data;
+  canvas.width = canvas.height = 0;
+  const gray = new Uint8Array(width * height);
+  for (let p = 0, i = 0; p < gray.length; p++, i += 4) gray[p] = (rgba[i] * 299 + rgba[i + 1] * 587 + rgba[i + 2] * 114) / 1000;
+  const { lines } = await r.run(gray, width, height);
+  const words: RecognizedWord[] = [];
+  lines.forEach((l, line) => {
+    for (const w of l.words) {
+      const { color, ink } = inkOf(rgba, width, height, w);
+      words.push({ text: w.text, x: w.x / scale, y: w.y / scale, w: w.w / scale, h: w.h / scale, line, color, ink });
+    }
+  });
+  return words;
+}
+
+/**
+ * A word's colour (its darkest-against-the-background pixels; the background from just around its
+ * box) and its ink (the share of its box the letters cover: bold covers more).
+ */
+function inkOf(rgba: Uint8ClampedArray, width: number, height: number, b: { x: number; y: number; w: number; h: number }) {
+  const x0 = Math.max(0, Math.floor(b.x)), y0 = Math.max(0, Math.floor(b.y));
+  const x1 = Math.min(width - 1, Math.ceil(b.x + b.w)), y1 = Math.min(height - 1, Math.ceil(b.y + b.h));
+  const ring: number[][] = [[], [], []];
+  const add = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const i = (y * width + x) * 4;
+    for (let c = 0; c < 3; c++) ring[c].push(rgba[i + c]);
+  };
+  for (let x = x0 - 2; x <= x1 + 2; x++) { add(x, y0 - 2); add(x, y1 + 2); }
+  for (let y = y0 - 2; y <= y1 + 2; y++) { add(x0 - 2, y); add(x1 + 2, y); }
+  const bg = ring.map((v) => v.sort((p, q) => p - q)[v.length >> 1] ?? 255);
+  let max = 0;
+  const dist = (i: number) => Math.abs(rgba[i] - bg[0]) + Math.abs(rgba[i + 1] - bg[1]) + Math.abs(rgba[i + 2] - bg[2]);
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) max = Math.max(max, dist((y * width + x) * 4));
+  if (max < 40) return { color: "000000", ink: 0 };
+  let n = 0, inked = 0;
+  const sum = [0, 0, 0];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = (y * width + x) * 4;
+    const d = dist(i);
+    if (d > max * 0.5) inked++;
+    if (d >= max * 0.75) { n++; for (let c = 0; c < 3; c++) sum[c] += rgba[i + c]; }
+  }
+  const rgb = sum.map((v) => Math.round(v / Math.max(n, 1)));
+  // Near-black is black (anti-aliasing lightens the darkest pixels a little).
+  const black = Math.max(...rgb) < 60 && Math.max(...rgb) - Math.min(...rgb) < 24;
+  const color = black ? "000000" : rgb.map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase();
+  return { color, ink: inked / ((x1 - x0 + 1) * (y1 - y0 + 1)) };
+}
+
 export async function convertPdfFile(bytes: Uint8Array, onPage?: (done: number, total: number) => void): Promise<ConversionResult> {
   const [{ convertPdf }, lib] = await Promise.all([import("@prime/pdf-import"), pdfjs()]);
   // pdf.js takes ownership of the buffer it is given: pass a copy, the caller keeps the original.
-  return convertPdf(bytes.slice(), lib, { ...files(), encodePicture }, onPage);
+  return convertPdf(bytes.slice(), lib, { ...files(), encodePicture, recognize: recognizePage }, onPage);
 }
 
 /** The original PDF, for drawing its pages. */

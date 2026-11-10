@@ -51,6 +51,10 @@ export interface Picture {
   /** The encoded picture (PNG or JPEG). */
   data: Uint8Array;
   contentType: "image/png" | "image/jpeg";
+  /** Its colour, when it is all one colour (a background drawn as a picture). */
+  uniform?: string;
+  /** Its most common colour, and the share of it that colour covers (0–1). */
+  tone?: { color: string; share: number };
 }
 
 /**
@@ -69,7 +73,29 @@ export interface PageContent {
   rules: Rule[];
   fills: Fill[];
   pictures: Picture[];
+  /** Its text was read by text recognition (the page had none: printed as outlines, or scanned). */
+  recognized?: boolean;
+  /** It had no text, and text recognition was not available. */
+  textless?: boolean;
 }
+
+/**
+ * A word found by text recognition: its text, its box on the page (pt from the top-left, the ink's
+ * bounds), the recogniser's line it is on, its colour, and how much of its box is ink (bold is more).
+ */
+export interface RecognizedWord {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  line: number;
+  color: string;
+  ink: number;
+}
+
+/** Text recognition for a page: the app's (the operating system's recogniser), when it has one. */
+export type Recognizer = (page: import("pdfjs-dist").PDFPageProxy) => Promise<RecognizedWord[] | undefined>;
 
 type Matrix = [number, number, number, number, number, number];
 const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
@@ -163,6 +189,8 @@ export interface PdfJsFiles {
   iccUrl?: string;
   /** How pictures are encoded (default: PNG). */
   encodePicture?: PictureEncoder;
+  /** Reads the text of pages that have none (default: none; such pages keep only their drawings). */
+  recognize?: Recognizer;
 }
 
 /** Page content of every page. */
@@ -183,7 +211,7 @@ export async function extractPages(data: Uint8Array, pdfjs: PdfJs, files: PdfJsF
   const pages: PageContent[] = [];
   try {
     for (let n = 1; n <= doc.numPages; n++) {
-      pages.push(await extractPage(await doc.getPage(n), n, pdfjs, files.encodePicture));
+      pages.push(await extractPage(await doc.getPage(n), n, pdfjs, files.encodePicture, files.recognize));
       onPage?.(n, doc.numPages);
     }
   } finally {
@@ -192,7 +220,8 @@ export async function extractPages(data: Uint8Array, pdfjs: PdfJs, files: PdfJsF
   return pages;
 }
 
-async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: number, pdfjs: PdfJs, encode?: PictureEncoder): Promise<PageContent> {
+async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: number, pdfjs: PdfJs, encode?: PictureEncoder,
+  recognize?: Recognizer): Promise<PageContent> {
   const vp = page.getViewport({ scale: 1 });
   const H = vp.height;
   // The viewport maps PDF space (y up, page box origin) to ours (y down, top-left).
@@ -347,7 +376,8 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
         if (pixels) {
           const encoded = (encode && await encode(pixels.rgba, pixels.width, pixels.height, { w: box.w, h: box.h }))
             ?? { data: encodePng(pixels.rgba, pixels.width, pixels.height), contentType: "image/png" as const };
-          pictures.push({ ...box, ...encoded });
+          const tone = toneOf(pixels.rgba);
+          pictures.push({ ...box, ...encoded, tone, ...(tone.share > 0.99 && tone.opaque ? { uniform: tone.color } : {}) });
         }
         break;
       }
@@ -445,7 +475,107 @@ async function extractPage(page: import("pdfjs-dist").PDFPageProxy, number: numb
       if (cx >= box.x0 && cx <= box.x1 && t.y >= box.y0 - 1 && t.y - t.size * 0.3 <= box.y1 + 1) t.link = url;
     }
   }
-  return { number, width: vp.width, height: H, texts, rules: rules.filter((r) => !underlines.has(r)), fills, pictures };
+  const content: PageContent = { number, width: vp.width, height: H, texts, rules: rules.filter((r) => !underlines.has(r)), fills, pictures };
+  if (texts.some((t) => t.text.trim())) return content;
+  // No text: letters drawn as outlines (Microsoft Print to PDF does this) or a scan. Read it.
+  const words = recognize ? await recognize(page).catch(() => undefined) : undefined;
+  if (!words?.length) return { ...content, textless: !recognize || !words };
+  return withRecognizedText(content, words);
+}
+
+/**
+ * Recognisers' usual slips in capitals: a lower-case l among capitals and digits ("CV-lNV-2026") is a
+ * capital I.
+ */
+function fixLetters(word: string): string {
+  if (/[a-km-z]/.test(word) || !/[A-Z]/.test(word)) return word;
+  // An H read as "I-I" between capitals (GI-IC: GHC).
+  return word.replace(/l/g, "I").replace(/(?<=[A-Z])I-I(?=[A-Z]|$)/g, "H");
+}
+
+/** Letters that reach the cap height (or above), and letters that go below the baseline. */
+const TALL = /[A-Z0-9bdfhijklt!?#$%&@(){}[\]/|'"]/;
+const DESCENDING = /[gjpqy,;(){}[\]|]/;
+
+/**
+ * A page whose text was recognised: the words as text pieces (baseline and size worked out from their
+ * ink), and the drawings that were the letters themselves (outlines, small pictures) left out.
+ */
+export function withRecognizedText(content: PageContent, found: RecognizedWord[]): PageContent {
+  const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+  // Text inside a sizeable picture (a logo's lettering) belongs to the picture; not text on a
+  // background drawn as a picture (one colour, or a large part of the page).
+  const large = content.pictures.filter((p) => p.w > 24 && p.h > 24 && !p.uniform && p.w * p.h < content.width * content.height * 0.03);
+  const inside = (w: RecognizedWord, b: { x: number; y: number; w: number; h: number }, m = 0) =>
+    w.x >= b.x - m && w.y >= b.y - m && w.x + w.w <= b.x + b.w + m && w.y + w.h <= b.y + b.h + m;
+  const words = found.filter((w) => w.text.trim() && !large.some((p) => inside(w, p, 1)));
+  const paper = (hex: string) => [0, 2, 4].every((i) => parseInt(hex.slice(i, i + 2), 16) >= 0xf6);
+  // A picture with text on it, mostly of one colour, is a background: shading in that colour.
+  const backdrop = (p: Picture) => !!p.uniform || (!!p.tone && p.tone.share > 0.6 && words.some((w) => inside(w, p, 1)));
+  const inks = words.map((w) => w.ink).filter((v) => v > 0);
+  const usualInk = inks.length >= 5 ? median(inks) : NaN;
+  const texts: TextPiece[] = [];
+  const lines = new Map<number, RecognizedWord[]>();
+  for (const w of words) lines.set(w.line, [...(lines.get(w.line) ?? []), w]);
+  for (const ws of lines.values()) {
+    const flat = ws.filter((w) => !DESCENDING.test(w.text));
+    const baseline = flat.length ? median(flat.map((w) => w.y + w.h)) : Math.max(...ws.map((w) => w.y + w.h * 0.78));
+    // Cap height is about 0.72 of the font size, x-height about 0.5.
+    const sizeOf = (w: RecognizedWord) => (baseline - w.y) / (TALL.test(w.text) ? 0.72 : 0.5);
+    const lineSize = median(ws.map(sizeOf));
+    for (const w of ws.sort((a, b) => a.x - b.x)) {
+      let size = sizeOf(w);
+      if (!(size > 2)) size = lineSize;
+      if (Math.abs(size - lineSize) < lineSize * 0.15) size = lineSize;
+      texts.push({
+        text: fixLetters(w.text), x: w.x, y: baseline, width: w.w, size: Math.max(4, Math.round(size * 2) / 2),
+        font: { family: "Calibri", bold: w.ink > usualInk * 1.3, italic: false }, color: w.color,
+      });
+    }
+  }
+  // What lies on a word (its letters drawn as shapes or tiny pictures) goes; borders and shading stay.
+  const boxes = words.map((w) => ({ x: w.x - 1, y: w.y - 1, w: w.w + 2, h: w.h + 2 }));
+  const covered = (b: { x: number; y: number; w: number; h: number }) => {
+    const area = Math.max(b.w * b.h, 0.01);
+    return boxes.some((o) => {
+      const ox = Math.min(b.x + b.w, o.x + o.w) - Math.max(b.x, o.x);
+      const oy = Math.min(b.y + b.h, o.y + o.h) - Math.max(b.y, o.y);
+      return ox > 0 && oy > 0 && (ox * oy) / area > 0.5;
+    });
+  };
+  const ruleBox = (r: Rule) => ({ x: Math.min(r.x1, r.x2), y: Math.min(r.y1, r.y2) - r.width / 2, w: Math.abs(r.x2 - r.x1), h: Math.abs(r.y2 - r.y1) + r.width });
+  return {
+    ...content, texts, recognized: true,
+    // Letter-sized pictures are letters the recogniser read (or could not); thin strips are decoration.
+    pictures: content.pictures.filter((p) => !backdrop(p) && !covered(p) && (p.w > 8 || p.h > 8) && Math.min(p.w, p.h) * 20 > Math.max(p.w, p.h)),
+    fills: [
+      // (White or near-white, such as a scan's paper, is no shading.)
+      ...content.pictures.filter((p) => backdrop(p) && !paper(p.uniform ?? p.tone!.color)).map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h, color: p.uniform ?? p.tone!.color })),
+      ...content.fills.filter((f) => !covered(f) && (f.w > 3 || f.h > 3)),
+    ],
+    rules: content.rules.filter((r) => !covered(ruleBox(r))),
+  };
+}
+
+/** A picture's most common colour (of its visible pixels, sampled, in close shades), its share. */
+function toneOf(rgba: Uint8Array): { color: string; share: number; opaque: boolean } {
+  const n = rgba.length / 4;
+  const step = Math.max(1, Math.floor(n / 4096));
+  const counts = new Map<number, { k: number; r: number; g: number; b: number }>();
+  let seen = 0;
+  let opaque = true;
+  for (let p = 0; p < n; p += step) {
+    const i = p * 4;
+    if (rgba[i + 3] < 250) { opaque = false; if (rgba[i + 3] < 128) continue; }
+    seen++;
+    const key = ((rgba[i] >> 3) << 10) | ((rgba[i + 1] >> 3) << 5) | (rgba[i + 2] >> 3);
+    const c = counts.get(key) ?? { k: 0, r: rgba[i], g: rgba[i + 1], b: rgba[i + 2] };
+    c.k++;
+    counts.set(key, c);
+  }
+  let best = { k: 0, r: 255, g: 255, b: 255 };
+  for (const c of counts.values()) if (c.k > best.k) best = c;
+  return { color: [best.r, best.g, best.b].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase(), share: seen ? best.k / seen : 0, opaque };
 }
 
 interface ImageLike {
