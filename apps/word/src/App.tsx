@@ -222,6 +222,7 @@ export function App() {
   const [zoom, setZoom] = useState(() => Number(new URLSearchParams(location.search).get("zoom")) || 100);
   /** Unsaved work found from an earlier session that did not close cleanly. */
   const [recovery, setRecovery] = useState<Snapshot[]>([]);
+  const [recoveryNoteHidden, setRecoveryNoteHidden] = useState(false);
   const [notice, setNotice] = useState("");
   const [, refresh] = useReducer((x: number) => x + 1, 0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -1243,17 +1244,12 @@ ${String(e)}`));
             <button className="link" onClick={() => setConversion(undefined)}>Dismiss</button>
           </div>
         )}
-        {recovery.length > 0 && (
-          <div className="recovery">
-            <strong>Prime Word recovered unsaved work.</strong>
-            {recovery.map((s) => (
-              <div key={s.id} className="recovery-item">
-                <span>{s.name} — last autosaved {new Date(s.savedAt).toLocaleString()}</span>
-                <button className="primary" onClick={() => void restore(s)}>Restore</button>
-                <button onClick={() => void discardRecovery(s)}>Discard</button>
-              </div>
-            ))}
-            <button className="link" onClick={() => setRecovery([])}>Decide later</button>
+        {/* Unsaved work from an earlier session: one quiet line; the choices are on Home → Recovered. */}
+        {recovery.length > 0 && !recoveryNoteHidden && (
+          <div className="recovery-note" role="status">
+            <span>{recovery.length === 1 ? `${recovery[0].name} has` : `${recovery.length} documents have`} unsaved changes from an earlier session.</span>
+            <button className="link" onClick={() => { setHomeView({ page: "recovered" }); setHome(true); }}>Review</button>
+            <button className="recovery-note-close" aria-label="Hide" title="Hide (they stay under Home → Recovered)" onClick={() => setRecoveryNoteHidden(true)}>×</button>
           </div>
         )}
         {find && <FindPanel view={v} replace={find === "replace"} onClose={() => setFind(null)} />}

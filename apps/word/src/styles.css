@@ -144,15 +144,16 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .status .zoom-value { min-width: 38px; text-align: right; }
 
 /* --- recovery & notices --- */
-.recovery {
-  margin: 0 auto 12px; width: min(640px, 100%); display: grid; gap: 6px; padding: 10px 14px;
-  background: #fff8e1; border: 1px solid #f0d27a; border-radius: 6px;
+.recovery-note {
+  margin: 0 auto 10px; width: fit-content; max-width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 4px 6px 4px 12px; font-size: 12px; color: var(--muted);
+  background: #fff; border: 1px solid var(--chrome-border); border-radius: 999px;
 }
-.recovery-item { display: flex; gap: 8px; align-items: center; }
-.recovery-item span { flex: 1; }
-.recovery button { font: inherit; height: 28px; padding: 0 10px; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff; cursor: pointer; }
-.recovery .primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.recovery .link { justify-self: start; border: none; background: none; color: var(--accent); text-decoration: underline; padding: 0; height: auto; }
+.recovery-note span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-note button { font: inherit; border: none; background: none; cursor: pointer; padding: 0; }
+.recovery-note .link { color: var(--accent); font-weight: 600; }
+.recovery-note-close { width: 20px; height: 20px; border-radius: 50%; color: var(--muted); font-size: 14px !important; line-height: 1; }
+.recovery-note-close:hover { background: var(--chrome-border); }
 .status .notice { color: var(--accent); }
 
 /* --- Layout tab, header/footer editor --- */
