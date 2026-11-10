@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { projectStyle } from "./projects";
 
 /** An open document; `project` and `color` when it is in one of the person's projects. */
 export interface TabInfo { id: number; name: string; dirty: boolean; project?: string; color?: string }
@@ -22,7 +23,7 @@ export function DocTabs({ tabs, active, onSelect, onClose, onNew }: {
         <div key={t.id} data-tab={t.id} role="tab" aria-selected={t.id === active} tabIndex={t.id === active ? 0 : -1}
           className={`doc-tab${t.id === active ? " on" : ""}${t.color ? " in-project" : ""}`}
           title={`${t.name}${t.project ? ` — project ${t.project}` : ""}${t.dirty ? " (unsaved changes)" : ""}`}
-          style={t.color ? { ["--project" as string]: `#${t.color}` } : undefined}
+          style={t.color ? projectStyle(t.color) : undefined}
           onClick={() => onSelect(t.id)}
           onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(t.id); } }}
           onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}

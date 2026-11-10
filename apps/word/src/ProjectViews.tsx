@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirmAction } from "./platform";
 import {
   addProject, chooseFolder, defaultProjectsFolder, type FileKind, forgetProject, importFiles, joinPath, kindOf,
-  openExternal, PROJECT_COLORS, type ProjectFile, projectFiles, type ProjectSummary, saveProject,
+  openExternal, PROJECT_COLORS, type ProjectFile, projectFiles, projectStyle, type ProjectSummary, saveProject,
 } from "./projects";
 
 /** What a project page can ask the app to do with its files. */
@@ -33,7 +33,7 @@ const size = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round
 /** A project's card: its colour, name, how many files, when it was last worked on. */
 export function ProjectCard({ p, onOpen }: { p: ProjectSummary; onOpen(): void }) {
   return (
-    <button className={`project-card${p.exists ? "" : " missing"}`} onClick={onOpen} style={{ ["--project" as string]: `#${p.meta.color ?? PROJECT_COLORS[0]}` }}>
+    <button className={`project-card${p.exists ? "" : " missing"}`} onClick={onOpen} style={projectStyle(p.meta.color)}>
       <span className="project-card-band" aria-hidden="true" />
       <strong>{p.meta.name}</strong>
       <span>{p.exists ? `${p.files} ${p.files === 1 ? "file" : "files"}${p.modified ? ` · ${when(p.modified)}` : ""}` : "Folder not found"}</span>
@@ -108,7 +108,7 @@ export function NewProjectDialog({ onCreated, onClose }: { onCreated(p: ProjectS
         <div className="project-colors" role="radiogroup" aria-label="Colour">
           {PROJECT_COLORS.map((c) => (
             <button key={c} role="radio" aria-checked={c === color} aria-label={`Colour ${c}`} className={c === color ? "on" : ""}
-              style={{ background: `#${c}` }} onClick={() => setColor(c)} />
+              style={projectStyle(c)} onClick={() => setColor(c)} />
           ))}
         </div>
         {existing ? (
@@ -187,7 +187,7 @@ A new document is saved in this project; the PDF stays as it is.`, "Convert PDF"
     }
   };
   return (
-    <main className="home-main project-page" style={{ ["--project" as string]: `#${meta.color}` }}>
+    <main className="home-main project-page" style={projectStyle(meta.color)}>
       <div className="home-content">
       <button className="project-back" onClick={onBack}>← All projects</button>
       <div className="project-head">
@@ -202,7 +202,7 @@ A new document is saved in this project; the PDF stays as it is.`, "Convert PDF"
         <div className="project-colors small" role="radiogroup" aria-label="Colour">
           {PROJECT_COLORS.map((c) => (
             <button key={c} role="radio" aria-checked={c === meta.color} aria-label={`Colour ${c}`} className={c === meta.color ? "on" : ""}
-              style={{ background: `#${c}` }} onClick={() => void update({ color: c })} />
+              style={projectStyle(c)} onClick={() => void update({ color: c })} />
           ))}
         </div>
       </div>

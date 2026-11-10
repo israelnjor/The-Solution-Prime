@@ -764,16 +764,15 @@ img.pw-chart { cursor: default; }
 /* Projects (home screen): cards, the project page, New project. */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .project-card { position: relative; display: grid; gap: 4px; text-align: left; padding: 18px 14px 12px; border: 1px solid var(--chrome-border); border-radius: 8px; background: #fff; cursor: pointer; font: inherit; overflow: hidden; }
-.project-card-band { position: absolute; inset: 0 0 auto 0; height: 6px; background: var(--project); }
 .project-card strong { font-size: 14.5px; color: #1d2433; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-card > span:last-child { color: var(--muted); font-size: 12px; }
-.project-card:hover, .project-card:focus { border-color: var(--project); box-shadow: 0 0 0 2px color-mix(in srgb, var(--project) 18%, transparent); outline: none; }
+.project-card:hover, .project-card:focus { border-color: var(--project-edge); box-shadow: 0 2px 8px rgb(16 24 40 / 0.08); outline: none; }
 .project-card.missing { opacity: 0.6; }
 .project-search { font: inherit; padding: 6px 10px; border: 1px solid var(--chrome-border); border-radius: 6px; width: min(320px, 100%); margin-bottom: 12px; }
 .project-back { display: block; width: fit-content; align-self: flex-start; justify-self: start; border: none; background: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; margin-bottom: 8px; }
 .project-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .project-head h1 { margin: 0; cursor: text; }
-.project-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--project); flex: none; }
+.project-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--project-band); flex: none; }
 .project-rename { font: inherit; font-size: 24px; font-weight: 600; padding: 2px 6px; border: 1px solid var(--chrome-border); border-radius: 6px; }
 .project-colors { display: flex; gap: 6px; }
 .project-colors button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--chrome-border); cursor: pointer; padding: 0; }
@@ -809,7 +808,7 @@ img.pw-chart { cursor: default; }
 .project-where { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
 .project-where span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .project-dialog .error, .project-page .error { color: #b71c1c; font-size: 12.5px; margin: 4px 0; }
-.doc-tab.in-project { box-shadow: inset 0 3px 0 var(--project); }
+.doc-tab.in-project { box-shadow: inset 0 3px 0 var(--project-edge); }
 .project-more { margin: -8px 0 16px 8px; }
 
 /* --- Buttons on the home screen and in dialogs: one look (the ribbon keeps its own). ------------------ */
@@ -870,3 +869,9 @@ button.link:hover { text-decoration: underline; }
 .template-card { grid-template-rows: auto auto 1fr; align-content: start; }
 .template-card .template-thumb { align-self: start; }
 .template-strip .template-card .template-thumb { height: 110px; aspect-ratio: auto; overflow: hidden; }
+
+/* Project colours: a band of the colour across the top of a white card (a hairline of its deeper shade
+   keeps the softest colours visible). */
+.project-card-band { position: absolute; inset: 0 0 auto 0; height: 6px; background: var(--project-band); }
+.project-colors button { background: var(--project-band); border: none; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.12); }
+.project-colors button.on { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1d2433; }

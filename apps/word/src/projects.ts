@@ -38,8 +38,35 @@ export interface ProjectFile {
   modified: number;
 }
 
-/** Project colours to choose from (readable on white, distinct from each other). */
-export const PROJECT_COLORS = ["2B579A", "1E7D45", "B4371F", "8E44AD", "C77C02", "0E7C86", "5D6D7E", "C2185B"];
+/**
+ * Project colours to choose from: soft ones first (cream, lavender, mint, sky, blush, sand, sage, mist —
+ * cream is the default), then strong ones (blue, green, red, purple, amber, teal, slate, pink).
+ */
+export const PROJECT_COLORS = [
+  "F4EEDD", "ECE5F6", "E1F1E7", "E0ECF8", "F8E4E9", "F1E5D1", "E5ECDD", "E9ECF0",
+  "2B579A", "1E7D45", "B4371F", "8E44AD", "C77C02", "0E7C86", "5D6D7E", "C2185B",
+];
+
+const rgbOf = (hex: string) => [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0);
+const hexOf = (rgb: number[]) => rgb.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+const mix = (hex: string, toward: number, amount: number) => hexOf(rgbOf(hex).map((v) => v + (toward - v) * amount));
+
+/**
+ * How a project's colour is shown: `band` for its card's top band, swatch and dot (a strong colour as it
+ * is; a soft one a shade deeper, so it shows on white), `edge` for hover borders and its tabs.
+ */
+export function projectTone(hex: string | undefined): { band: string; edge: string } {
+  const h = /^[0-9a-f]{6}$/i.test(hex ?? "") ? hex! : PROJECT_COLORS[0];
+  const [r, g, b] = rgbOf(h);
+  const light = (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.72;
+  return light ? { band: `#${mix(h, 0, 0.18)}`, edge: `#${mix(h, 0, 0.32)}` } : { band: `#${h}`, edge: `#${h}` };
+}
+
+/** CSS variables for a project's colour (--project-band, --project-edge). */
+export function projectStyle(hex: string | undefined): Record<string, string> {
+  const t = projectTone(hex);
+  return { "--project-band": t.band, "--project-edge": t.edge };
+}
 
 type Backend = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 const backend = (): Backend | undefined =>
