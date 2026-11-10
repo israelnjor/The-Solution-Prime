@@ -87,21 +87,26 @@ fn read_meta(folder: &Path) -> serde_json::Value {
 
 fn write_meta(folder: &Path, meta: &serde_json::Value) -> Result<(), String> {
     let dir = folder.join(META_DIR);
-    let new = !dir.exists();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    if new {
-        hide(&dir);
-    }
+    hide(&dir);
     let json = serde_json::to_vec_pretty(meta).map_err(|e| e.to_string())?;
     crate::atomic_write(&meta_path(folder), &json).map_err(|e| e.to_string())
 }
 
-/// Hides the project's own folder in Explorer (folders starting with a dot are hidden elsewhere).
+/// Hides the project's own folder in Explorer (folders starting with a dot are hidden elsewhere). Set
+/// directly (not by running attrib.exe, which can hang when started from a windowless app).
 #[cfg(windows)]
 fn hide(dir: &Path) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let _ = std::process::Command::new("attrib").arg("+h").arg(dir).creation_flags(CREATE_NO_WINDOW).status();
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_FLAGS_AND_ATTRIBUTES, INVALID_FILE_ATTRIBUTES};
+    let name = HSTRING::from(dir.as_os_str());
+    // SAFETY: plain Win32 calls on a path string that lives for the whole call.
+    unsafe {
+        let now = GetFileAttributesW(&name);
+        if now != INVALID_FILE_ATTRIBUTES && now & FILE_ATTRIBUTE_HIDDEN.0 == 0 {
+            let _ = SetFileAttributesW(&name, FILE_FLAGS_AND_ATTRIBUTES(now | FILE_ATTRIBUTE_HIDDEN.0));
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -185,15 +190,13 @@ fn summary(folder: &str) -> ProjectSummary {
     }
 }
 
-#[tauri::command]
-pub fn project_list(app: AppHandle) -> Vec<ProjectSummary> {
+fn project_list_now(app: AppHandle) -> Vec<ProjectSummary> {
     registered(&app).iter().map(|f| summary(f)).collect()
 }
 
 /// Makes a folder a project (creating it when `create`), with its settings; it goes to the top of the
 /// list. A folder that already is a project (moved here, or from another computer) keeps its settings.
-#[tauri::command]
-pub fn project_add(app: AppHandle, folder: String, meta: serde_json::Value, create: bool) -> Result<ProjectSummary, String> {
+fn project_add_now(app: AppHandle, folder: String, meta: serde_json::Value, create: bool) -> Result<ProjectSummary, String> {
     let p = PathBuf::from(&folder);
     if !p.is_absolute() {
         return Err("Choose a folder on your computer for the project.".into());
@@ -222,8 +225,7 @@ fn touch(app: &AppHandle, folder: &str) -> Result<(), String> {
 }
 
 /// A project's files; it moves to the top of the list (most recently used).
-#[tauri::command]
-pub fn project_files(app: AppHandle, folder: String) -> Result<Vec<ProjectFile>, String> {
+fn project_files_now(app: AppHandle, folder: String) -> Result<Vec<ProjectFile>, String> {
     if !is_registered(&app, &folder) {
         return Err("Not a project".into());
     }
@@ -232,8 +234,7 @@ pub fn project_files(app: AppHandle, folder: String) -> Result<Vec<ProjectFile>,
 }
 
 /// Changes a project's settings (name, colour…).
-#[tauri::command]
-pub fn project_save(app: AppHandle, folder: String, meta: serde_json::Value) -> Result<(), String> {
+fn project_save_now(app: AppHandle, folder: String, meta: serde_json::Value) -> Result<(), String> {
     if !is_registered(&app, &folder) {
         return Err("Not a project".into());
     }
@@ -241,8 +242,7 @@ pub fn project_save(app: AppHandle, folder: String, meta: serde_json::Value) -> 
 }
 
 /// Takes a project off Prime Word's list. Its folder and files stay as they are.
-#[tauri::command]
-pub fn project_forget(app: AppHandle, folder: String) -> Result<(), String> {
+fn project_forget_now(app: AppHandle, folder: String) -> Result<(), String> {
     let mut list = registered(&app);
     list.retain(|p| !same(p, &folder));
     store(&app, &list)
@@ -269,8 +269,7 @@ fn clean_name(name: &str) -> String {
 }
 
 /// A path in the project folder for a new file named `name` (not taken: "(2)" added if it is).
-#[tauri::command]
-pub fn project_new_path(app: AppHandle, folder: String, name: String) -> Result<String, String> {
+fn project_new_path_now(app: AppHandle, folder: String, name: String) -> Result<String, String> {
     if !is_registered(&app, &folder) {
         return Err("Not a project".into());
     }
@@ -278,8 +277,7 @@ pub fn project_new_path(app: AppHandle, folder: String, name: String) -> Result<
 }
 
 /// Copies files the person chose into the project folder (keeping their names; "(2)" when taken).
-#[tauri::command]
-pub fn project_import(app: AppHandle, folder: String, paths: Vec<String>) -> Result<Vec<String>, String> {
+fn project_import_now(app: AppHandle, folder: String, paths: Vec<String>) -> Result<Vec<String>, String> {
     use tauri_plugin_fs::FsExt;
     if !is_registered(&app, &folder) {
         return Err("Not a project".into());
@@ -299,15 +297,61 @@ pub fn project_import(app: AppHandle, folder: String, paths: Vec<String>) -> Res
 }
 
 /// Opens a file of a project in its own program (a spreadsheet, a picture), or shows a project folder.
-#[tauri::command]
-pub fn project_open_external(app: AppHandle, path: String) -> Result<(), String> {
+fn project_open_external_now(app: AppHandle, path: String) -> Result<(), String> {
     let p = Path::new(&path);
     if !(in_a_project(&app, &path) || (p.is_dir() && is_registered(&app, &path))) {
         return Err("Not in a project".into());
     }
     let opener = if cfg!(target_os = "windows") { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    std::process::Command::new(opener).arg(p).spawn().map_err(|e| e.to_string())?;
+    // Explorer needs backslashes: given "C:/a/b.pdf" it opens the Documents folder instead.
+    let target = if cfg!(target_os = "windows") { PathBuf::from(path.replace('/', "\\")) } else { p.to_path_buf() };
+    std::process::Command::new(opener).arg(&target).spawn().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Runs a project command on a worker thread (folders can be large, or on a slow or synced drive).
+async fn off_main<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn project_list(app: AppHandle) -> Result<Vec<ProjectSummary>, String> {
+    off_main(move || Ok(project_list_now(app))).await
+}
+
+#[tauri::command]
+pub async fn project_add(app: AppHandle, folder: String, meta: serde_json::Value, create: bool) -> Result<ProjectSummary, String> {
+    off_main(move || project_add_now(app, folder, meta, create)).await
+}
+
+#[tauri::command]
+pub async fn project_files(app: AppHandle, folder: String) -> Result<Vec<ProjectFile>, String> {
+    off_main(move || project_files_now(app, folder)).await
+}
+
+#[tauri::command]
+pub async fn project_save(app: AppHandle, folder: String, meta: serde_json::Value) -> Result<(), String> {
+    off_main(move || project_save_now(app, folder, meta)).await
+}
+
+#[tauri::command]
+pub async fn project_forget(app: AppHandle, folder: String) -> Result<(), String> {
+    off_main(move || project_forget_now(app, folder)).await
+}
+
+#[tauri::command]
+pub async fn project_new_path(app: AppHandle, folder: String, name: String) -> Result<String, String> {
+    off_main(move || project_new_path_now(app, folder, name)).await
+}
+
+#[tauri::command]
+pub async fn project_import(app: AppHandle, folder: String, paths: Vec<String>) -> Result<Vec<String>, String> {
+    off_main(move || project_import_now(app, folder, paths)).await
+}
+
+#[tauri::command]
+pub async fn project_open_external(app: AppHandle, path: String) -> Result<(), String> {
+    off_main(move || project_open_external_now(app, path)).await
 }
 
 #[cfg(test)]
@@ -336,6 +380,19 @@ mod tests {
         // A sibling whose name starts the same is not inside.
         fs::create_dir_all(root.join("Thesis old")).unwrap();
         assert!(!contains(&project, &root.join("Thesis old").join("a.docx")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn settings_folder_is_hidden() {
+        let root = temp("hidden");
+        write_meta(&root, &serde_json::json!({ "name": "P" })).unwrap();
+        assert_eq!(read_meta(&root)["name"], "P");
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            assert!(fs::metadata(root.join(META_DIR)).unwrap().file_attributes() & 0x2 != 0, "hidden");
+        }
         let _ = fs::remove_dir_all(&root);
     }
 

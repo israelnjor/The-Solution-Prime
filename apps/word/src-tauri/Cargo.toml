@@ -23,8 +23,9 @@ tauri-plugin-fs = "2.7"
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
-# Already part of the app (through Tauri); these features add Windows' own offline text recognition.
-windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "Win32_System_WinRT"] }
+# Already part of the app (through Tauri); these features add Windows' own offline text recognition
+# and setting a folder hidden (a project's .primeword folder).
+windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "Win32_Storage_FileSystem", "Win32_System_WinRT"] }
 
 [profile.release]
 # Thin LTO: most of the size benefit of full LTO at a fraction of the build time and CPU load.

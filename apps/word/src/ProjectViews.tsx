@@ -1,5 +1,6 @@
 import { type Template, TEMPLATES } from "@prime/editor";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { confirmAction } from "./platform";
 import {
   addProject, chooseFolder, defaultProjectsFolder, type FileKind, forgetProject, importFiles, joinPath, kindOf,
   openExternal, PROJECT_COLORS, type ProjectFile, projectFiles, type ProjectSummary, saveProject,
@@ -83,36 +84,41 @@ export function ProjectsPage({ projects, onOpen, onNew }: { projects: ProjectSum
   );
 }
 
-/** New project: a name and colour, and where its folder goes (or an existing folder to use). */
+/**
+ * New project: a name and colour, and its folder — a new one (in Documents unless the person picks
+ * somewhere else), or a folder they already have. Nothing is created until Create project.
+ */
 export function NewProjectDialog({ onCreated, onClose }: { onCreated(p: ProjectSummary): void; onClose(): void }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState(PROJECT_COLORS[0]);
   const [parent, setParent] = useState("");
+  /** A folder the person already has, chosen to become the project (its files stay as they are). */
+  const [existing, setExisting] = useState<string | undefined>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); void defaultProjectsFolder().then(setParent); }, []);
-  const clean = name.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().replace(/\.+$/, "");
+  const clean = name.replace(/[\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().replace(/\.+$/, "");
+  const lastPart = (folder: string) => folder.split(/[\/]/).filter(Boolean).pop() ?? "";
+  const folder = existing ?? (clean && parent ? joinPath(parent, clean) : "");
   const create = async () => {
-    if (!clean || !parent) return;
+    if (!clean || !folder || busy) return;
     setBusy(true);
+    setError("");
     try {
-      onCreated(await addProject(joinPath(parent, clean), { name: clean, color }, true));
+      onCreated(await addProject(folder, { name: clean, color }, !existing));
     } catch (e) {
       setError(String((e as Error).message ?? e));
       setBusy(false);
     }
   };
-  const useFolder = async () => {
-    const folder = await chooseFolder("Choose a folder to make a project", parent || undefined);
-    if (!folder) return;
-    setBusy(true);
-    try {
-      onCreated(await addProject(folder, { name: clean || folder.split(/[\\/]/).filter(Boolean).pop() || "Project", color }, false));
-    } catch (e) {
-      setError(String((e as Error).message ?? e));
-      setBusy(false);
-    }
+  const pickExisting = async () => {
+    const f = await chooseFolder("Choose the folder to make a project", existing ?? (parent || undefined));
+    if (!f) return;
+    setExisting(f);
+    setError("");
+    if (!clean) setName(lastPart(f));
+    input.current?.focus();
   };
   return (
     <div className="hf-overlay" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
@@ -126,14 +132,22 @@ export function NewProjectDialog({ onCreated, onClose }: { onCreated(p: ProjectS
               style={{ background: `#${c}` }} onClick={() => setColor(c)} />
           ))}
         </div>
-        <div className="project-where">
-          <span>Its folder: <strong>{clean && parent ? joinPath(parent, clean) : parent ? joinPath(parent, "…") : "…"}</strong></span>
-          <button onClick={async () => { const f = await chooseFolder("Where to put the project's folder", parent || undefined); if (f) setParent(f); }}>Change…</button>
-        </div>
+        {existing ? (
+          <div className="project-where">
+            <span>Your folder: <strong>{existing}</strong><br />It becomes the project; the files in it stay as they are.</span>
+            <button onClick={() => void pickExisting()}>Change…</button>
+            <button onClick={() => setExisting(undefined)}>New folder instead</button>
+          </div>
+        ) : (
+          <div className="project-where">
+            <span>A new folder: <strong>{folder || (parent ? joinPath(parent, "…") : "…")}</strong></span>
+            <button onClick={async () => { const f = await chooseFolder("Where to put the project's folder", parent || undefined); if (f) setParent(f); }}>Change…</button>
+            <button onClick={() => void pickExisting()} title="Make a folder you already have into a project (its files stay as they are)">Use a folder I have…</button>
+          </div>
+        )}
         {error && <p className="error">{error}</p>}
         <div className="buttons">
-          <button className="primary" disabled={!clean || !parent || busy} onClick={() => void create()}>Create project</button>
-          <button disabled={busy} onClick={() => void useFolder()} title="Make a folder you already have into a project (its files stay as they are)">Use an existing folder…</button>
+          <button className="primary" disabled={!clean || !folder || busy} onClick={() => void create()}>{busy ? "Creating…" : "Create project"}</button>
           <button onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -154,6 +168,8 @@ export function ProjectPage({ project, actions, onBack, onChanged, onForgotten }
   const [renaming, setRenaming] = useState(false);
   const [newDoc, setNewDoc] = useState<{ name: string; template: string } | undefined>();
   const [busy, setBusy] = useState(false);
+  /** Groups shown in full (long ones show their newest 200 until asked). */
+  const [expanded, setExpanded] = useState<string[]>([]);
   const meta = project.meta;
   const refresh = useCallback(() => {
     projectFiles(project.path).then((f) => { setFiles(f); setError(""); }, (e) => setError(String((e as Error).message ?? e)));
@@ -182,8 +198,14 @@ export function ProjectPage({ project, actions, onBack, onChanged, onForgotten }
   const open = (f: ProjectFile) => {
     const k = kindOf(f.name);
     if (k === "document") actions.openDocument(f.path);
-    else if (k === "pdf") actions.convertPdf(project.path, f.path);
     else void openExternal(f.path).catch((e) => setError(String(e)));
+  };
+  const convert = async (f: ProjectFile) => {
+    if (await confirmAction(`Convert “${f.name}” into an editable Word document?
+
+A new document is saved in this project; the PDF stays as it is.`, "Convert PDF")) {
+      actions.convertPdf(project.path, f.path);
+    }
   };
   return (
     <main className="home-main project-page" style={{ ["--project" as string]: `#${meta.color}` }}>
@@ -246,23 +268,26 @@ export function ProjectPage({ project, actions, onBack, onChanged, onForgotten }
               <section key={title} aria-label={title}>
                 <h2>{title} <span className="project-count">{list.length}</span></h2>
                 <ul className="project-files">
-                  {list.map((f) => {
+                  {(expanded.includes(title) ? list : list.slice(0, 200)).map((f) => {
                     const k = kindOf(f.name);
                     return (
                       <li key={f.path}>
                         <button className="project-file" onClick={() => open(f)}
-                          title={k === "document" ? `Open ${f.name}` : k === "pdf" ? `Convert ${f.name} into an editable document in this project` : `Open ${f.name} in its program`}>
+                          title={k === "document" ? `Open ${f.name}` : `Open ${f.name} in its program`}>
                           <span className={`file-badge ${k}`} aria-hidden="true">{BADGE[k]}</span>
                           <span className="project-file-name">
                             <strong>{f.name}</strong>
                             <span>{[f.folder, when(f.modified), size(f.size)].filter(Boolean).join(" · ")}</span>
                           </span>
                         </button>
-                        {k === "pdf" && <button className="project-file-side" onClick={() => void openExternal(f.path).catch((e) => setError(String(e)))}>View</button>}
+                        {k === "pdf" && <button className="project-file-side" onClick={() => void convert(f)} title="Make an editable Word document from this PDF (asks first)">Convert…</button>}
                       </li>
                     );
                   })}
                 </ul>
+                {list.length > 200 && !expanded.includes(title) && (
+                  <button className="project-more" onClick={() => setExpanded((x) => [...x, title])}>Show all {list.length} {title.toLowerCase()}</button>
+                )}
               </section>
             );
           })}

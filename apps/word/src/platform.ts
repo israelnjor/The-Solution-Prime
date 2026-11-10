@@ -180,6 +180,9 @@ export async function saveDocument(make: (format: SaveFormat) => Uint8Array | Pr
 
 /** A yes/no question: a native dialog on the desktop, the browser's confirm() otherwise. */
 export async function confirmAction(message: string, title = "Prime Word"): Promise<boolean> {
+  // Self-tests answer for the person (a native dialog would wait for them).
+  const stand = (globalThis as { primeConfirm?: (m: string) => Promise<boolean> }).primeConfirm;
+  if (stand) return stand(message);
   if (isDesktop) return ask(message, { title, kind: "warning" });
   return window.confirm(message);
 }
