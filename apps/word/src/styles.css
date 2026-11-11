@@ -50,6 +50,17 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .toolbar button:disabled { opacity: 0.4; cursor: default; }
 .toolbar button.on { background: #d0dcef; border-color: #a9bfe0; }
 .toolbar button:has(> .icon) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+/* Buttons show they can be clicked: a very light fill (lighter than hover). */
+.toolbar button:not(.on):not(:disabled) { background: #f5f7fa; }
+.toolbar button:not(.on):not(:disabled):hover { background: #e9edf3; }
+.toolbar button.launcher { background: transparent; }
+/* A thin line between kinds of buttons inside one group (lists | alignment). */
+.toolbar .divider { width: 1px; height: 20px; margin: 0 4px; background: var(--chrome-border); }
+/* Groups of many text buttons (Review): two rows, column by column, like Word's small buttons. */
+.toolbar .group.stacked { display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 3px 4px; align-items: center; }
+.toolbar .group.stacked button { height: 25px; justify-content: flex-start; text-align: left; }
+.toolbar .group.stacked select { height: 25px; }
+.toolbar .markup-select { width: 128px; }
 .toolbar .icon { flex-shrink: 0; }
 /* A narrow window (half a screen): the ribbon in two rows rather than four — buttons with an icon show
    only the icon (the name is in the tooltip), lists are narrower, groups closer together. */
@@ -57,6 +68,8 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
   .toolbar { gap: 6px; padding: 5px 8px; }
   /* Buttons wrap one by one (a group need not move to the next row whole); groups keep a gap between them. */
   .toolbar .group { display: contents; }
+  .toolbar .group.stacked { display: grid; margin-right: 10px; }
+  .toolbar .divider { display: none; }
   .toolbar .group > :last-child:not(:first-child) { margin-right: 10px; }
   .toolbar .label { display: none; }
   .toolbar button { padding: 0 6px; }
