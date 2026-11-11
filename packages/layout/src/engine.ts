@@ -800,10 +800,12 @@ export class LayoutEngine {
         runs.push(...this.faces(a.run));
         continue;
       }
-      // A word may span several runs (e.g. "H₂O"): collect atoms until the next space or break.
+      // A word may span several runs (e.g. "H₂O"): collect atoms until the next space or break. An inline
+      // picture (or chart) stands alone: the line may break before and after it, as Word and the screen do —
+      // pictures side by side with no space between them wrap one by one instead of running off the page.
       const word: Atom[] = [a];
-      const ends = (w: Atom) => w.kind === "word" && w.breakAfter;
-      while (!ends(word[word.length - 1]) && ["word", "image", "math"].includes(atoms[i + 1]?.kind)) word.push(atoms[++i]);
+      const ends = (w: Atom) => (w.kind === "word" && w.breakAfter) || w.kind === "image";
+      while (!ends(word[word.length - 1]) && ["word", "math"].includes(atoms[i + 1]?.kind)) word.push(atoms[++i]);
       // A word wider than a whole line is split where the line ends (Word does the same).
       if (word.length === 1 && a.kind === "word" && a.text.length > 1) {
         // Measured against the line's full width: such a word starts a new line, then breaks.

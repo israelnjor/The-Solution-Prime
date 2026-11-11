@@ -417,7 +417,7 @@ export function App() {
         ...(spelling ? [spellPlugin(() => speller.current, ignoredWords.current)] : []),
         speakPlugin(),
         ...(mode === "outline" ? [outlinePlugin(() => fileRef.current.base)] : []),
-        ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
+        ...(mode === "print" ? [pagination({ base: () => fileRef.current.base, measurer, onLayout: (l) => { setLayout(l); setLayoutOf(fileRef.current.base); if (SELFTEST) (globalThis as { primeLayout?: unknown }).primeLayout = l; }, onFit: (next) => setOverflow((prev) => (prev.size === next.size && [...next].every((p) => prev.has(p)) ? prev : next)) })] : []),
     ];
     // Back to a document (another tab, another view): as it was left, its undo history too. New: from the file.
     let state: EditorState;
