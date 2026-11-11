@@ -54,21 +54,23 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .toolbar button:not(.on):not(:disabled) { background: #f5f7fa; }
 .toolbar button:not(.on):not(:disabled):hover { background: #e9edf3; }
 .toolbar button.launcher { background: transparent; }
-/* A thin line between kinds of buttons inside one group (lists | alignment). */
+/* Ends a toolbar row: what follows starts the next one. */
+.toolbar .row-break { flex-basis: 100%; height: 0; }
+/* A thin line between kinds of buttons inside one group (alignment | lists). */
 .toolbar .divider { width: 1px; height: 20px; margin: 0 4px; background: var(--chrome-border); }
 .toolbar .icon { flex-shrink: 0; }
 /* A narrow window (half a screen): the ribbon in two rows rather than four — buttons with an icon show
    only the icon (the name is in the tooltip), lists are narrower, groups closer together. */
 @media (max-width: 1400px) {
-  .toolbar { gap: 6px; padding: 5px 8px; }
+  .toolbar { gap: 4px 3px; padding: 5px 8px; }
   /* Buttons wrap one by one (a group need not move to the next row whole); groups keep a gap between them. */
   .toolbar .group { display: contents; }
   .toolbar .divider { display: none; }
   .toolbar .group > :last-child:not(:first-child) { margin-right: 10px; }
   .toolbar .label { display: none; }
-  .toolbar button { padding: 0 6px; }
-  .toolbar .style-select { min-width: 0; width: 104px; }
-  .toolbar .font-select { width: 124px; }
+  .toolbar button { padding: 0 5px; }
+  .toolbar .style-select { min-width: 0; width: 92px; }
+  .toolbar .font-select { width: 104px; }
   .toolbar .size-select { width: 52px; }
   .toolbar .highlight-select { width: 92px; }
   .toolbar .spacing-select { width: 84px; }

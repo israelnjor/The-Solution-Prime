@@ -319,16 +319,18 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               </select>
               <button onClick={onFontDialog} title="Font settings (Ctrl+D)" aria-label="Font settings" className="launcher">⋯</button>
             </div>
+            {/* The paragraph controls start the second row, with alignment first. */}
+            <span className="row-break" aria-hidden="true" />
             <div className="group">
-              <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets" aria-label="Bullets"><Icon name="bullets" /></button>
-              <button className={list === "number" ? "on" : ""} onClick={run(toggleList(docRef, "number"))} title="Numbering" aria-label="Numbering"><Icon name="numbers" /></button>
-              <button onClick={run(changeLevel(-1))} title="Decrease indent (Shift+Tab)" aria-label="Decrease list level" disabled={!list}>⇤</button>
-              <button onClick={run(changeLevel(1))} title="Increase indent (Tab)" aria-label="Increase list level" disabled={!list}>⇥</button>
-              <span className="divider" aria-hidden="true" />
               {([["left", "Left"], ["center", "Center"], ["right", "Right"], ["both", "Justify"]] as const).map(([value, label]) => (
                 <button key={value} className={align === value || (value === "both" && align === "justify") ? "on" : ""}
                   onClick={run(setParagraph("align", value === "left" ? undefined : value))} title={`Align: ${label}`} aria-label={`Align ${label}`}><Icon name={value} /></button>
               ))}
+              <span className="divider" aria-hidden="true" />
+              <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets" aria-label="Bullets"><Icon name="bullets" /></button>
+              <button className={list === "number" ? "on" : ""} onClick={run(toggleList(docRef, "number"))} title="Numbering" aria-label="Numbering"><Icon name="numbers" /></button>
+              <button onClick={run(changeLevel(-1))} title="Decrease indent (Shift+Tab)" aria-label="Decrease list level" disabled={!list}>⇤</button>
+              <button onClick={run(changeLevel(1))} title="Increase indent (Tab)" aria-label="Increase list level" disabled={!list}>⇥</button>
             </div>
             <div className="group">
               <select value="" onChange={(e) => {
