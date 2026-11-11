@@ -8,6 +8,7 @@ export {
   deleteFloat, floatAt, floatEditing, floatNodeOf, inlinePictureResizing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
   setPictureWrap, withBox, type FloatBox,
 } from "./floats.js";
+export { deleteCurrentPage, deletePages, pageStarts, selectedPages } from "./delete-pages.js";
 export { PAGE_GAP, pageAt, pageTops, pagination, paginationKey, type PagedOptions, mark, sectionOffsets, timed } from "./paged.js";
 export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
 export { changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, toggleList } from "./lists.js";

@@ -1,5 +1,5 @@
 import {
-  addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, linkAt, pasteAs, type PasteMode, pictureAt,
+  addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, linkAt, pasteAs, type PasteMode, pictureAt, selectedPages,
 } from "@prime/editor";
 import type { Command } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
@@ -14,6 +14,8 @@ export interface ContextActions {
   onAltText(): void;
   onSaveBlock(): void;
   onNotice(message: string): void;
+  /** Deletes the page(s) the cursor or selection is on. */
+  onDeletePage(): void;
 }
 
 /** Pastes from the system clipboard (formatted when it has HTML), then applies a paste option. */
@@ -112,6 +114,14 @@ export function ContextMenu({ view, x, y, actions, onClose }: { view: EditorView
     { label: "New Comment", disabled: !has, run: actions.onComment },
     { label: "Save Selection as Block…", disabled: !has, run: actions.onSaveBlock },
   );
+  // Print Layout: the page(s) the cursor or selection is on.
+  const pages = selectedPages(state);
+  if (pages) {
+    items.push("-", {
+      label: pages.first === pages.last ? `Delete Page ${pages.first}` : `Delete Pages ${pages.first}–${pages.last}`,
+      run: actions.onDeletePage,
+    });
+  }
 
   // Keep the menu on screen.
   useLayoutEffect(() => {

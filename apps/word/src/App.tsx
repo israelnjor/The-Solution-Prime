@@ -5,7 +5,7 @@ import {
   insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
-  pageAt, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun, typingParser } from "@prime/editor";
+  pageAt, deletePages, selectedPages, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun, typingParser } from "@prime/editor";
 import { layoutDocument, type LayoutResult } from "@prime/layout";
 import { CanvasMeasurer } from "@prime/layout/dist/browser/canvas.js";
 import type { PrimeDocument } from "@prime/pdm";
@@ -264,6 +264,18 @@ export function App() {
   const flash = (message: string) => {
     setNotice(message);
     setTimeout(() => setNotice((n) => (n === message ? "" : n)), 4000);
+  };
+
+  // Delete Page: the page(s) the cursor or selection is on, in Print Layout (Ctrl+Z brings them back).
+  const deletePage = () => {
+    const v = view.current;
+    if (!v) return;
+    const pages = selectedPages(v.state);
+    if (!pages) { flash("Pages are shown in Print Layout: switch to it to delete a page"); return; }
+    if (deletePages(pages.first, pages.last)(v.state, v.dispatch)) {
+      flash(`${pages.first === pages.last ? `Page ${pages.first}` : `Pages ${pages.first}–${pages.last}`} deleted (Ctrl+Z to undo)`);
+    }
+    v.focus();
   };
 
   const save = useCallback(async (saveAs = false) => {
@@ -1172,7 +1184,7 @@ ${String(e)}`));
       <Ribbon
         view={v} doc={v?.state.doc.attrs.styles ? { ...file.base, styles: v.state.doc.attrs.styles } : file.base} mode={mode}
         onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)} onSave={(saveAs) => void save(saveAs)}
-        onExportPdf={() => void exportToPdf()} onShare={(f) => void share(f)} onPrint={() => void print()}
+        onExportPdf={() => void exportToPdf()} onShare={(f) => void share(f)} onDeletePage={deletePage} onPrint={() => void print()}
         onFind={(replace) => (replace ? setFind("replace") : searchNav())}
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
@@ -1426,7 +1438,7 @@ ${String(e)}`));
           onLink: () => window.dispatchEvent(new Event(LINK_EVENT)), onComment: () => setComments("writing"),
           onEditPicture: () => setEditingPicture(true),
           onAltText: () => { const t = window.prompt("Alt text (describe the picture for people who cannot see it):"); if (t !== null) setAltText(t)(v.state, v.dispatch); },
-          onSaveBlock: () => setDialog("saveBlock"), onNotice: flash,
+          onSaveBlock: () => setDialog("saveBlock"), onNotice: flash, onDeletePage: deletePage,
         }} />
       )}
       {editingHeaderFooter && v && measurerRef.current && (

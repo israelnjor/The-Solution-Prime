@@ -68,6 +68,8 @@ export interface RibbonProps {
   onNewComment(): void;
   onHome(): void;
   onConvertPdf(): void;
+  /** Deletes the page(s) the cursor or selection is on (Print Layout). */
+  onDeletePage(): void;
   onEditPicture(): void;
   onLetterhead(): void;
   onSaveTemplate(): void;
@@ -145,7 +147,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -344,6 +346,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
           <>
             <div className="group">
               <button onClick={run(insertPageBreak)} title="Page break (Ctrl+Enter)">Page Break</button>
+              <button onClick={onDeletePage} title="Delete the page the cursor is on (or every page the selection covers); Ctrl+Z brings it back">Delete Page</button>
             </div>
             <div className="group" aria-label="Text box and shapes">
               <button onClick={() => { run(insertShape("textbox"))(); setTab("picture"); }} title="A box of text you can place anywhere on the page">Text Box</button>
