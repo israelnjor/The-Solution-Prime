@@ -2554,6 +2554,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-single-instance",
  "windows",
+ "windows-collections",
 ]
 
 [[package]]

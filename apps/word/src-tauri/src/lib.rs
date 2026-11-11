@@ -5,6 +5,7 @@
 mod fonts;
 pub mod ocr;
 mod projects;
+mod share;
 
 use std::fs;
 use std::io::Write;
@@ -373,6 +374,56 @@ fn open_pdf(request: Request) -> Result<(), String> {
     Ok(())
 }
 
+/// Shares a copy of the open document (`x-name`, e.g. "Report.docx" or "Report.pdf"; the bytes as the
+/// body) through the system's share panel. The copy goes in Prime Word's cache folder, in a folder of its
+/// own so it keeps the document's name; copies a day old or more are removed.
+#[tauri::command]
+async fn share_document(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+    let name: String = header(&request, "x-name")?
+        .chars()
+        .map(|c| if c.is_alphanumeric() || " -_.()".contains(c) { c } else { '_' })
+        .collect();
+    let name = name.trim().trim_start_matches('.').to_string();
+    if name.is_empty() {
+        return Err("bad name".into());
+    }
+    let bytes = raw_body(&request)?.to_vec();
+    let root = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("share");
+    let file_name = name.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || -> Result<PathBuf, String> {
+        if let Ok(entries) = fs::read_dir(&root) {
+            for entry in entries.flatten() {
+                let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+                if old.is_some_and(|age| age.as_secs() > 24 * 3600) {
+                    let _ = fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let dir = root.join(stamp.to_string());
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(&file_name);
+        atomic_write(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(path)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let window = app.get_webview_window("main").ok_or("no window")?;
+    #[cfg(windows)]
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    #[cfg(not(windows))]
+    let hwnd = { let _ = &window; 0isize };
+    // The panel is the window's: opened from its thread.
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(share::show(hwnd, name, path));
+    })
+    .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -394,6 +445,7 @@ pub fn run() {
         .manage(fonts::FontIndex::default())
         .invoke_handler(tauri::generate_handler![
             recognize_text,
+            share_document,
             projects::project_list,
             projects::project_add,
             projects::project_files,

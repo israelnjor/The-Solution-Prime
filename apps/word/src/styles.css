@@ -207,6 +207,26 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .spell-menu .none { padding: 6px 10px; color: var(--muted); }
 .spell-menu hr { border: none; border-top: 1px solid var(--chrome-border); margin: 4px 0; }
 .recent-menu { position: relative; display: inline-block; }
+/* Share: a button at the right of the tabs (and in File), with the choice of copy below it. */
+.share-menu { position: relative; display: inline-block; }
+.tabs .share-menu { margin: 0 10px 4px 0; align-self: center; }
+.tabs button.share-button {
+  height: 26px; padding: 0 14px; border: 1px solid var(--accent); border-radius: 13px;
+  background: var(--accent); color: #fff; font-weight: 600;
+}
+.tabs button.share-button:hover { filter: brightness(1.1); }
+.share-popup {
+  position: absolute; z-index: 50; top: calc(100% + 6px); right: 0; width: 250px; display: grid; gap: 2px;
+  padding: 6px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+.toolbar .share-popup { left: 0; right: auto; }
+.share-popup p { margin: 2px 8px 4px; font-size: 12px; color: var(--muted); }
+.share-popup button {
+  display: grid; gap: 1px; height: auto !important; padding: 7px 10px !important; text-align: left; font: inherit;
+  border: none !important; border-radius: 6px !important; background: none !important; color: var(--ink) !important; cursor: pointer;
+}
+.share-popup button:hover, .share-popup button:focus-visible { background: #e9edf3 !important; }
+.share-popup button span { font-size: 12px; color: var(--muted); font-weight: normal; }
 .recent-popup {
   position: absolute; z-index: 50; top: calc(100% + 4px); left: 0; width: 380px; max-height: 420px; overflow: auto;
   padding: 6px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);

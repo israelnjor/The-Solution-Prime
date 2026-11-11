@@ -18,6 +18,8 @@ import type { Command } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
 import { RecentMenu } from "./RecentList";
+import { ShareMenu } from "./ShareMenu";
+import type { ShareFormat } from "./share";
 
 export const FONTS = ["Aptos", "Arial", "Book Antiqua", "Calibri", "Calibri Light", "Cambria", "Candara", "Century Gothic",
   "Consolas", "Constantia", "Corbel", "Courier New", "Garamond", "Georgia", "Palatino Linotype", "Segoe UI",
@@ -52,6 +54,8 @@ export interface RibbonProps {
   onOpenRecent(path: string): void;
   onSave(saveAs?: boolean): void;
   onExportPdf(): void;
+  /** Sends a copy of the document through the system's share panel. */
+  onShare(format: ShareFormat): void;
   onPrint(): void;
   onFind(replace: boolean): void;
   onHeaderFooter(): void;
@@ -141,7 +145,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -221,6 +225,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>{shape ? "Shape Format" : "Picture"}</button>}
         {mode === "outline" && <button className={`contextual ${activeTab === "outlining" ? "on" : ""}`} onClick={() => setTab("outlining")}>Outlining</button>}
         <span className="spacer" />
+        <ShareMenu onShare={onShare} className="share-button" />
         <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
         <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")} title="One continuous column">Web Layout</button>
       </nav>
@@ -243,6 +248,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onSaveTemplate} title="Save this document as a template, to start new documents from">Save as Template</button>
             </div>
             <div className="group" aria-label="Share">
+              <ShareMenu onShare={onShare} label="Share ▾" />
               <button onClick={onExportPdf} title="Export as PDF">Export PDF</button>
               <button onClick={onPrint} title="Print (Ctrl+P)">Print</button>
             </div>

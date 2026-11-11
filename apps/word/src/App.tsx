@@ -32,6 +32,7 @@ import { EquationDialog } from "./EquationDialog";
 import { SortDialog } from "./SortDialog";
 import { StylesDialog } from "./StylesDialog";
 import { exportPdf, makePdf, printDocument } from "./exportPdf";
+import { type ShareFormat, shareFile, shareName } from "./share";
 import { openPdfForView } from "./pdfImport";
 import { PrintDialog, type ViewPdf } from "./PrintDialog";
 import { ReadMode } from "./ReadMode";
@@ -969,6 +970,21 @@ ${String(e)}`));
     }
   };
 
+  // Share: a copy of the document as it is now (not saved first; the document is unchanged).
+  const share = async (format: ShareFormat) => {
+    const v = view.current;
+    if (!v || !measurerRef.current) return;
+    try {
+      const model = fromProseMirror(v.state.doc, fileRef.current.base);
+      const pw = currentPassword();
+      const bytes = format === "pdf" ? (await makePdf(model, measurerRef.current)).bytes
+        : pw ? await encryptDocx(writeDocx(model), pw) : writeDocx(model);
+      await shareFile(shareName(fileRef.current.name, format), bytes, format);
+    } catch (e) {
+      alert(`Prime Word could not share the document:\n${(e as Error).message}`);
+    }
+  };
+
   // Ctrl+P from the editor.
   useEffect(() => {
     const onPrint = () => void printRef.current();
@@ -1156,7 +1172,7 @@ ${String(e)}`));
       <Ribbon
         view={v} doc={v?.state.doc.attrs.styles ? { ...file.base, styles: v.state.doc.attrs.styles } : file.base} mode={mode}
         onNew={() => setPickingTemplate(true)} onOpen={() => void open()} onOpenRecent={(p) => void openRecent(p)} onSave={(saveAs) => void save(saveAs)}
-        onExportPdf={() => void exportToPdf()} onPrint={() => void print()}
+        onExportPdf={() => void exportToPdf()} onShare={(f) => void share(f)} onPrint={() => void print()}
         onFind={(replace) => (replace ? setFind("replace") : searchNav())}
         onHeaderFooter={() => setEditingHeaderFooter(true)}
         onParagraph={() => setEditingParagraph(true)}
