@@ -24,6 +24,18 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 }
 .tabs button.on { background: #fff; border-color: var(--chrome-border); }
 .tabs button.contextual { color: #7a4f00; }
+/* A narrow window (half a screen): the tabs stay on one line, closer together; Print/Web Layout leave the
+   row (they are in View), and what still does not fit scrolls sideways. */
+.tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.tabs > * { flex-shrink: 0; }
+.tabs button { white-space: nowrap; }
+@media (max-width: 1400px) {
+  .tabs { padding: 4px 8px 0; }
+  .tabs button { padding: 0 8px; }
+  .tabs > button.brand { margin-right: 6px; }
+  .tabs button.layout-mode { display: none; }
+}
+@media (max-width: 1000px) { .tabs button { padding: 0 6px; } }
 .toolbar {
   display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: #fff;
   border-top: 1px solid var(--chrome-border); flex-wrap: wrap; min-height: 42px;

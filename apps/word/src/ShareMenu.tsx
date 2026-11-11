@@ -14,12 +14,20 @@ export function ShareMenu({ onShare, className, label = "Share" }: { onShare(for
     return () => { window.removeEventListener("mousedown", close); window.removeEventListener("keydown", esc); };
   }, [open]);
   const pick = (f: ShareFormat) => { setOpen(false); onShare(f); };
+  // Placed against the window (the tab row scrolls sideways when narrow, and would clip it): below the
+  // button, kept inside the window.
+  const [at, setAt] = useState<{ top: number; left: number }>();
+  const toggle = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - 258)) });
+    setOpen((o) => !o);
+  };
   return (
     <div className="share-menu" ref={box}>
-      <button className={className} onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu"
+      <button className={className} onClick={toggle} aria-expanded={open} aria-haspopup="menu"
         title="Send a copy of this document: by email, WhatsApp, Nearby Share…">{label}</button>
       {open && (
-        <div className="share-popup" role="menu">
+        <div className="share-popup" role="menu" style={at ? { position: "fixed", top: at.top, left: at.left, right: "auto" } : undefined}>
           <p>Send a copy as</p>
           <button role="menuitem" onClick={() => pick("docx")}>
             <strong>Word document</strong><span>They can edit it (.docx)</span>

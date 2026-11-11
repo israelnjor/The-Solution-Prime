@@ -226,8 +226,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         {mode === "outline" && <button className={`contextual ${activeTab === "outlining" ? "on" : ""}`} onClick={() => setTab("outlining")}>Outlining</button>}
         <span className="spacer" />
         <ShareMenu onShare={onShare} className="share-button" />
-        <button className={mode === "print" ? "on" : ""} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
-        <button className={mode === "web" ? "on" : ""} onClick={() => onMode("web")} title="One continuous column">Web Layout</button>
+        <button className={`layout-mode ${mode === "print" ? "on" : ""}`} onClick={() => onMode("print")} title="Pages as they will print">Print Layout</button>
+        <button className={`layout-mode ${mode === "web" ? "on" : ""}`} onClick={() => onMode("web")} title="One continuous column">Web Layout</button>
       </nav>
 
       <div className="toolbar" role="toolbar" aria-label="Ribbon">
