@@ -731,25 +731,20 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
 
         {activeTab === "review" && (
           <>
-            <div className="group stacked" aria-label="Comments">
+            <div className="group" aria-label="Comments">
               <button onClick={onNewComment} title="Comment on the selected text">New Comment</button>
               <button onClick={onComments} title="Show or hide the comments">Comments</button>
             </div>
-            <div className="group stacked" aria-label="Proofing">
+            <div className="group" aria-label="Proofing">
               <button onClick={onAutoCorrect} title="Choose what is corrected as you type, and add your own replacements">AutoCorrect…</button>
               <button onClick={onThesaurus} title="Words of like meaning for the word at the cursor (Shift+F7)">Thesaurus</button>
               <button onClick={onReadAloud} title="Read the document aloud from the cursor (Ctrl+Alt+Space)">Read Aloud</button>
             </div>
-            <div className="group stacked" aria-label="Tracking">
+            <div className="group" aria-label="Tracking">
               <button className={state && trackingOn(state) ? "on" : ""} aria-pressed={!!(state && trackingOn(state))} onClick={() => state && run(setTracking(!trackingOn(state)))()}
                 title="Track Changes: record insertions and deletions as changes others can accept or reject (Ctrl+Shift+E)">Track Changes</button>
-              <select className="markup-select" value={markup} onChange={(e) => onMarkup(e.target.value as Markup)} title="How tracked changes are shown" aria-label="Markup">
-                <option value="all">All Markup</option>
-                <option value="none">No Markup (final)</option>
-                <option value="original">Original</option>
-              </select>
             </div>
-            <div className="group stacked" aria-label="Tracked changes">
+            <div className="group" aria-label="Tracked changes">
               <button onClick={run(gotoChange(-1))} title="Previous change">◀ Previous</button>
               <button onClick={run(gotoChange(1))} title="Next change">Next ▶</button>
               <button onClick={run(acceptOrReject(true))} title="Accept the change at the cursor">Accept</button>
@@ -759,6 +754,13 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </div>
             <div className="group" aria-label="Compare">
               <button onClick={onCompare} title="Compare this document with an earlier version: the differences as tracked changes">Compare…</button>
+            </div>
+            <div className="group">
+              <select value={markup} onChange={(e) => onMarkup(e.target.value as Markup)} title="How tracked changes are shown" aria-label="Markup">
+                <option value="all">All Markup</option>
+                <option value="none">No Markup (final)</option>
+                <option value="original">Original</option>
+              </select>
             </div>
           </>
         )}
