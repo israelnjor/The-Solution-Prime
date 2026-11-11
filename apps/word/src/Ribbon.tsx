@@ -127,6 +127,22 @@ const LOOK_OPTIONS: [keyof TableLook, string][] = [
 const CASES: [CaseMode, string][] = [["sentence", "Sentence case."], ["lower", "lowercase"], ["upper", "UPPERCASE"], ["title", "Capitalize Each Word"], ["toggle", "tOGGLE cASE"]];
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
+/** Small line icons for the ribbon (drawn in the text colour). */
+function Icon({ name }: { name: "left" | "center" | "right" | "both" | "bullets" | "numbers" | "find" | "replace" }) {
+  const lines = (rows: [number, number][]) => rows.map(([x1, x2], i) => <line key={i} x1={x1} x2={x2} y1={3 + i * 3.5} y2={3 + i * 3.5} />);
+  const body = {
+    left: lines([[2, 14], [2, 10], [2, 14], [2, 9]]),
+    center: lines([[2, 14], [4, 12], [2, 14], [5, 11]]),
+    right: lines([[2, 14], [6, 14], [2, 14], [7, 14]]),
+    both: lines([[2, 14], [2, 14], [2, 14], [2, 14]]),
+    bullets: <>{[4, 8, 12].map((y) => <g key={y}><circle cx={3} cy={y} r={1.1} fill="currentColor" stroke="none" /><line x1={6} x2={14} y1={y} y2={y} /></g>)}</>,
+    numbers: <>{[4, 8, 12].map((y, i) => <g key={y}><text x={1} y={y + 1.8} fontSize={5} fill="currentColor" stroke="none" fontFamily="Segoe UI, sans-serif">{i + 1}</text><line x1={6} x2={14} y1={y} y2={y} /></g>)}</>,
+    find: <><circle cx={7} cy={7} r={4} /><line x1={10} y1={10} x2={14} y2={14} /></>,
+    replace: <><path d="M2 6h10l-2.5-2.5M14 10H4l2.5 2.5" /></>,
+  }[name];
+  return <svg className="icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{body}</svg>;
+}
+
 const displayName = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
 function readImage(): Promise<{ data: string; contentType: string; width: number; height: number; name: string } | undefined> {
@@ -263,14 +279,14 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={run(undo)} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
               <button onClick={run(redo)} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
               <button className={painter ? "on" : ""} aria-pressed={painter} onClick={() => onPainter(false)} onDoubleClick={() => onPainter(true)}
-                title="Format Painter: copy this formatting, then select text to apply it (double-click to keep it on; Esc to stop)">🖌 Format Painter</button>
+                title="Format Painter: copy this formatting, then select text to apply it (double-click to keep it on; Esc to stop)">🖌 <span className="label">Format Painter</span></button>
             </div>
             <div className="group">
               <select value={currentStyle} onChange={(e) => run(setParagraph("style", e.target.value))()} title="Paragraph style" className="style-select">
                 {!styles.some((s) => s.id === currentStyle) && <option value={currentStyle}>{currentStyle}</option>}
                 {styles.map((s) => <option key={s.id} value={s.id}>{displayName(s.name ?? s.id)}</option>)}
               </select>
-              <button onClick={onStyles} title="Modify a style, or create one from this paragraph">Styles…</button>
+              <button onClick={onStyles} title="Styles: modify a style, or create one from this paragraph" aria-label="Styles">Styles…</button>
             </div>
             <div className="group">
               <select value={effective?.font ?? ""} onChange={(e) => run(setFont(e.target.value))()} title="Font" className="font-select">
@@ -298,21 +314,21 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <input type="color" value={`#${(effective?.color ?? "000000").toLowerCase()}`} onChange={(e) => run(setColor(e.target.value.slice(1)))()} />
               </label>
               <select value={effective?.highlight ?? ""} onChange={(e) => run(setHighlight(e.target.value || undefined))()} title="Highlight" className="highlight-select">
-                <option value="">No highlight</option>
+                <option value="">Highlight</option>
                 {HIGHLIGHTS.map(([name, css]) => <option key={name} value={name} style={{ background: css }}>{name}</option>)}
               </select>
               <button onClick={onFontDialog} title="Font settings (Ctrl+D)" aria-label="Font settings" className="launcher">⋯</button>
             </div>
             <div className="group">
-              <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets">• List</button>
-              <button className={list === "number" ? "on" : ""} onClick={run(toggleList(docRef, "number"))} title="Numbering">1. List</button>
+              <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets" aria-label="Bullets"><Icon name="bullets" /></button>
+              <button className={list === "number" ? "on" : ""} onClick={run(toggleList(docRef, "number"))} title="Numbering" aria-label="Numbering"><Icon name="numbers" /></button>
               <button onClick={run(changeLevel(-1))} title="Decrease indent (Shift+Tab)" aria-label="Decrease list level" disabled={!list}>⇤</button>
               <button onClick={run(changeLevel(1))} title="Increase indent (Tab)" aria-label="Increase list level" disabled={!list}>⇥</button>
             </div>
             <div className="group">
               {([["left", "Left"], ["center", "Center"], ["right", "Right"], ["both", "Justify"]] as const).map(([value, label]) => (
                 <button key={value} className={align === value || (value === "both" && align === "justify") ? "on" : ""}
-                  onClick={run(setParagraph("align", value === "left" ? undefined : value))} title={`Align: ${label}`}>{label}</button>
+                  onClick={run(setParagraph("align", value === "left" ? undefined : value))} title={`Align: ${label}`} aria-label={`Align ${label}`}><Icon name={value} /></button>
               ))}
             </div>
             <div className="group">
@@ -336,8 +352,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onParagraph} title="Paragraph settings: indents, spacing, line and page breaks, tabs" aria-label="Paragraph settings" className="launcher">⋯</button>
             </div>
             <div className="group">
-              <button onClick={() => onFind(false)} title="Find in the navigation pane (Ctrl+F)">Find</button>
-              <button onClick={() => onFind(true)} title="Replace (Ctrl+H)">Replace</button>
+              <button onClick={() => onFind(false)} title="Find in the navigation pane (Ctrl+F)" aria-label="Find"><Icon name="find" /><span className="label">Find</span></button>
+              <button onClick={() => onFind(true)} title="Replace (Ctrl+H)" aria-label="Replace"><Icon name="replace" /><span className="label">Replace</span></button>
             </div>
           </>
         )}
