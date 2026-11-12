@@ -288,33 +288,17 @@ function styledDefinition(doc: PrimeDocument, kind: ListKind, styleId: string, a
 }
 
 /**
- * A bullet or number from the library for the selected paragraphs, at the level each is on (a sub-list
- * item gets the symbol at its level). A list right above with the same format continues; otherwise a
- * new list starts (numbers from 1).
+ * A bullet or number from the library. With the cursor in a list item: a sub-list in that style, a level
+ * deeper. Otherwise the selected paragraphs, at the level each is on (select a list's items to change
+ * its style). A list right above with the same format continues; otherwise a new list starts (numbers
+ * from 1).
  */
 export function applyListStyle(doc: () => PrimeDocument, kind: ListKind, styleId: string): Command {
   return (state, dispatch) => {
-    let paras = paragraphs(state);
-    // The cursor in a list item: the whole list at that level changes (its items above and below, past
-    // deeper sub-items, up to the list's end), as in Word.
-    const cur = paras.length === 1 ? paras[0].node.attrs.props.list : undefined;
-    if (cur) {
-      const $p = state.doc.resolve(paras[0].pos);
-      const parent = $p.parent, index = $p.index(), base = $p.start();
-      const run: { node: Node; pos: number }[] = [];
-      const starts: number[] = [];
-      parent.forEach((_, o) => starts.push(base + o));
-      const offsetOf = (i: number) => starts[i];
-      const member = (n: Node) => {
-        const l = n.type.name === "paragraph" ? n.attrs.props?.list : undefined;
-        if (!l) return "stop";
-        const lv = l.level ?? 0, at = cur.level ?? 0;
-        return lv > at ? "skip" : lv === at && l.numId === cur.numId ? "take" : "stop";
-      };
-      for (let i = index; i >= 0; i--) { const m = member(parent.child(i)); if (m === "stop") break; if (m === "take") run.unshift({ node: parent.child(i), pos: offsetOf(i) }); }
-      for (let i = index + 1; i < parent.childCount; i++) { const m = member(parent.child(i)); if (m === "stop") break; if (m === "take") run.push({ node: parent.child(i), pos: offsetOf(i) }); }
-      paras = run;
-    }
+    const paras = paragraphs(state);
+    // The cursor in a list item: a sub-list in the chosen style, a level deeper (as the Bullets and
+    // Numbering buttons do there). Selected items keep their levels and change style.
+    const single = paras.length === 1 && paras[0].node.attrs.props.list && state.selection.$from.sameParent(state.selection.$to);
     if (!paras.length) return false;
     if (!dispatch) return true;
     const d = doc();
@@ -322,7 +306,7 @@ export function applyListStyle(doc: () => PrimeDocument, kind: ListKind, styleId
     const chosen = new Map<number, string>(); // level → numId
     const tr = state.tr;
     for (const { node, pos } of paras) {
-      const lvl = node.attrs.props.list?.level ?? 0;
+      const lvl = Math.min(8, (node.attrs.props.list?.level ?? 0) + (single ? 1 : 0));
       let numId = chosen.get(lvl);
       if (!numId) {
         const defId = styledDefinition(d, kind, styleId, lvl);
