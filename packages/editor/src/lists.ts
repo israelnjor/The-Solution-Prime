@@ -62,6 +62,53 @@ function paragraphs(state: EditorState): { node: Node; pos: number }[] {
   return out;
 }
 
+/**
+ * The list a paragraph at `pos` joins: the one right above it if that is the same kind (it continues),
+ * else a new list numbered from 1. (A second instance of the same format, restarted, as Word writes it:
+ * without the restart Word would carry on the numbers of the earlier list.)
+ */
+function listFor(state: EditorState, doc: PrimeDocument, kind: ListKind, pos: number): string {
+  const $pos = state.doc.resolve(pos);
+  const above = $pos.index() > 0 ? $pos.parent.child($pos.index() - 1) : undefined;
+  const prevId = above?.type.name === "paragraph" ? above.attrs.props?.list?.numId : undefined;
+  if (prevId && listKind(doc, prevId) === kind) return prevId;
+  const numId = ensureList(doc, kind);
+  if (kind === "bullet") return numId;
+  let used = false;
+  state.doc.descendants((n) => {
+    if (used) return false;
+    if (n.type.name === "paragraph") { used = n.attrs.props?.list?.numId === numId; return false; }
+    return true;
+  });
+  if (!used) return numId;
+  const definitionId = doc.lists.instances.find((i) => i.id === numId)!.definitionId;
+  const id = String(Math.max(0, ...doc.lists.instances.map((i) => Number(i.id)).filter(Number.isFinite)) + 1);
+  doc.lists.instances.push({
+    id, definitionId,
+    extra: [{ name: "w:lvlOverride", xml: '<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride>' }],
+  });
+  return id;
+}
+
+/**
+ * Enter in a list item: the new paragraph is the next item (ProseMirror's own split, at the end of a
+ * paragraph, starts a plain one). An empty item ends the list instead (exitEmptyListItem, before this).
+ */
+export const splitListItem: Command = (state, dispatch) => {
+  const { $from } = state.selection;
+  const para = $from.parent;
+  if (para.type.name !== "paragraph" || !para.attrs.props?.list || $from.depth < 1) return false;
+  if (dispatch) {
+    const tr = state.tr;
+    if (!state.selection.empty) tr.deleteSelection();
+    const marks = state.storedMarks ?? (state.selection.$to.parentOffset ? $from.marks() : null);
+    tr.split(tr.mapping.map(state.selection.from), 1, [{ type: para.type, attrs: para.attrs }]);
+    if (marks) tr.ensureMarks(marks);
+    dispatch(tr.scrollIntoView());
+  }
+  return true;
+};
+
 /** Turns the selected paragraphs into a list of `kind`, or back into plain paragraphs if they already are. */
 export function toggleList(doc: () => PrimeDocument, kind: ListKind): Command {
   return (state, dispatch) => {
@@ -69,7 +116,7 @@ export function toggleList(doc: () => PrimeDocument, kind: ListKind): Command {
     if (!paras.length) return false;
     if (!dispatch) return true;
     const all = paras.every((p) => listKind(doc(), p.node.attrs.props.list?.numId) === kind);
-    const numId = all ? undefined : ensureList(doc(), kind);
+    const numId = all ? undefined : listFor(state, doc(), kind, paras[0].pos);
     const tr = state.tr;
     for (const { node, pos } of paras) {
       const props = { ...node.attrs.props };

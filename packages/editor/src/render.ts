@@ -613,7 +613,21 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
       update(view, prev) {
         const looks = key.getState(view.state)!.looks;
         if (looks === key.getState(prev)?.looks) return;
-        timed("styles.restyle", () => { for (const p of views) p.show(looks.get(p.node)); });
+        timed("styles.restyle", () => {
+          for (const p of views) {
+            let look = looks.get(p.node);
+            // ProseMirror keeps a paragraph's view without telling it when the new document has an equal
+            // (but new) node there — the paragraph before a split by Enter. Its look is under the new
+            // node: find it, or the paragraph would lose its formatting (a list item its indent).
+            if (!look && p.dom.isConnected) {
+              try {
+                const now = view.state.doc.nodeAt(view.posAtDOM(p.contentDOM, 0) - 1);
+                if (now && now !== p.node && now.type === p.node.type) { p.node = now; look = looks.get(now); }
+              } catch { /* not in the document any more */ }
+            }
+            p.show(look);
+          }
+        });
       },
     }),
   });
