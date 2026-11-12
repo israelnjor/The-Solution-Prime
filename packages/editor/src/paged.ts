@@ -289,7 +289,9 @@ function layoutClasses(doc: Node, from = 0, to = doc.content.size): Decoration[]
     if (columns && !inColumns[si]) out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-span" }, { layoutClass: true }));
     const next = doc.maybeChild(index + 1);
     const following = next?.type.name === "section_break" ? sections[si + 1] : undefined;
-    if (node.type.name === "paragraph" && node.content.size === 0 && following?.breakType === "continuous" && index > 0) {
+    if (node.type.name === "paragraph" && node.content.size === 0 && following?.breakType === "continuous" && index > 0
+      // (a section on other paper starts a new page: its break holder is an ordinary empty paragraph)
+      && (following.pageWidth ?? 612) === (sections[si].pageWidth ?? 612) && (following.pageHeight ?? 792) === (sections[si].pageHeight ?? 792)) {
       out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-break-holder" }, { layoutClass: true }));
     }
   });

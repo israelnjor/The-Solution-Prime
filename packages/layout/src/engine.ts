@@ -1534,6 +1534,12 @@ export class LayoutEngine {
       return { ...span, y1: fy - f.dist.top, y2: fy + height + f.dist.bottom };
     };
 
+    // Whether section i+1 continues on the page section i ends on (a continuous break, same paper).
+    const continuesAfter = (si: number): boolean => {
+      const next = this.doc.sections[si + 1]?.props, cur = this.doc.sections[si]?.props;
+      return !!next && !!cur && next.breakType === "continuous"
+        && (next.pageWidth ?? 612) === (cur.pageWidth ?? 612) && (next.pageHeight ?? 792) === (cur.pageHeight ?? 792);
+    };
     let topIndex = 0;
     this.doc.sections.forEach((section, si) => {
       const carried = prev;
@@ -1541,8 +1547,12 @@ export class LayoutEngine {
       footers = { ...footers, ...section.footers };
       // A continuous section's first page is the one it starts on (already begun): its next page is
       // its second (no "first page" header there).
-      sectionPages = si > 0 && section.props.breakType === "continuous" ? 1 : 0;
-      if (si === 0 || section.props.breakType !== "continuous") {
+      // A continuous section with another paper size or orientation cannot share the page: it starts a
+      // new one (as Word does).
+      const resized = si > 0 && !!page && ((section.props.pageWidth ?? 612) !== page.width || (section.props.pageHeight ?? 792) !== page.height);
+      const continuous = si > 0 && section.props.breakType === "continuous" && !resized;
+      sectionPages = continuous ? 1 : 0;
+      if (!continuous) {
         // "Even page" and "odd page" sections start on the next page of that kind: a blank page of the
         // previous section between, when needed (as Word does).
         const parity = section.props.breakType === "evenPage" ? 0 : section.props.breakType === "oddPage" ? 1 : undefined;
@@ -1595,7 +1605,7 @@ export class LayoutEngine {
         const rp = box.rp;
         // An empty paragraph that only holds a continuous section break takes no room (Word lays it out
         // with no height: the next section continues right after the text before it).
-        if (bi === boxes.length - 1 && bi > 0 && box.para.content.length === 0 && this.doc.sections[si + 1]?.props.breakType === "continuous") return;
+        if (bi === boxes.length - 1 && bi > 0 && box.para.content.length === 0 && continuesAfter(si)) return;
         // A drop cap takes no room of its own: its letter is placed with the next paragraph.
         if (rp.dropCap && box.lines.length && boxes[bi + 1]?.kind === "para") {
           dropCap = { box, ...rp.dropCap };
@@ -1775,7 +1785,7 @@ export class LayoutEngine {
       // A section with columns ends: balanced before a continuous section break (as Word does), lines
       // between its columns, and what follows starts below the longest column.
       if (cols) {
-        if (this.doc.sections[si + 1]?.props.breakType === "continuous") balance();
+        if (continuesAfter(si)) balance();
         colBottom = Math.max(colBottom, y);
         closeSet();
         y = colBottom;
