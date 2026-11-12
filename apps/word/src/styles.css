@@ -928,3 +928,13 @@ button.link:hover { text-decoration: underline; }
 .project-card-band { position: absolute; inset: 0 0 auto 0; height: 6px; background: var(--project-band); }
 .project-colors button { background: var(--project-band); border: none; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.12); }
 .project-colors button.on { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1d2433; }
+
+/* Home → Bullets ▾ / Numbering ▾ (ListLibrary.tsx): the list library. */
+.list-library { display: inline-flex; }
+.toolbar button.list-more { min-width: 0; padding: 0 3px; margin-left: -2px; font-size: 10px; }
+.list-popup { position: fixed; z-index: 60; display: grid; gap: 6px; padding: 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
+.list-popup.bullet { grid-template-columns: repeat(3, 56px); }
+.list-popup.number { grid-template-columns: repeat(2, 104px); }
+.list-popup button { height: auto !important; min-height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff !important; font-size: 18px; color: #222; cursor: pointer; }
+.list-popup.number button { flex-direction: column; align-items: flex-start; padding: 6px 12px; font-size: 12px; line-height: 1.5; }
+.list-popup button:hover, .list-popup button:focus-visible { background: #e9edf3 !important; border-color: var(--accent); }

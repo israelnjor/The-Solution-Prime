@@ -1,5 +1,5 @@
 import {
-  addColumn, addRow, indentParagraphs, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
+  addColumn, addRow, applyListStyle, indentParagraphs, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
   setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
   setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
@@ -19,6 +19,7 @@ import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
 import { RecentMenu } from "./RecentList";
 import { ShareMenu } from "./ShareMenu";
+import { ListLibrary } from "./ListLibrary";
 import type { ShareFormat } from "./share";
 
 export const FONTS = ["Aptos", "Arial", "Book Antiqua", "Calibri", "Calibri Light", "Cambria", "Candara", "Century Gothic",
@@ -328,7 +329,9 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               ))}
               <span className="divider" aria-hidden="true" />
               <button className={list === "bullet" ? "on" : ""} onClick={run(toggleList(docRef, "bullet"))} title="Bullets" aria-label="Bullets"><Icon name="bullets" /></button>
+              <ListLibrary kind="bullet" onPick={(id) => run(applyListStyle(docRef, "bullet", id))()} />
               <button className={list === "number" ? "on" : ""} onClick={run(toggleList(docRef, "number"))} title="Numbering" aria-label="Numbering"><Icon name="numbers" /></button>
+              <ListLibrary kind="number" onPick={(id) => run(applyListStyle(docRef, "number", id))()} />
               <button onClick={run(indentParagraphs(-1))} title="Decrease indent" aria-label="Decrease indent">⇤</button>
               <button onClick={run(indentParagraphs(1))} title="Increase indent" aria-label="Increase indent">⇥</button>
             </div>

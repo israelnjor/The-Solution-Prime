@@ -247,3 +247,112 @@ export const exitEmptyListItem: Command = (state, dispatch) => {
   }
   return true;
 };
+
+/** The bullet library (Home → Bullets ▾): the symbol a level shows. */
+export const BULLET_STYLES: { id: string; text: string; font?: string }[] = [
+  { id: "disc", text: "•" }, { id: "circle", text: "○", font: "Segoe UI Symbol" }, { id: "square", text: "■", font: "Segoe UI Symbol" },
+  { id: "diamond", text: "◆", font: "Segoe UI Symbol" }, { id: "diamonds", text: "❖", font: "Segoe UI Symbol" }, { id: "arrow", text: "➢", font: "Segoe UI Symbol" },
+  { id: "check", text: "✓", font: "Segoe UI Symbol" }, { id: "star", text: "★", font: "Segoe UI Symbol" }, { id: "dash", text: "–" },
+];
+
+/** The numbering library (Home → Numbering ▾): the number format and the text around it. */
+export const NUMBER_STYLES: { id: string; format: string; before?: string; after: string; label: string }[] = [
+  { id: "decimal", format: "decimal", after: ".", label: "1. 2. 3." },
+  { id: "decimal-paren", format: "decimal", after: ")", label: "1) 2) 3)" },
+  { id: "decimal-both", format: "decimal", before: "(", after: ")", label: "(1) (2) (3)" },
+  { id: "upper-roman", format: "upperRoman", after: ".", label: "I. II. III." },
+  { id: "upper-letter", format: "upperLetter", after: ".", label: "A. B. C." },
+  { id: "lower-letter", format: "lowerLetter", after: ")", label: "a) b) c)" },
+  { id: "lower-roman", format: "lowerRoman", after: ".", label: "i. ii. iii." },
+];
+
+/** A list format from the library: the usual levels, with the chosen symbol or number at `at`. */
+function styledDefinition(doc: PrimeDocument, kind: ListKind, styleId: string, at: number): string {
+  const tag = `prime-${kind}-${styleId}-${at}`;
+  let def = doc.lists.definitions.find((d) => d.extra?.some((x) => x.xml.includes(`w:val="${tag}"`)));
+  if (!def) {
+    const levels = Array.from({ length: 9 }, (_, i) => level(i, kind));
+    const base = levels[at];
+    if (kind === "bullet") {
+      const b = BULLET_STYLES.find((s) => s.id === styleId) ?? BULLET_STYLES[0];
+      levels[at] = { ...base, text: b.text, run: b.font ? { font: { ascii: b.font, hAnsi: b.font } } : undefined };
+    } else {
+      const n = NUMBER_STYLES.find((s) => s.id === styleId) ?? NUMBER_STYLES[0];
+      levels[at] = { ...base, format: n.format, text: `${n.before ?? ""}%${at + 1}${n.after}` };
+    }
+    const id = String(Math.max(0, ...doc.lists.definitions.map((d) => Number(d.id)).filter(Number.isFinite)) + 1);
+    def = { id, levels, extra: [{ name: "w:name", xml: `<w:name w:val="${tag}"/>` }, { name: "w:multiLevelType", xml: '<w:multiLevelType w:val="hybridMultilevel"/>' }] };
+    doc.lists.definitions.push(def);
+  }
+  return def.id;
+}
+
+/**
+ * A bullet or number from the library for the selected paragraphs, at the level each is on (a sub-list
+ * item gets the symbol at its level). A list right above with the same format continues; otherwise a
+ * new list starts (numbers from 1).
+ */
+export function applyListStyle(doc: () => PrimeDocument, kind: ListKind, styleId: string): Command {
+  return (state, dispatch) => {
+    let paras = paragraphs(state);
+    // The cursor in a list item: the whole list at that level changes (its items above and below, past
+    // deeper sub-items, up to the list's end), as in Word.
+    const cur = paras.length === 1 ? paras[0].node.attrs.props.list : undefined;
+    if (cur) {
+      const $p = state.doc.resolve(paras[0].pos);
+      const parent = $p.parent, index = $p.index(), base = $p.start();
+      const run: { node: Node; pos: number }[] = [];
+      const starts: number[] = [];
+      parent.forEach((_, o) => starts.push(base + o));
+      const offsetOf = (i: number) => starts[i];
+      const member = (n: Node) => {
+        const l = n.type.name === "paragraph" ? n.attrs.props?.list : undefined;
+        if (!l) return "stop";
+        const lv = l.level ?? 0, at = cur.level ?? 0;
+        return lv > at ? "skip" : lv === at && l.numId === cur.numId ? "take" : "stop";
+      };
+      for (let i = index; i >= 0; i--) { const m = member(parent.child(i)); if (m === "stop") break; if (m === "take") run.unshift({ node: parent.child(i), pos: offsetOf(i) }); }
+      for (let i = index + 1; i < parent.childCount; i++) { const m = member(parent.child(i)); if (m === "stop") break; if (m === "take") run.push({ node: parent.child(i), pos: offsetOf(i) }); }
+      paras = run;
+    }
+    if (!paras.length) return false;
+    if (!dispatch) return true;
+    const d = doc();
+    const selected = new Set(paras.map((p) => p.pos));
+    const chosen = new Map<number, string>(); // level → numId
+    const tr = state.tr;
+    for (const { node, pos } of paras) {
+      const lvl = node.attrs.props.list?.level ?? 0;
+      let numId = chosen.get(lvl);
+      if (!numId) {
+        const defId = styledDefinition(d, kind, styleId, lvl);
+        const instances = d.lists.instances.filter((i) => i.definitionId === defId);
+        const above = listAbove(state.doc, pos, lvl);
+        numId = above && instances.some((i) => i.id === above) ? above : undefined;
+        if (!numId) {
+          // An instance no paragraph outside the selection uses, else a new one (restarted).
+          const used = new Set<string>();
+          state.doc.descendants((n, p) => {
+            if (n.type.name !== "paragraph") return true;
+            if (!selected.has(p) && n.attrs.props?.list?.numId) used.add(n.attrs.props.list.numId);
+            return false;
+          });
+          numId = instances.find((i) => !used.has(i.id))?.id;
+          if (!numId) {
+            numId = String(Math.max(0, ...d.lists.instances.map((i) => Number(i.id)).filter(Number.isFinite)) + 1);
+            d.lists.instances.push({
+              id: numId, definitionId: defId,
+              ...(instances.length ? { extra: Array.from({ length: 9 }, (_, l) => ({ name: "w:lvlOverride", xml: `<w:lvlOverride w:ilvl="${l}"><w:startOverride w:val="1"/></w:lvlOverride>` })) } : {}),
+            });
+          }
+        }
+        chosen.set(lvl, numId);
+      }
+      const props = { ...node.attrs.props, list: { numId, level: lvl } };
+      delete props.indent;
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, props });
+    }
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
