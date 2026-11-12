@@ -72,7 +72,6 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
   .toolbar .style-select { min-width: 0; width: 92px; }
   .toolbar .font-select { width: 104px; }
   .toolbar .size-select { width: 52px; }
-  .toolbar .highlight-select { width: 92px; }
   .toolbar .spacing-select { width: 84px; }
   .toolbar .border-select { width: 84px; }
 }
@@ -80,7 +79,6 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .style-select { min-width: 130px; }
 .font-select { width: 150px; }
 .size-select { width: 64px; }
-.highlight-select { width: 110px; }
 .fmt-bold { font-weight: 700; }
 .fmt-italic { font-style: italic; }
 .fmt-underline { text-decoration: underline; }
@@ -938,3 +936,17 @@ button.link:hover { text-decoration: underline; }
 .list-popup button { height: auto !important; min-height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff !important; font-size: 18px; color: #222; cursor: pointer; }
 .list-popup.number button { flex-direction: column; align-items: flex-start; padding: 6px 12px; font-size: 12px; line-height: 1.5; }
 .list-popup button:hover, .list-popup button:focus-visible { background: #e9edf3 !important; border-color: var(--accent); }
+
+/* Home → Highlight (HighlightPicker.tsx): the highlighter button and its palette. */
+.highlight-picker { display: inline-flex; align-items: center; }
+.toolbar button.highlight-main { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0 6px; }
+.highlight-main .ab { font-weight: 600; line-height: 1; }
+.highlight-main .bar { width: 16px; height: 4px; border-radius: 1px; border: 1px solid rgba(0, 0, 0, 0.15); }
+.highlight-popup { position: fixed; z-index: 60; width: 212px; padding: 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
+.highlight-popup p { margin: 2px 2px 6px; font-size: 12px; color: var(--muted); }
+.highlight-popup .swatches { display: grid; grid-template-columns: repeat(6, 26px); gap: 6px; margin-bottom: 8px; }
+.highlight-popup .swatch { width: 26px; height: 22px !important; min-width: 0; padding: 0; border: 1px solid rgba(0, 0, 0, 0.18); border-radius: 3px; cursor: pointer; }
+.highlight-popup .swatch:hover, .highlight-popup .swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.highlight-popup .wide { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 30px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff !important; font: inherit; font-size: 13px; cursor: pointer; box-sizing: border-box; }
+.highlight-popup .wide:hover { background: #e9edf3 !important; }
+.highlight-popup .more input { width: 36px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }

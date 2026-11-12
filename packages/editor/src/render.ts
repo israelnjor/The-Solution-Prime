@@ -41,7 +41,7 @@ export function runCss(r: Partial<ResolvedRun>): string {
     if (u) css.push(`text-decoration-style:${u.startsWith("double") ? "double" : u.startsWith("dotted") ? "dotted" : u.startsWith("dash") ? "dashed" : u.startsWith("wav") ? "wavy" : "solid"}`);
     if (u && /thick|Heavy/.test(u)) css.push("text-decoration-thickness:2px");
   }
-  if (r.highlight) css.push(`background:${HIGHLIGHT[r.highlight] ?? "transparent"}`);
+  if (r.highlight) css.push(`background:${HIGHLIGHT[r.highlight] ?? (r.highlight.startsWith("#") ? r.highlight : "transparent")}`);
   // Raised or lowered by the layout's amounts (a third of the full size up, 0.14 down: in the run's own
   // 65% size, 0.51em and 0.215em). Runs have no line height of their own (styles.css), so this does
   // not make the line taller; position:relative did the same but made each run a layer of its own,

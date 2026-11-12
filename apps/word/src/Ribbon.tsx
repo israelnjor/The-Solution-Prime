@@ -1,7 +1,7 @@
 import {
   addColumn, addRow, applyListStyle, indentParagraphs, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
-  setHighlight, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
+  setHighlightColor, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
   setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
   changeCase, type CaseMode, clearFormatting, growFont, toggleVertAlign, type CitationStyle, insertCitation, readSources,
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
@@ -19,6 +19,7 @@ import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
 import { RecentMenu } from "./RecentList";
 import { ShareMenu } from "./ShareMenu";
+import { HighlightPicker } from "./HighlightPicker";
 import { ListLibrary } from "./ListLibrary";
 import type { ShareFormat } from "./share";
 
@@ -29,8 +30,6 @@ const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 7
 /** Raised by Ctrl+K in the editor; the ribbon opens its link box. */
 export const LINK_EVENT = "prime-word:link";
 
-const HIGHLIGHTS: [string, string][] = [["yellow", "#ffff00"], ["green", "#00ff00"], ["cyan", "#00ffff"], ["magenta", "#ff00ff"],
-  ["red", "#ff0000"], ["blue", "#0000ff"], ["lightGray", "#c0c0c0"]];
 
 type Tab = "file" | "home" | "insert" | "design" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture" | "outlining";
 /** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+S, Alt+R, Alt+W. */
@@ -314,10 +313,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <span style={{ borderBottom: `3px solid #${effective?.color ?? "000000"}` }}>A</span>
                 <input type="color" value={`#${(effective?.color ?? "000000").toLowerCase()}`} onChange={(e) => run(setColor(e.target.value.slice(1)))()} />
               </label>
-              <select value={effective?.highlight ?? ""} onChange={(e) => run(setHighlight(e.target.value || undefined))()} title="Highlight" className="highlight-select">
-                <option value="">Highlight</option>
-                {HIGHLIGHTS.map(([name, css]) => <option key={name} value={name} style={{ background: css }}>{name}</option>)}
-              </select>
+              <HighlightPicker current={effective?.highlight} onPick={(hex) => run(setHighlightColor(hex))()} />
               <button onClick={onFontDialog} title="Font settings (Ctrl+D)" aria-label="Font settings" className="launcher">⋯</button>
             </div>
             {/* The paragraph controls start the second row, with alignment first. */}

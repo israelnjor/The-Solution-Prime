@@ -212,7 +212,7 @@ class Renderer {
         width = 0;
       }
       if (seg.highlight) {
-        out.drawRectangle({ x, y: y - size * 0.22, width, height: size * 1.1, color: color(HIGHLIGHT[seg.highlight]) });
+        out.drawRectangle({ x, y: y - size * 0.22, width, height: size * 1.1, color: color(HIGHLIGHT[seg.highlight] ?? seg.highlight.replace("#", "")) });
       }
       if (piece.text.trim()) {
         try {

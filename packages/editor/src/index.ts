@@ -10,7 +10,7 @@ export {
 } from "./floats.js";
 export { deleteCurrentPage, deletePages, pageStarts, selectedPages } from "./delete-pages.js";
 export { PAGE_GAP, pageAt, pageTops, pagination, paginationKey, type PagedOptions, mark, sectionOffsets, timed } from "./paged.js";
-export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
+export { HIGHLIGHT_COLORS, runAtSelection, setColor, setFont, setFontSize, setHighlight, setHighlightColor, updateRun } from "./commands.js";
 export { backspaceAtParagraphStart, changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, splitParagraph, toggleList, applyListStyle, BULLET_STYLES, NUMBER_STYLES } from "./lists.js";
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";
 export { caretBetweenAtoms, insertImage, insertPageBreak, linkAt, setLink } from "./insert.js";

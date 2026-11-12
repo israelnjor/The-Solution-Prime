@@ -93,6 +93,28 @@ export const setColor = (hex: string | undefined): Command => updateRun((p) => (
 /** Highlight colour (Word's named highlight colours), or undefined for none. */
 export const setHighlight = (name: string | undefined): Command => updateRun((p) => ({ ...p, highlight: name }));
 
+/** Word's highlighter colours (w:highlight), by name. */
+export const HIGHLIGHT_COLORS: [name: string, hex: string, label: string][] = [
+  ["yellow", "FFFF00", "Yellow"], ["green", "00FF00", "Bright Green"], ["cyan", "00FFFF", "Turquoise"], ["magenta", "FF00FF", "Pink"],
+  ["blue", "0000FF", "Blue"], ["red", "FF0000", "Red"], ["darkBlue", "000080", "Dark Blue"], ["darkCyan", "008080", "Teal"],
+  ["darkGreen", "008000", "Green"], ["darkMagenta", "800080", "Violet"], ["darkRed", "800000", "Dark Red"], ["darkYellow", "808000", "Dark Yellow"],
+  ["darkGray", "808080", "Gray 50%"], ["lightGray", "C0C0C0", "Gray 25%"], ["black", "000000", "Black"],
+];
+
+/**
+ * Highlight in any colour (RRGGBB), or undefined for none. Word's highlighter colours are written as
+ * highlights; any other colour as character shading (Word's way of giving text any background), so
+ * the file opens in Word with the same colour.
+ */
+export const setHighlightColor = (hex: string | undefined): Command => updateRun((p) => {
+  const out = { ...p };
+  delete out.highlight;
+  delete out.shading;
+  if (!hex) return out;
+  const named = HIGHLIGHT_COLORS.find(([, h]) => h === hex.toUpperCase());
+  return named ? { ...out, highlight: named[0] } : { ...out, shading: { val: "clear", color: "auto", fill: hex.toUpperCase() } };
+});
+
 /** Direct run formatting at the start of the selection (for toolbar state). */
 export function runAtSelection(state: EditorState): RunProps {
   const marks = state.storedMarks ?? state.selection.$from.marks();

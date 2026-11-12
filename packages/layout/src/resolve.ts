@@ -109,6 +109,12 @@ function letters(n: number): string {
   return ch.repeat(Math.floor((n - 1) / 26) + 1);
 }
 
+/** Character shading as a highlight colour ("#RRGGBB"), or undefined for none ("auto", or no fill). */
+function shadeOf(shd: Record<string, string> | undefined): string | undefined {
+  const fill = shd?.fill;
+  return fill && /^[0-9A-Fa-f]{6}$/.test(fill) && shd?.val !== "nil" ? `#${fill.toUpperCase()}` : undefined;
+}
+
 function formatNumber(n: number, format = "decimal"): string {
   switch (format) {
     case "lowerLetter": return letters(n);
@@ -234,7 +240,8 @@ export class Resolver {
       underline: !!p.underline && p.underline.val !== "none",
       ...(p.underline?.val && !["single", "none", "words"].includes(p.underline.val) ? { underlineStyle: p.underline.val } : {}),
       strike: !!p.strike || !!p.doubleStrike,
-      highlight: p.highlight && p.highlight !== "none" ? p.highlight : undefined,
+      // A named highlight, else character shading (any colour: "#RRGGBB"); Word draws the highlight on top.
+      highlight: p.highlight && p.highlight !== "none" ? p.highlight : shadeOf(p.shading),
       ...(p.charSpacing ? { charSpacing: p.charSpacing } : {}),
     };
   }
@@ -270,6 +277,7 @@ export class Resolver {
     }
     if (r.strike !== undefined || r.doubleStrike !== undefined) out.strike = !!r.strike || !!r.doubleStrike;
     if (r.highlight !== undefined) out.highlight = r.highlight === "none" ? undefined : r.highlight;
+    else if (r.shading !== undefined && !(out.highlight && !out.highlight.startsWith("#"))) out.highlight = shadeOf(r.shading);
     if (r.vertAlign !== undefined) out.vertAlign = r.vertAlign === "baseline" ? undefined : r.vertAlign;
     if (r.charSpacing !== undefined) out.charSpacing = r.charSpacing || undefined;
     return out;
