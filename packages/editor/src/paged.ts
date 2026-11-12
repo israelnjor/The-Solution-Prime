@@ -282,10 +282,15 @@ function layoutClasses(doc: Node, from = 0, to = doc.content.size): Decoration[]
   doc.forEach((node) => { if (node.type.name === "section_break") sections.push(node.attrs.section?.props ?? {}); });
   sections.push(doc.attrs.section?.props ?? {});
   const { columns, inColumns } = screenColumns(sections);
+  // Sections with their own page width or margins: their blocks' text column (see sectionOffsets;
+  // paragraph and table margins add these variables).
+  const offsets = sectionOffsets(sections);
   let si = 0;
   doc.forEach((node, pos, index) => {
     if (node.type.name === "section_break") { si++; return; }
     if (pos + node.nodeSize < from || pos > to) return;
+    const o = offsets[si];
+    if (o.left || o.right) out.push(Decoration.node(pos, pos + node.nodeSize, { style: `--pw-sx:${o.left}pt;--pw-sr:${o.right}pt` }, { layoutClass: true }));
     if (columns && !inColumns[si]) out.push(Decoration.node(pos, pos + node.nodeSize, { class: "pw-span" }, { layoutClass: true }));
     const next = doc.maybeChild(index + 1);
     const following = next?.type.name === "section_break" ? sections[si + 1] : undefined;
@@ -307,20 +312,6 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
   // columns (a page gap ends them); a column break typed in the text still breaks (styles.css).
   out.push(...layoutClasses(doc));
   for (const pos of hyphens) out.push(Decoration.widget(pos, softHyphen, { side: -1, key: "shy", marks: [] }));
-  // Sections with their own page width or margins: their blocks' text column (see sectionOffsets;
-  // paragraph and table margins add these variables).
-  const props: SectionProps[] = [];
-  doc.forEach((node) => { if (node.type.name === "section_break") props.push(node.attrs.section?.props ?? {}); });
-  props.push(doc.attrs.section?.props ?? {});
-  const offsets = sectionOffsets(props);
-  if (offsets.some((o) => o.left || o.right)) {
-    let si = 0;
-    doc.forEach((node, pos) => {
-      if (node.type.name === "section_break") { si++; return; }
-      const o = offsets[si];
-      if (o.left || o.right) out.push(Decoration.node(pos, pos + node.nodeSize, { style: `--pw-sx:${o.left}pt;--pw-sr:${o.right}pt` }));
-    });
-  }
   if (base) {
     const resolver = new Resolver(base);
     for (const f of floats) {

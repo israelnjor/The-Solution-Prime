@@ -16,14 +16,15 @@ in self-test runs). `align` checks that every page's content starts at its sheet
 
 ## Results (2026-11-01, 145 pages)
 
-| | Before | After |
-|---|---|---|
-| Keystroke, median / worst | 659 ms / 2.6 s | **28 ms / 46 ms** |
-| Long tasks while typing | ~250 (100–450 ms each) | **none** |
-| After a pause | repeated 2 s freezes for seconds | re-layout and page corrections, 50–270 ms each, ~0.8 s in all |
-| Page alignment | pages after ~56 misaligned (up to 4 pages off) | all within 1 px |
+|                           | Before                                         | After                                                          |
+| ------------------------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| Keystroke, median / worst | 659 ms / 2.6 s                                 | **28 ms / 46 ms**                                        |
+| Long tasks while typing   | ~250 (100–450 ms each)                        | **none**                                                 |
+| After a pause             | repeated 2 s freezes for seconds               | re-layout and page corrections, 50–270 ms each, ~0.8 s in all |
+| Page alignment            | pages after ~56 misaligned (up to 4 pages off) | all within 1 px                                                |
 
 Causes fixed:
+
 1. **Page-gap fitting** re-measured the whole document once per page (a style change between every
    read). Now one measuring pass; later positions follow arithmetically from earlier sizes.
 2. **Paragraph formatting** was rebuilt for all 1,500 paragraphs on every keystroke; text-only edits now
@@ -62,12 +63,12 @@ as decorations (378 in all, none at the top level), and restyles paragraphs afte
 List-label widgets were also keyed by position, so every label after the cursor was redrawn on each
 keystroke; they are keyed by their content now.
 
-| 145 pages | Before | After |
-|---|---|---|
-| Applying a keystroke (`dispatch`) | ~31 ms | **~3.6 ms** |
-| Fitting the pages, per keystroke (median) | — | 2 ms |
-| Keystroke until painted, median | 63–75 ms | **43–45 ms** |
-| Page alignment | within 1 px | within 1 px |
+| 145 pages                                 | Before      | After               |
+| ----------------------------------------- | ----------- | ------------------- |
+| Applying a keystroke (`dispatch`)       | ~31 ms      | **~3.6 ms**   |
+| Fitting the pages, per keystroke (median) | —          | 2 ms                |
+| Keystroke until painted, median           | 63–75 ms   | **43–45 ms** |
+| Page alignment                            | within 1 px | within 1 px         |
 
 The rest of each keystroke is the browser laying out and painting a 145-page editable page (our
 code now accounts for ~11 ms of the 44). Timings on this computer vary by ±20% between runs (and a
@@ -79,11 +80,11 @@ pages kept out of the browser's layout while off screen, a larger change.
 With tabs drawn at their stops (as the layout places them) instead of the browser's fixed tab width,
 the screen and the pages agree on far more lines, so fitting has less to correct:
 
-| 145 pages | Before | After |
-|---|---|---|
+| 145 pages                               | Before              | After                       |
+| --------------------------------------- | ------------------- | --------------------------- |
 | Keystroke until painted, median / worst | 43–45 ms / ~150 ms | **28–29 ms / 40 ms** |
-| One-off fitting pass after a layout | ~425 ms | ~160 ms |
-| Page alignment | within 1 px | within 1 px |
+| One-off fitting pass after a layout     | ~425 ms             | ~160 ms                     |
+| Page alignment                          | within 1 px         | within 1 px                 |
 
 ## A 480-page converted book (2026-11-04)
 
@@ -104,13 +105,13 @@ keystroke, and every pause froze the app for about a second. Four causes, each n
    the app they were not converted at all (pdf.js hands over bitmaps there). Now: photographs as JPEG,
    others as filtered PNG, at most 200 dpi at their printed size — 19.9 MB, all 531 kept.
 
-| 480-page book | Before | After |
-|---|---|---|
-| Applying a keystroke | ~21 ms | **~3.7 ms** |
-| Keystroke until painted, median | 71 ms | **50–53 ms** |
-| Layout after a pause | ~584 ms | **~180 ms** |
-| Spell check after a pause | ~282 ms | **3 ms** |
-| Pictures in the converted file | 68 MB (none, when converted in the app) | **19.9 MB** |
+| 480-page book                   | Before                                  | After               |
+| ------------------------------- | --------------------------------------- | ------------------- |
+| Applying a keystroke            | ~21 ms                                  | **~3.7 ms**   |
+| Keystroke until painted, median | 71 ms                                   | **50–53 ms** |
+| Layout after a pause            | ~584 ms                                 | **~180 ms**   |
+| Spell check after a pause       | ~282 ms                                 | **3 ms**      |
+| Pictures in the converted file  | 68 MB (none, when converted in the app) | **19.9 MB**   |
 
 The 145-page document gained too: 18–19 ms a keystroke (was 26–29). What remains on the book is the
 browser repainting a 480-page editable page; keeping off-screen pages out of its layout is the next step.
@@ -134,12 +135,12 @@ the screen's corrections to the page breaks ("fitting", paged.ts) were reworked:
    previous page's) where it was; the next layout waits for a real pause after our own work, longer
    when layouts are slow.
 
-| 855-page book | Before | After |
-|---|---|---|
-| Keystroke until painted, median / worst | 1,043 ms / seconds | **120–133 ms / ~190 ms** |
-| Layouts while typing 40 characters | 22 | **1** |
-| Corrections when opened (rounds) | 726 (never settled) | **680 in 1 round** |
-| Pages off their sheet afterwards, worst | 823 pages, hundreds of px | **within 2.5 px** |
+| 855-page book                           | Before                    | After                           |
+| --------------------------------------- | ------------------------- | ------------------------------- |
+| Keystroke until painted, median / worst | 1,043 ms / seconds        | **120–133 ms / ~190 ms** |
+| Layouts while typing 40 characters      | 22                        | **1**                     |
+| Corrections when opened (rounds)        | 726 (never settled)       | **680 in 1 round**        |
+| Pages off their sheet afterwards, worst | 823 pages, hundreds of px | **within 2.5 px**         |
 
 Corrections on the generated 145-page document fell from 455 to 56 (it is back to 20 ms a keystroke).
 
@@ -147,13 +148,13 @@ Corrections on the generated 145-page document fell from 455 to 56 (it is back t
 
 Measured with the DevTools protocol (a JS CPU profile, then a full browser trace) while typing:
 
-| Cause | Fix | Book, per keystroke |
-|---|---|---|
-| React measured the selection across the whole focused editor on every render (status bar, ribbon) | in documents over 300,000 characters, the ribbon and status bar update after a 200 ms pause in typing | −30 ms |
-| ProseMirror's DecorationSet.create scanned every decoration once per top-level block (9,778 × thousands) | a linear, sorted build at the top level (render.ts) | ~1 s off each rebuild after a pause |
-| Fitting measured all 855 page spacers after every keystroke | after an edit, only the first spacer after it is resized (fastFit); a full fit only if the page now overflows | −25 ms |
-| 855 page sheets, masks and header/footer boxes, all positioned | only the pages near the screen are drawn (PageSheets) | no change measured (kept: less work while scrolling) |
-| Superscripts as `position:relative` (a layer each) | `vertical-align` (runs have no line height of their own) | no change measured (kept) |
+| Cause                                                                                                     | Fix                                                                                                           | Book, per keystroke                                  |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| React measured the selection across the whole focused editor on every render (status bar, ribbon)         | in documents over 300,000 characters, the ribbon and status bar update after a 200 ms pause in typing         | −30 ms                                              |
+| ProseMirror's DecorationSet.create scanned every decoration once per top-level block (9,778 × thousands) | a linear, sorted build at the top level (render.ts)                                                           | ~1 s off each rebuild after a pause                  |
+| Fitting measured all 855 page spacers after every keystroke                                               | after an edit, only the first spacer after it is resized (fastFit); a full fit only if the page now overflows | −25 ms                                              |
+| 855 page sheets, masks and header/footer boxes, all positioned                                            | only the pages near the screen are drawn (PageSheets)                                                         | no change measured (kept: less work while scrolling) |
+| Superscripts as `position:relative` (a layer each)                                                      | `vertical-align` (runs have no line height of their own)                                                    | no change measured (kept)                            |
 
 Result: the book went from ~120 to **~80–90 ms** a keystroke (windowed Edge with GPU, as in the app: 88 ms;
 the 145-page document: 17–21 ms). Tried and dropped: `content-visibility: auto` on the editor's blocks

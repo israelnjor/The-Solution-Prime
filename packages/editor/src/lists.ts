@@ -85,7 +85,8 @@ function listFor(state: EditorState, doc: PrimeDocument, kind: ListKind, pos: nu
   const id = String(Math.max(0, ...doc.lists.instances.map((i) => Number(i.id)).filter(Number.isFinite)) + 1);
   doc.lists.instances.push({
     id, definitionId,
-    extra: [{ name: "w:lvlOverride", xml: '<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride>' }],
+    // Every level restarts (a numbered sub-list starts again at a.).
+    extra: Array.from({ length: 9 }, (_, l) => ({ name: "w:lvlOverride", xml: `<w:lvlOverride w:ilvl="${l}"><w:startOverride w:val="1"/></w:lvlOverride>` })),
   });
   return id;
 }
@@ -125,12 +126,28 @@ export function splitParagraph(doc: () => PrimeDocument): Command {
   };
 }
 
-/** Turns the selected paragraphs into a list of `kind`, or back into plain paragraphs if they already are. */
+/**
+ * Bullets / Numbering. In a list item (the cursor in one paragraph), a sub-list: the item moves a level
+ * deeper, as a bullet or a number as clicked (a bulleted sub-list under a numbered item is a bullet
+ * list one level in, and the numbers above carry on after it). Otherwise the selected paragraphs become
+ * a list of `kind`, or plain paragraphs again if they all are one already (select the items to end or
+ * convert a whole list; Backspace, Shift+Tab or Enter on an empty item also end one).
+ */
 export function toggleList(doc: () => PrimeDocument, kind: ListKind): Command {
   return (state, dispatch) => {
     const paras = paragraphs(state);
     if (!paras.length) return false;
     if (!dispatch) return true;
+    const one = paras.length === 1 ? paras[0] : undefined;
+    const cur = one?.node.attrs.props.list;
+    if (one && cur && cur.numId !== "0" && listKind(doc(), cur.numId)) {
+      const level = Math.min(8, (cur.level ?? 0) + 1);
+      const numId = listKind(doc(), cur.numId) === kind ? cur.numId : listFor(state, doc(), kind, one.pos);
+      const props = { ...one.node.attrs.props, list: { numId, level } };
+      delete props.indent;
+      dispatch(state.tr.setNodeMarkup(one.pos, undefined, { ...one.node.attrs, props }).scrollIntoView());
+      return true;
+    }
     const all = paras.every((p) => listKind(doc(), p.node.attrs.props.list?.numId) === kind);
     const numId = all ? undefined : listFor(state, doc(), kind, paras[0].pos);
     const tr = state.tr;
@@ -147,6 +164,23 @@ export function toggleList(doc: () => PrimeDocument, kind: ListKind): Command {
   };
 }
 
+/**
+ * The list a paragraph at `pos` belongs to at `level`, from the items above it: the nearest item at that
+ * level (stopping at a shallower one or a paragraph outside lists). Moving a sub-list item back up a
+ * level rejoins that list (a bullet under "2." becomes "3."), as in Word.
+ */
+export function listAbove(doc: Node, pos: number, level: number): string | undefined {
+  const $pos = doc.resolve(pos);
+  for (let i = $pos.index() - 1; i >= 0; i--) {
+    const n = $pos.parent.child(i);
+    const l = n.type.name === "paragraph" ? n.attrs.props?.list : undefined;
+    if (!l) return undefined;
+    if ((l.level ?? 0) === level) return l.numId;
+    if ((l.level ?? 0) < level) return undefined;
+  }
+  return undefined;
+}
+
 /** Moves list paragraphs one level deeper (+1) or shallower (-1); shallower than level 0 ends the list. */
 export function changeLevel(delta: 1 | -1): Command {
   return (state, dispatch) => {
@@ -158,7 +192,7 @@ export function changeLevel(delta: 1 | -1): Command {
       const props = { ...node.attrs.props };
       const lvl = (props.list.level ?? 0) + delta;
       if (lvl < 0) delete props.list;
-      else props.list = { ...props.list, level: Math.min(8, lvl) };
+      else props.list = { ...props.list, numId: (delta < 0 && listAbove(tr.doc, pos, lvl)) || props.list.numId, level: Math.min(8, lvl) };
       tr.setNodeMarkup(pos, undefined, { ...node.attrs, props });
     }
     dispatch(tr);
@@ -204,7 +238,10 @@ export const exitEmptyListItem: Command = (state, dispatch) => {
   if (!empty || para.type.name !== "paragraph" || !para.attrs.props.list || para.content.size > 0) return false;
   if (dispatch) {
     const props = { ...para.attrs.props };
-    delete props.list;
+    // In a sub-list: back up a level, into the list there (Word); at the top level: out of the list.
+    const level = (props.list.level ?? 0) - 1;
+    if (level >= 0) props.list = { ...props.list, numId: listAbove(state.doc, $from.before(), level) ?? props.list.numId, level };
+    else delete props.list;
     const tr = state.tr.setNodeMarkup($from.before(), undefined, { ...para.attrs, props });
     dispatch(tr.setSelection(TextSelection.create(tr.doc, $from.pos)));
   }

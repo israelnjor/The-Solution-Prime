@@ -2,6 +2,7 @@
 import type { Indent, ParagraphProps, Spacing } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import type { Command, EditorState } from "prosemirror-state";
+import { listAbove } from "./lists.js";
 
 function paragraphs(state: EditorState): { node: Node; pos: number }[] {
   const out: { node: Node; pos: number }[] = [];
@@ -107,7 +108,7 @@ export function indentParagraphs(delta: 1 | -1): Command {
         if (props.list) {
           const lvl = (props.list.level ?? 0) + delta;
           if (lvl < 0) delete props.list;
-          else props.list = { ...props.list, level: Math.min(8, lvl) };
+          else props.list = { ...props.list, numId: (delta < 0 && listAbove(tr.doc, pos, lvl)) || props.list.numId, level: Math.min(8, lvl) };
         } else {
           const left = props.indent?.left ?? 0;
           const next = delta > 0 ? (Math.floor(left / STEP + 1e-6) + 1) * STEP : Math.max(0, (Math.ceil(left / STEP - 1e-6) - 1) * STEP);
