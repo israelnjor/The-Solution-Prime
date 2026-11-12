@@ -11,7 +11,7 @@ export {
 export { deleteCurrentPage, deletePages, pageStarts, selectedPages } from "./delete-pages.js";
 export { PAGE_GAP, pageAt, pageTops, pagination, paginationKey, type PagedOptions, mark, sectionOffsets, timed } from "./paged.js";
 export { runAtSelection, setColor, setFont, setFontSize, setHighlight, updateRun } from "./commands.js";
-export { backspaceAtParagraphStart, changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, splitListItem, toggleList } from "./lists.js";
+export { backspaceAtParagraphStart, changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, splitParagraph, toggleList } from "./lists.js";
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";
 export { caretBetweenAtoms, insertImage, insertPageBreak, linkAt, setLink } from "./insert.js";
 export { findAll, findNext, findPlugin, findState, type FindQuery, replaceAll, replaceCurrent, setFindQuery } from "./find.js";
@@ -21,7 +21,7 @@ export {
   insertColumnBreak, insertField, insertFieldResult, insertSectionBreak, ownStory, PAPER, pageSetup, type SectionAttrs, type SectionStart, sectionInfo,
   setPageSetup, setStory, setTitlePage, storyAt, columnPreset, type ColumnsSpec, columnsOf, hyphenationOn, setColumns, setHyphenation, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers, toggleSuppressLineNumbers,
 } from "./docsetup.js";
-export { type BorderKind, bordersAt, setBorders, setIndent, setLineSpacing, setParagraphSpacing, updateParagraphs } from "./paragraph.js";
+export { type BorderKind, bordersAt, indentParagraphs, setBorders, setIndent, shiftTabKey, tabKey, setLineSpacing, setParagraphSpacing, updateParagraphs } from "./paragraph.js";
 export { type Template, TEMPLATES } from "./templates.js";
 export {
   acceptOrReject, addComment, anchoredComments, type Change, changeAt, changes, type Comment, deleteComment, gotoChange,

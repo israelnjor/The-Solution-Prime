@@ -90,3 +90,52 @@ export function bordersAt(state: EditorState): BorderKind | undefined {
   if (on("bottom")) return "bottom";
   return "none";
 }
+
+/**
+ * Increase / Decrease Indent: list items change level; other paragraphs move their left indent to the
+ * next (or previous) half-inch step, as Word's buttons do (never below the margin).
+ */
+export function indentParagraphs(delta: 1 | -1): Command {
+  return (state, dispatch) => {
+    const paras = paragraphs(state);
+    if (!paras.length) return false;
+    if (dispatch) {
+      const tr = state.tr;
+      const STEP = 36;
+      for (const { node, pos } of paras) {
+        const props = { ...node.attrs.props };
+        if (props.list) {
+          const lvl = (props.list.level ?? 0) + delta;
+          if (lvl < 0) delete props.list;
+          else props.list = { ...props.list, level: Math.min(8, lvl) };
+        } else {
+          const left = props.indent?.left ?? 0;
+          const next = delta > 0 ? (Math.floor(left / STEP + 1e-6) + 1) * STEP : Math.max(0, (Math.ceil(left / STEP - 1e-6) - 1) * STEP);
+          props.indent = clean<Indent>({ ...props.indent, left: next || undefined });
+          if (!props.indent) delete props.indent;
+        }
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, props });
+      }
+      dispatch(tr);
+    }
+    return true;
+  };
+}
+
+/**
+ * Tab, as in Word: at the start of a list item it moves the item a level deeper; with several
+ * paragraphs selected it indents them; otherwise it types a tab (to the next tab stop).
+ */
+export const tabKey: Command = (state, dispatch) => {
+  const { $from, $to, empty } = state.selection;
+  const para = $from.parent;
+  if (para.type.name === "paragraph" && para.attrs.props?.list && empty && $from.parentOffset === 0) return indentParagraphs(1)(state, dispatch);
+  if (!$from.sameParent($to)) return indentParagraphs(1)(state, dispatch);
+  const tab = state.schema.nodes.tab;
+  if (!$from.parent.inlineContent || !tab) return false;
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(tab.create(), true).scrollIntoView());
+  return true;
+};
+
+/** Shift+Tab: a list item (or a selection of paragraphs) goes up a level / out by a step. */
+export const shiftTabKey: Command = (state, dispatch) => indentParagraphs(-1)(state, dispatch);

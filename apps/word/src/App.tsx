@@ -1,7 +1,7 @@
 import { Fragment, type Node as PmNode, type Schema, DOMParser as PmDOMParser } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, chartAt, insertChart, SAMPLE_CHART, setChartData, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, splitListItem, backspaceAtParagraphStart, findPlugin, fromProseMirror,
+  blankDocument, chartAt, insertChart, SAMPLE_CHART, setChartData, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, createRender, createSchema, exitEmptyListItem, splitParagraph, tabKey, shiftTabKey, backspaceAtParagraphStart, findPlugin, fromProseMirror,
   caretBetweenAtoms, insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -377,11 +377,11 @@ export function App() {
           "Mod-Shift-e": (st, d) => setTracking(!trackingOn(st))(st, d),
           // Word's "move paragraph up / down".
           "Alt-Shift-ArrowUp": moveBlock(-1), "Alt-Shift-ArrowDown": moveBlock(1),
-          // Tab moves between table cells, or changes a list item's level.
-          Tab: chainCommands(moveCell(1), changeLevel(1)),
-          "Shift-Tab": chainCommands(moveCell(-1), changeLevel(-1)),
-          // Enter on an empty list item ends the list (as in Word).
-          Enter: chainCommands(exitEmptyListItem, splitListItem),
+          // Tab moves between table cells, changes a list item's level at its start, or types a tab.
+          Tab: chainCommands(moveCell(1), tabKey),
+          "Shift-Tab": chainCommands(moveCell(-1), shiftTabKey),
+          // Enter on an empty list item ends the list; otherwise the new paragraph keeps the formatting (as in Word).
+          Enter: chainCommands(exitEmptyListItem, splitParagraph(() => fileRef.current.base)),
           Backspace: backspaceAtParagraphStart,
           // Word's formatting keys.
           "Mod-Space": clearCharFormatting, "Mod-q": clearParagraphFormatting, "Shift-F3": changeCase("cycle"),

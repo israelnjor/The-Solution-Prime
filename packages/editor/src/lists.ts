@@ -91,23 +91,39 @@ function listFor(state: EditorState, doc: PrimeDocument, kind: ListKind, pos: nu
 }
 
 /**
- * Enter in a list item: the new paragraph is the next item (ProseMirror's own split, at the end of a
- * paragraph, starts a plain one). An empty item ends the list instead (exitEmptyListItem, before this).
+ * Enter, as in Word: the new paragraph keeps the paragraph's formatting — the next item of a list, the
+ * same indent and alignment (ProseMirror's own split, at the end of a paragraph, starts a plain one).
+ * At the end of a paragraph whose style names a different next style (a heading: Normal), the new
+ * paragraph takes that style instead, without the heading's own formatting. An empty list item ends
+ * the list instead (exitEmptyListItem, before this).
  */
-export const splitListItem: Command = (state, dispatch) => {
-  const { $from } = state.selection;
-  const para = $from.parent;
-  if (para.type.name !== "paragraph" || !para.attrs.props?.list || $from.depth < 1) return false;
-  if (dispatch) {
-    const tr = state.tr;
-    if (!state.selection.empty) tr.deleteSelection();
-    const marks = state.storedMarks ?? (state.selection.$to.parentOffset ? $from.marks() : null);
-    tr.split(tr.mapping.map(state.selection.from), 1, [{ type: para.type, attrs: para.attrs }]);
-    if (marks) tr.ensureMarks(marks);
-    dispatch(tr.scrollIntoView());
-  }
-  return true;
-};
+export function splitParagraph(doc: () => PrimeDocument): Command {
+  return (state, dispatch) => {
+    const { $from, $to } = state.selection;
+    const para = $from.parent;
+    if (para.type.name !== "paragraph" || $from.depth < 1 || !$from.sameParent($to)) return false;
+    if (dispatch) {
+      const tr = state.tr;
+      if (!state.selection.empty) tr.deleteSelection();
+      let marks = state.storedMarks ?? (state.selection.$to.parentOffset ? $from.marks() : null);
+      let attrs = para.attrs;
+      const styleId: string | undefined = para.attrs.props?.style;
+      if ($to.parentOffset === para.content.size && styleId) {
+        const sheet = (state.doc.attrs.styles ?? doc().styles) as PrimeDocument["styles"];
+        const next = sheet.styles.find((s) => s.id === styleId)?.next;
+        if (next && next !== styleId) {
+          const isDefault = sheet.styles.find((s) => s.id === next)?.isDefault;
+          attrs = { ...para.attrs, props: isDefault ? {} : { style: next } };
+          marks = null;
+        }
+      }
+      tr.split(tr.mapping.map(state.selection.from), 1, [{ type: para.type, attrs }]);
+      if (marks) tr.ensureMarks(marks);
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  };
+}
 
 /** Turns the selected paragraphs into a list of `kind`, or back into plain paragraphs if they already are. */
 export function toggleList(doc: () => PrimeDocument, kind: ListKind): Command {
@@ -120,8 +136,10 @@ export function toggleList(doc: () => PrimeDocument, kind: ListKind): Command {
     const tr = state.tr;
     for (const { node, pos } of paras) {
       const props = { ...node.attrs.props };
-      if (numId) props.list = { numId, level: props.list?.level ?? 0 };
-      else delete props.list;
+      if (numId) {
+        props.list = { numId, level: props.list?.level ?? 0 };
+        delete props.indent; // the list level sets the indent (Word drops the paragraph's own)
+      } else delete props.list;
       tr.setNodeMarkup(pos, undefined, { ...node.attrs, props });
     }
     dispatch(tr.scrollIntoView());
