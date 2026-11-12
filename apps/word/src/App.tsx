@@ -1,8 +1,8 @@
 import { Fragment, type Node as PmNode, type Schema, DOMParser as PmDOMParser } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, chartAt, insertChart, SAMPLE_CHART, setChartData, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, findPlugin, fromProseMirror,
-  insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
+  blankDocument, chartAt, insertChart, SAMPLE_CHART, setChartData, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, changeLevel, createRender, createSchema, exitEmptyListItem, backspaceAtParagraphStart, findPlugin, fromProseMirror,
+  caretBetweenAtoms, insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
   pageAt, deletePages, selectedPages, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun, typingParser } from "@prime/editor";
@@ -382,6 +382,7 @@ export function App() {
           "Shift-Tab": chainCommands(moveCell(-1), changeLevel(-1)),
           // Enter on an empty list item ends the list (as in Word).
           Enter: exitEmptyListItem,
+          Backspace: backspaceAtParagraphStart,
           // Word's formatting keys.
           "Mod-Space": clearCharFormatting, "Mod-q": clearParagraphFormatting, "Shift-F3": changeCase("cycle"),
           "Mod->": growFont(() => fileRef.current.base, 1), "Mod-Shift->": growFont(() => fileRef.current.base, 1),
@@ -406,7 +407,7 @@ export function App() {
         keymap(baseKeymap),
         paragraphStyles(file.base, measurer),
         findPlugin(),
-        pastePlugin(() => fileRef.current.base),
+        pastePlugin(() => fileRef.current.base), caretBetweenAtoms(),
         floatEditing(), inlinePictureResizing(),
         blockHandle(),
         pasteOptions(),

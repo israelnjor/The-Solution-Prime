@@ -176,7 +176,10 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 /* flow-root: margins never collapse through a gap, so growing it by d moves what follows by exactly d (see fit in paged.ts). */
 .pw-page-gap { display: flow-root; height: 0; pointer-events: none; user-select: none; }
 
-.pw-editor.paged .pw-section-break, .pw-editor.paged .pw-page-break { display: none; }
+.pw-editor.paged .pw-section-break { display: none; }
+/* Invisible but placed (zero width, on the line): a hidden break has no position, and the caret beside it
+   was measured at the top of the page — scrolling there on every keystroke. */
+.pw-editor.paged .pw-page-break { display: inline-block; width: 0; height: 0; margin: 0; border: 0; vertical-align: baseline; overflow: hidden; }
 
 .status .zoom { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .status .zoom input { width: 110px; }

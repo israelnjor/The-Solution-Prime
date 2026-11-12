@@ -102,6 +102,37 @@ export function changeLevel(delta: 1 | -1): Command {
 }
 
 /** Enter on an empty list item ends the list, as in Word. */
+/**
+ * Backspace at the start of a paragraph, as in Word: a numbered or bulleted item first loses its number;
+ * a paragraph that a page (or column) break put on a new page first loses that break — the text moves
+ * back, and the two paragraphs stay apart (joining them would leave the break at the end of the first,
+ * with what is typed after it going to the page after). Otherwise Backspace joins as usual.
+ */
+export const backspaceAtParagraphStart: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection;
+  const para = $from.parent;
+  if (!empty || $from.parentOffset !== 0 || para.type.name !== "paragraph") return false;
+  if (para.attrs.props?.list) {
+    if (dispatch) {
+      const props = { ...para.attrs.props };
+      delete props.list;
+      const tr = state.tr.setNodeMarkup($from.before(), undefined, { ...para.attrs, props });
+      dispatch(tr.setSelection(TextSelection.create(tr.doc, $from.pos)));
+    }
+    return true;
+  }
+  const depth = $from.depth - 1;
+  const index = $from.index(depth);
+  const prev = index > 0 ? $from.node(depth).child(index - 1) : undefined;
+  const last = prev?.type.name === "paragraph" ? prev.lastChild : undefined;
+  if (last?.type.name !== "hard_break" || (last.attrs.kind !== "page" && last.attrs.kind !== "column")) return false;
+  if (dispatch) {
+    const end = $from.before() - 1; // the end of the previous paragraph's content
+    dispatch(state.tr.delete(end - last.nodeSize, end).scrollIntoView());
+  }
+  return true;
+};
+
 export const exitEmptyListItem: Command = (state, dispatch) => {
   const { $from, empty } = state.selection;
   const para = $from.parent;

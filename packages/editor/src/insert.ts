@@ -1,6 +1,6 @@
 /** Insert commands: page break, hyperlink, picture. */
 import type { PrimeDocument } from "@prime/pdm";
-import { type Command, TextSelection } from "prosemirror-state";
+import { type Command, Plugin, TextSelection } from "prosemirror-state";
 
 /** Inserts a page break: the text after the cursor starts on a new page. */
 export const insertPageBreak: Command = (state, dispatch) => {
@@ -12,6 +12,38 @@ export const insertPageBreak: Command = (state, dispatch) => {
   dispatch(tr.scrollIntoView());
   return true;
 };
+
+/**
+ * Typing where the browser cannot hold a caret: between two page breaks (a blank page in Word files,
+ * which keep several breaks in one paragraph) or between other non-text inline nodes. Page breaks are
+ * drawn as non-editable boxes, so the browser moves typed text to the next text it finds — onto a
+ * later page. Here the editor inserts the text at its own (correct) position instead.
+ */
+export function caretBetweenAtoms(): Plugin {
+  return new Plugin({
+    props: {
+      handleDOMEvents: {
+        beforeinput: (view, e) => {
+          const ev = e as InputEvent;
+          if (ev.inputType !== "insertText" || !ev.data || view.composing) return false;
+          const { state } = view;
+          const { $from, empty, from, to } = state.selection;
+          if (!empty || !$from.parent.inlineContent) return false;
+          const before = $from.nodeBefore, after = $from.nodeAfter;
+          const breakNear = [before, after].some((n) => n?.type.name === "hard_break" && n.attrs.kind !== "line");
+          if (!breakNear || before?.isText || after?.isText) return false;
+          ev.preventDefault();
+          const handled = view.someProp("handleTextInput", (f) => f(view, from, to, ev.data!));
+          if (!handled) {
+            const marks = state.storedMarks ?? $from.marks();
+            view.dispatch(state.tr.replaceWith(from, to, state.schema.text(ev.data!, marks)).scrollIntoView());
+          }
+          return true;
+        },
+      },
+    },
+  });
+}
 
 /**
  * Links the selection to `href`; with an empty selection, inserts `text` (default: the address) as
