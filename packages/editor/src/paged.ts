@@ -78,6 +78,12 @@ interface PagedState {
   decorations: DecorationSet;
   /** The text columns the editor shows (the editor is then a multi-column container), if any. */
   columns?: ScreenColumns;
+  /**
+   * Whether the decorations include layout classes (page-wide blocks, section offsets, break holders),
+   * kept up after edits. In the state, not the plugin: the editor is rebuilt with new plugins (fonts
+   * arriving) that keep this state — a fresh "no" there let AutoFit's rebuilt table lose them.
+   */
+  layoutClassed?: boolean;
 }
 
 /** Equal text columns, as the browser draws them: how many, the space between (pt), a line between. */
@@ -461,8 +467,6 @@ export function pagination(opts: PagedOptions): Plugin {
   let raw: ResolvedStart[] = [];
   /** Where text wraps around floating objects, and the objects themselves (from the layout). */
   let wraps: ReturnType<typeof resolveWraps> = [];
-  /** Whether the drawn decorations include layout classes (text columns, break holders): kept up after edits. */
-  let layoutClassed = false;
   /** Where the layout hyphenated words (editor positions). */
   let hyphens: number[] = [];
   let floats: ResolvedFloat[] = [];
@@ -656,8 +660,8 @@ export function pagination(opts: PagedOptions): Plugin {
         if (drawn) {
           const columns = columnsIn(tr.doc);
           const set = decorations(tr.doc, drawn, wraps, floats, opts.base(), hyphens);
-          layoutClassed = set.find(undefined, undefined, (spec) => spec.layoutClass).length > 0;
-          return { decorations: set, ...(columns ? { columns } : {}) };
+          const layoutClassed = set.find(undefined, undefined, (spec) => spec.layoutClass).length > 0;
+          return { decorations: set, ...(columns ? { columns } : {}), ...(layoutClassed ? { layoutClassed } : {}) };
         }
         if (!tr.docChanged) return old;
         // Keep page starts and wrap points on their text until the next layout replaces them (a
@@ -671,18 +675,25 @@ export function pagination(opts: PagedOptions): Plugin {
         // Blocks the edit replaced (a table rebuilt when a column is resized, a restyled paragraph) lose
         // their node decorations: their layout classes are worked out again (else a table outside text
         // columns fell into them, its rows over the text).
-        if (layoutClassed) {
-          const from = tr.before.content.findDiffStart(tr.doc.content);
-          if (from !== null) {
-            const to = tr.before.content.findDiffEnd(tr.doc.content)?.b ?? tr.doc.content.size;
-            const $from = tr.doc.resolve(Math.min(from, tr.doc.content.size));
-            const $to = tr.doc.resolve(Math.min(Math.max(to, from), tr.doc.content.size));
-            const a = $from.depth ? $from.before(1) : from;
-            const b = $to.depth ? $to.after(1) : Math.max(to, from);
+        if (old.layoutClassed) {
+          // Where the steps replaced content (in the new document): a block replaced by an identical one
+          // (AutoFit on a table already that wide) loses its decorations too, though nothing differs.
+          let from = Infinity, to = -Infinity;
+          tr.mapping.maps.forEach((map, i) => map.forEach((_a, _b, start, end) => {
+            const rest = tr.mapping.slice(i + 1);
+            from = Math.min(from, rest.map(start, -1));
+            to = Math.max(to, rest.map(end, 1));
+          }));
+          if (from <= to) {
+            const size = tr.doc.content.size;
+            const $from = tr.doc.resolve(Math.max(0, Math.min(from, size)));
+            const $to = tr.doc.resolve(Math.max(0, Math.min(to, size)));
+            const a = $from.depth ? $from.before(1) : $from.pos;
+            const b = $to.depth ? $to.after(1) : $to.pos;
             mapped = mapped.remove(mapped.find(a, b, (spec) => spec.layoutClass)).add(tr.doc, layoutClasses(tr.doc, a, b));
           }
         }
-        return { decorations: mapped, ...(old.columns ? { columns: old.columns } : {}) };
+        return { decorations: mapped, ...(old.columns ? { columns: old.columns } : {}), ...(old.layoutClassed ? { layoutClassed: true } : {}) };
       },
     },
     props: {

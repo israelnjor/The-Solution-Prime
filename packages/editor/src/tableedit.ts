@@ -183,7 +183,7 @@ export const splitCell: Command = (state, dispatch) => {
           i === 0 && r === at.row ? c.node.content : [state.schema.nodes.paragraph.create()]));
       }),
     }));
-    dispatch(rebuild(state, g, rows).scrollIntoView());
+    dispatch(keepCursor(state, rebuild(state, g, rows)).scrollIntoView());
     return true;
   }
   // An ordinary cell: its grid column becomes two.
@@ -202,9 +202,14 @@ export const splitCell: Command = (state, dispatch) => {
       return [c.node];
     }),
   }));
-  dispatch(rebuild(state, g, rows, grid).scrollIntoView());
+  dispatch(keepCursor(state, rebuild(state, g, rows, grid)).scrollIntoView());
   return true;
 };
+
+/** The cursor back where it was (the table was replaced; the split cell starts where it did). */
+function keepCursor(state: EditorState, tr: ReturnType<typeof rebuild>) {
+  return tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(state.selection.from, tr.doc.content.size))));
+}
 
 // --- borders, shading, alignment -----------------------------------------------------------------
 

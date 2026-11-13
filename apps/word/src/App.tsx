@@ -938,7 +938,10 @@ ${String(e)}`));
   useEffect(() => {
     if (!isDesktop) return;
     const pending = listen<string>("open-document", (e) => {
-      void openPath(e.payload).then((opened) => loadRef.current(opened.bytes, opened.name, opened.location))
+      // A PDF goes to the converter (shown to confirm first); anything else opens in a tab.
+      void openPath(e.payload).then((opened) => (/\.pdf$/i.test(opened.name)
+        ? setConverter({ initial: { bytes: opened.bytes, name: opened.name } })
+        : loadRef.current(opened.bytes, opened.name, opened.location)))
         .catch((err) => alert(`Prime Word could not open ${e.payload}:\n${String(err)}`));
     });
     return () => { void pending.then((unlisten) => unlisten()); };
@@ -1047,8 +1050,14 @@ ${String(e)}`));
     if (!isDesktop) return;
     void invoke<[string, number[]] | null>("startup_document").then((doc) => {
       if (!doc) return setStartupDone(true);
+      const name = doc[0].split(/[\\/]/).pop()!;
+      // A PDF ("Open with Prime Word"): to the converter, which shows it to confirm first.
+      if (/\.pdf$/i.test(name)) {
+        setConverter({ initial: { bytes: Uint8Array.from(doc[1]), name } });
+        return setStartupDone(true);
+      }
       void invoke<number | null>("document_modified", { path: doc[0] }).then((modified) => {
-        load(Uint8Array.from(doc[1]), doc[0].split(/[\\/]/).pop()!, { kind: "path", path: doc[0], ...(modified ? { modified } : {}) });
+        load(Uint8Array.from(doc[1]), name, { kind: "path", path: doc[0], ...(modified ? { modified } : {}) });
         setStartupDone(true);
       });
     });

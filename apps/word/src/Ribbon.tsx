@@ -137,7 +137,11 @@ const CASES: [CaseMode, string][] = [["sentence", "Sentence case."], ["lower", "
 
 /** "heading 1" -> "Heading 1" (Word stores built-in style names in lower case). */
 /** Small line icons for the ribbon (drawn in the text colour). */
-function Icon({ name }: { name: "left" | "center" | "right" | "both" | "bullets" | "numbers" | "find" | "replace" }) {
+type IconName = "left" | "center" | "right" | "both" | "bullets" | "numbers" | "find" | "replace"
+  | "pageBreak" | "deletePage" | "textBox" | "chart" | "shapes" | "dropCap" | "table" | "textToTable" | "picture"
+  | "headerFooter" | "letterhead" | "signature" | "blocks" | "equation" | "symbol" | "dateTime" | "link";
+
+function Icon({ name }: { name: IconName }) {
   const lines = (rows: [number, number][]) => rows.map(([x1, x2], i) => <line key={i} x1={x1} x2={x2} y1={3 + i * 3.5} y2={3 + i * 3.5} />);
   const body = {
     left: lines([[2, 14], [2, 10], [2, 14], [2, 9]]),
@@ -148,6 +152,24 @@ function Icon({ name }: { name: "left" | "center" | "right" | "both" | "bullets"
     numbers: <>{[4, 8, 12].map((y, i) => <g key={y}><text x={1} y={y + 1.8} fontSize={5} fill="currentColor" stroke="none" fontFamily="Segoe UI, sans-serif">{i + 1}</text><line x1={6} x2={14} y1={y} y2={y} /></g>)}</>,
     find: <><circle cx={7} cy={7} r={4} /><line x1={10} y1={10} x2={14} y2={14} /></>,
     replace: <><path d="M2 6h10l-2.5-2.5M14 10H4l2.5 2.5" /></>,
+    // Insert tab.
+    pageBreak: <><path d="M3.5 1.5v4h9v-4M3.5 14.5v-4h9v4" /><line x1={1.5} x2={14.5} y1={8} y2={8} strokeDasharray="1.6 1.4" /></>,
+    deletePage: <><path d="M3 1.5h6.5l3 3v10H3z" /><path d="M5.5 7.5l4.5 4.5M10 7.5l-4.5 4.5" /></>,
+    textBox: <><rect x={1.5} y={2.5} width={13} height={11} rx={1} /><path d="M5 11l3-7 3 7M6.2 8.5h3.6" /></>,
+    chart: <><line x1={1.5} x2={14.5} y1={14} y2={14} /><rect x={2.5} y={8} width={2.6} height={6} /><rect x={6.7} y={4} width={2.6} height={10} /><rect x={10.9} y={6.5} width={2.6} height={7.5} /></>,
+    shapes: <><circle cx={5.5} cy={6} r={4} /><rect x={7} y={7} width={7.5} height={7.5} rx={0.5} /></>,
+    dropCap: <><path d="M2 10.5l2.8-8 2.8 8M3 8h3.6" /><path d="M9.5 3.5h5M9.5 7h5M2 13.5h12.5" /></>,
+    table: <><rect x={1.5} y={2.5} width={13} height={11} rx={1} /><path d="M1.5 6.2h13M1.5 9.9h13M5.8 2.5v11M10.2 2.5v11" /></>,
+    textToTable: <><path d="M1.5 3.5h5M1.5 6.5h5M1.5 9.5h5" /><rect x={8.5} y={5.5} width={6} height={8} /><path d="M8.5 9.5h6M11.5 5.5v8" /></>,
+    picture: <><rect x={1.5} y={2.5} width={13} height={11} rx={1} /><circle cx={5.5} cy={6} r={1.3} /><path d="M1.5 12l4-4 3 3 2-2 4 4" /></>,
+    headerFooter: <><path d="M3 1.5h10v13H3z" /><path d="M5 4h6M5 12h6" strokeWidth={2} /><path d="M5 7.2h6M5 9h4.5" strokeWidth={0.9} /></>,
+    letterhead: <><path d="M3 1.5h10v13H3z" /><circle cx={5.6} cy={4.6} r={1.4} /><path d="M8 4h3.3M8 5.6h2.4M5 8.5h6M5 10.5h6M5 12.5h4" strokeWidth={1} /></>,
+    signature: <><path d="M1.5 10.5c1.5-4 3-6.5 3.8-5.5.9 1.2-2.4 6.3-.9 6.3 1.3 0 2.3-3.3 3.3-3.3.8 0 .3 2.3 1.2 2.3.7 0 1.4-1.1 2.3-1.1.6 0 .8.6 1.3.6" /><line x1={1.5} x2={14.5} y1={14} y2={14} strokeWidth={1} /></>,
+    blocks: <><rect x={1.5} y={2} width={8.5} height={5} rx={0.8} /><rect x={6} y={9} width={8.5} height={5} rx={0.8} /><path d="M3.5 4.5h4.5M8 11.5h4.5" strokeWidth={1} /></>,
+    equation: <><path d="M1.5 9h1.8l1.8 4.5L8.4 2.5h6.1" /><path d="M9.5 6.5l3.5 5M13 6.5l-3.5 5" strokeWidth={1.2} /></>,
+    symbol: <><path d="M3 13.5h3v-1.8C3.6 10.6 2.6 8.7 2.6 6.7 2.6 3.9 5 2 8 2s5.4 1.9 5.4 4.7c0 2-1 3.9-3.4 5v1.8h3" /></>,
+    dateTime: <><rect x={1.5} y={3} width={13} height={11.5} rx={1} /><path d="M1.5 6.5h13M5 1.5v3M11 1.5v3" /><path d="M4.5 9.5h1.2M7.4 9.5h1.2M10.3 9.5h1.2M4.5 12h1.2M7.4 12h1.2" strokeWidth={1.5} /></>,
+    link: <><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.4-2.4a2.6 2.6 0 0 0-3.7-3.7l-1 1" /><path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.1 9.2a2.6 2.6 0 0 0 3.7 3.7l1-1" /></>,
   }[name];
   return <svg className="icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{body}</svg>;
 }
@@ -228,7 +250,13 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
     for (let d = state.selection.$from.depth; d > 0; d--) if (state.selection.$from.node(d).type.name === "table") return state.selection.$from.node(d).attrs.props.style as string | undefined;
     return undefined;
   })() : undefined;
-  const columnWidth = state ? (() => { const p = pageSetup(state); return (p.pageWidth ?? 612) - (p.margins?.left ?? 72) - (p.margins?.right ?? 72); })() : 468;
+  // The text column at the cursor: the page's text width, or one text column of it (as Word fits a table there).
+  const columnWidth = state ? (() => {
+    const p = pageSetup(state);
+    const text = (p.pageWidth ?? 612) - (p.margins?.left ?? 72) - (p.margins?.right ?? 72);
+    const c = columnsOf(state);
+    return c.widths?.length ? c.widths[0] : c.count > 1 ? (text - c.space * (c.count - 1)) / c.count : text;
+  })() : 468;
   // Selecting a picture shows its tab (as Word does); leaving it returns to where you were.
   const pictureKey = picture ? `${picture.pos}` : "";
   useEffect(() => {
@@ -384,12 +412,13 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         {activeTab === "insert" && (
           <>
             <div className="group">
-              <button onClick={run(insertPageBreak)} title="Page break (Ctrl+Enter)">Page Break</button>
-              <button onClick={onDeletePage} title="Delete the page the cursor is on (or every page the selection covers); Ctrl+Z brings it back">Delete Page</button>
+              <button onClick={run(insertPageBreak)} title="Page break (Ctrl+Enter)"><Icon name="pageBreak" /><span className="label keep">Page Break</span></button>
+              <button onClick={onDeletePage} title="Delete the page the cursor is on (or every page the selection covers); Ctrl+Z brings it back"><Icon name="deletePage" /><span className="label keep">Delete Page</span></button>
             </div>
             <div className="group" aria-label="Text box and shapes">
-              <button onClick={() => { run(insertShape("textbox"))(); setTab("picture"); }} title="A box of text you can place anywhere on the page">Text Box</button>
-              <button onClick={onChart} title="A column, bar, line or pie chart from a small table of numbers (double-click a chart to change it)">Chart…</button>
+              <button onClick={() => { run(insertShape("textbox"))(); setTab("picture"); }} title="A box of text you can place anywhere on the page"><Icon name="textBox" /><span className="label keep">Text Box</span></button>
+              <button onClick={onChart} title="A column, bar, line or pie chart from a small table of numbers (double-click a chart to change it)"><Icon name="chart" /><span className="label keep">Chart…</span></button>
+              <span className="select-icon"><Icon name="shapes" /></span>
               <select value="" aria-label="Shapes" title="Insert a shape"
                 onChange={(e) => { if (e.target.value) { run(insertShape("shape", e.target.value))(); setTab("picture"); } }}>
                 <option value="">Shapes…</option>
@@ -397,6 +426,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               </select>
             </div>
             <div className="group" aria-label="Drop Cap">
+              <span className="select-icon"><Icon name="dropCap" /></span>
               <select value={state ? dropCapOf(state) : "none"} aria-label="Drop Cap" title="A large first letter beside the paragraph's first lines"
                 onChange={(e) => onDropCap(e.target.value as DropCapKind)}>
                 <option value="none">Drop Cap: None</option>
@@ -405,8 +435,8 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               </select>
             </div>
             <div className="group popover-anchor">
-              <button onClick={() => setPopover(popover === "table" ? null : "table")} title="Insert a table">Table</button>
-              <button onClick={run(textToTable(docRef))} title="Turn the selected lines (separated by tabs) into a table">Text to Table</button>
+              <button onClick={() => setPopover(popover === "table" ? null : "table")} title="Insert a table"><Icon name="table" /><span className="label keep">Table</span></button>
+              <button onClick={run(textToTable(docRef))} title="Turn the selected lines (separated by tabs) into a table"><Icon name="textToTable" /><span className="label keep">Text to Table</span></button>
               {popover === "table" && (
                 <div className="popover">
                   <label>Rows <input type="number" min={1} max={100} value={tableSize.rows} onChange={(e) => setTableSize((s) => ({ ...s, rows: Number(e.target.value) }))} /></label>
@@ -422,21 +452,21 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={async () => {
                 const img = await readImage();
                 if (img) run(insertImage(docRef, img))();
-              }} title="Insert a picture from a file">Picture</button>
+              }} title="Insert a picture from a file"><Icon name="picture" /><span className="label keep">Picture</span></button>
             </div>
             <div className="group">
-              <button onClick={onHeaderFooter} title="Edit the header and footer, add page numbers">Header &amp; Footer</button>
-              <button onClick={onLetterhead} title="Design a letterhead: logo, name, address, contacts">Letterhead…</button>
-              <button onClick={onSignature} title="Insert your signature, or make one from a photo, by drawing or typing">Signature…</button>
-              <button onClick={onBlocks} title="Signature blocks, addresses, stamps and saved text: insert left, centre or right">Blocks…</button>
+              <button onClick={onHeaderFooter} title="Edit the header and footer, add page numbers"><Icon name="headerFooter" /><span className="label keep">Header &amp; Footer</span></button>
+              <button onClick={onLetterhead} title="Design a letterhead: logo, name, address, contacts"><Icon name="letterhead" /><span className="label keep">Letterhead…</span></button>
+              <button onClick={onSignature} title="Insert your signature, or make one from a photo, by drawing or typing"><Icon name="signature" /><span className="label keep">Signature…</span></button>
+              <button onClick={onBlocks} title="Signature blocks, addresses, stamps and saved text: insert left, centre or right"><Icon name="blocks" /><span className="label keep">Blocks…</span></button>
             </div>
             <div className="group">
-              <button onClick={onEquation} title="Insert an equation (Alt+=): fractions, roots, sums, Greek…">Equation…</button>
-              <button onClick={onSymbol} title="Insert a symbol: ©, €, ₵, ½, →, Greek letters…">Symbol…</button>
-              <button onClick={onDateTime} title="Insert today's date or the time">Date &amp; Time…</button>
+              <button onClick={onEquation} title="Insert an equation (Alt+=): fractions, roots, sums, Greek…"><Icon name="equation" /><span className="label keep">Equation…</span></button>
+              <button onClick={onSymbol} title="Insert a symbol: ©, €, ₵, ½, →, Greek letters…"><Icon name="symbol" /><span className="label keep">Symbol…</span></button>
+              <button onClick={onDateTime} title="Insert today's date or the time"><Icon name="dateTime" /><span className="label keep">Date &amp; Time…</span></button>
             </div>
             <div className="group popover-anchor">
-              <button onClick={openLink} title="Insert or edit a link (Ctrl+K)">Link</button>
+              <button onClick={openLink} title="Insert or edit a link (Ctrl+K)"><Icon name="link" /><span className="label keep">Link</span></button>
               {popover === "link" && (
                 <form className="popover" onSubmit={(e) => { e.preventDefault(); run(setLink(linkUrl.trim()))(); setPopover(null); }}>
                   <label>Address <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} style={{ width: 240 }} /></label>
@@ -942,7 +972,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             </div>
             <div className="group" aria-label="Cell Size">
               <button onClick={run(distributeColumns)} title="Make all columns the same width">Distribute Columns</button>
-              <button onClick={run(autofitWindow(columnWidth))} title="Make the table as wide as the page's text">AutoFit Window</button>
+              <button onClick={run(autofitWindow(columnWidth))} title="Make the table as wide as the text column it is in">AutoFit Window</button>
             </div>
             <div className="group" aria-label="Alignment">
               <select value="" onChange={(e) => { const [v, h] = e.target.value.split(" "); if (v) run(setCellAlign(v as "top", h as "left"))(); }} title="Cell alignment" aria-label="Cell alignment" className="cell-align-select">
