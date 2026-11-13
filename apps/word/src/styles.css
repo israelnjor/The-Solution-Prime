@@ -70,7 +70,8 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
   .toolbar .label { display: none; }
   /* Insert: the words stay (the tab may take two rows); the lists a little narrower. */
   .toolbar .label.keep { display: inline; }
-  .toolbar select[aria-label="Shapes"], .toolbar select[aria-label="Drop Cap"] { width: 128px; }
+  .toolbar select[aria-label="Shapes"] { width: 120px; }
+  .toolbar select[aria-label="Drop Cap"] { width: 146px; }
   .toolbar button { padding: 0 5px; }
   .toolbar .style-select { min-width: 0; width: 92px; }
   .toolbar .font-select { width: 104px; }
