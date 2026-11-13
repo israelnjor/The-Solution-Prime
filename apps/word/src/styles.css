@@ -73,7 +73,6 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
   .toolbar .label { display: none; }
   /* Insert: the words stay (the tab may take two rows); the lists a little narrower. */
   .toolbar .label.keep { display: inline; }
-  .toolbar select[aria-label="Shapes"] { width: 120px; }
   .toolbar select[aria-label="Drop Cap"] { width: 146px; }
   .toolbar button { padding: 0 5px; }
   .toolbar .style-select { min-width: 0; width: 92px; }
@@ -1006,3 +1005,10 @@ button.link:hover { text-decoration: underline; }
 /* Share buttons: the share symbol before the word. */
 .share-menu > button { display: inline-flex; align-items: center; gap: 6px; }
 .share-menu > button .share-icon { flex-shrink: 0; }
+
+/* Insert → Shapes (ShapePicker.tsx): the shapes as pictures to pick from. */
+.shape-picker { display: inline-flex; }
+.toolbar .shape-picker > button .caret { font-size: 10px; margin-left: 2px; }
+.shape-popup { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(5, 46px); gap: 4px; padding: 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
+.shape-popup button { height: 38px !important; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: #fff !important; cursor: pointer; }
+.shape-popup button:hover, .shape-popup button:focus-visible { border-color: var(--accent); background: #eef3fa !important; }

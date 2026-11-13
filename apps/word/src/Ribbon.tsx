@@ -7,7 +7,7 @@ import {
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
   insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
-  toggleSuppressLineNumbers, insertShape, SHAPES, setShapeFill, setShapeLine, shapeAt, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  toggleSuppressLineNumbers, insertShape, setShapeFill, setShapeLine, shapeAt, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
@@ -19,6 +19,7 @@ import { type Command, NodeSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
 import { RecentMenu } from "./RecentList";
+import { ShapePicker } from "./ShapePicker";
 import { ShareMenu } from "./ShareMenu";
 import { HighlightPicker } from "./HighlightPicker";
 import { ListLibrary } from "./ListLibrary";
@@ -418,12 +419,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group" aria-label="Text box and shapes">
               <button onClick={() => { run(insertShape("textbox"))(); setTab("picture"); }} title="A box of text you can place anywhere on the page"><Icon name="textBox" /><span className="label keep">Text Box</span></button>
               <button onClick={onChart} title="A column, bar, line or pie chart from a small table of numbers (double-click a chart to change it)"><Icon name="chart" /><span className="label keep">Chart…</span></button>
-              <span className="select-icon"><Icon name="shapes" /></span>
-              <select value="" aria-label="Shapes" title="Insert a shape"
-                onChange={(e) => { if (e.target.value) { run(insertShape("shape", e.target.value))(); setTab("picture"); } }}>
-                <option value="">Shapes…</option>
-                {SHAPES.map((sh) => <option key={sh.geometry} value={sh.geometry}>{sh.label}</option>)}
-              </select>
+              <ShapePicker icon={<Icon name="shapes" />} onPick={(geometry) => { run(insertShape("shape", geometry))(); setTab("picture"); }} />
             </div>
             <div className="group" aria-label="Drop Cap">
               <span className="select-icon"><Icon name="dropCap" /></span>
