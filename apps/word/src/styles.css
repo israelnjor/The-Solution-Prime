@@ -65,6 +65,9 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
   .toolbar { gap: 4px 3px; padding: 5px 8px; }
   /* Buttons wrap one by one (a group need not move to the next row whole); groups keep a gap between them. */
   .toolbar .group { display: contents; }
+  /* A group with a pop-up box (Insert Table, Link, Margins…) stays one piece: its box opens under its button. */
+  .toolbar .group.popover-anchor { display: inline-flex; align-items: center; gap: 3px; position: relative; margin-right: 10px; }
+  .toolbar .group.popover-anchor > :last-child { margin-right: 0; }
   .toolbar .divider { display: none; }
   .toolbar .group > :last-child:not(:first-child) { margin-right: 10px; }
   .toolbar .label { display: none; }
