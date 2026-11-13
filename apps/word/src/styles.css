@@ -795,7 +795,10 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .chart-form { display: grid; gap: 10px; min-width: 0; }
 .chart-form label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
 .chart-form input { font: inherit; padding: 4px 6px; border: 1px solid var(--chrome-border); border-radius: 4px; min-width: 0; }
-.chart-kinds { display: flex; gap: 4px; }
+.chart-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.chart-kinds button { min-width: 72px; }
+.chart-dialog .choice { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 13px; }
+.chart-dialog .hint { color: var(--muted); font-size: 12px; margin: 0; }
 .chart-kinds button { flex: 1; padding: 6px; border: 1px solid var(--chrome-border); border-radius: 5px; background: #fff; }
 .chart-kinds button.on { background: #2b579a; border-color: #2b579a; color: #fff; }
 .chart-data { overflow: auto; max-height: 260px; border: 1px solid var(--chrome-border); border-radius: 6px; }

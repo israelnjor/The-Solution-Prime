@@ -5,13 +5,26 @@
  * on screen and as vector graphics in the PDF.
  */
 
-export type ChartKind = "column" | "bar" | "line" | "pie";
+export type ChartKind = "column" | "bar" | "line" | "pie" | "area" | "doughnut" | "scatter";
+
+/** Where the legend goes (none: no legend). */
+export type LegendPos = "bottom" | "top" | "right" | "none";
 
 export interface ChartSeries { name: string; values: number[]; color?: string }
 
 export interface ChartSpec {
   kind: ChartKind;
   title?: string;
+  /** Column, bar and area: series stacked on each other (Word's "stacked" grouping). */
+  stacked?: boolean;
+  /** The legend's place (default: bottom). */
+  legend?: LegendPos;
+  /** Each value written on its bar, point or slice. */
+  labels?: boolean;
+  /** The value gridlines (default: shown). */
+  gridlines?: boolean;
+  /** The colour set: series (and pie slices) in this order, unless a series has its own. Scatter: categories are the x values. */
+  colors?: string[];
   /** The chart's border colour (its outline), if it has one. */
   border?: string;
   categories: string[];
@@ -59,19 +72,23 @@ function points(xml: string | undefined): string[] {
   return out;
 }
 
-/** What a chart part shows, or undefined for a kind not drawn yet (3-D, area, scatter…: shown as a box). */
+/** What a chart part shows, or undefined for a kind not drawn yet (3-D, bubble, stock…: shown as a box). */
 export function parseChart(xml: string, theme: Record<string, string> = chartTheme(undefined)): ChartSpec | undefined {
   const plot = /<c:plotArea>([\s\S]*?)<\/c:plotArea>/.exec(xml)?.[1] ?? "";
-  const group = /<c:(barChart|lineChart|pieChart|doughnutChart)>([\s\S]*?)<\/c:\1>/.exec(plot);
+  const group = /<c:(barChart|lineChart|pieChart|doughnutChart|areaChart|scatterChart)>([\s\S]*?)<\/c:\1>/.exec(plot);
   if (!group) return undefined;
-  const kind: ChartKind = group[1] === "lineChart" ? "line" : group[1] === "barChart" ? (/<c:barDir val="bar"/.test(group[2]) ? "bar" : "column") : "pie";
+  const kind: ChartKind = group[1] === "lineChart" ? "line" : group[1] === "barChart" ? (/<c:barDir val="bar"/.test(group[2]) ? "bar" : "column")
+    : group[1] === "areaChart" ? "area" : group[1] === "scatterChart" ? "scatter" : group[1] === "doughnutChart" ? "doughnut" : "pie";
+  // Stacked (and 100% stacked, drawn stacked) columns, bars and areas.
+  const stacked = /<c:grouping val="(stacked|percentStacked)"/.test(group[2]);
   const series: ChartSeries[] = [];
   let categories: string[] = [];
   for (const s of group[2].matchAll(/<c:ser>([\s\S]*?)<\/c:ser>/g)) {
     const body = s[1];
     const name = points(/<c:tx>([\s\S]*?)<\/c:tx>/.exec(body)?.[1])[0] ?? unescape(/<c:tx>[\s\S]*?<c:v>([\s\S]*?)<\/c:v>/.exec(body)?.[1] ?? `Series ${series.length + 1}`);
-    const cat = points(/<c:cat>([\s\S]*?)<\/c:cat>/.exec(body)?.[1]);
-    const val = points(/<c:val>([\s\S]*?)<\/c:val>/.exec(body)?.[1]).map((v) => Number(v));
+    // (A scatter chart's x values stand in the categories' place.)
+    const cat = points(/<c:(?:cat|xVal)>([\s\S]*?)<\/c:(?:cat|xVal)>/.exec(body)?.[1]);
+    const val = points(/<c:(?:val|yVal)>([\s\S]*?)<\/c:(?:val|yVal)>/.exec(body)?.[1]).map((v) => Number(v));
     if (cat.length > categories.length) categories = cat;
     // The series' own colour: its fill (bars, slices) or line.
     const spPr = /<c:spPr>([\s\S]*?)<\/c:spPr>/.exec(body.replace(/<c:dPt>[\s\S]*?<\/c:dPt>/g, ""))?.[1] ?? "";
@@ -88,7 +105,7 @@ export function parseChart(xml: string, theme: Record<string, string> = chartThe
   const outer = /<\/c:chart>([\s\S]*)$/.exec(xml)?.[1] ?? "";
   const ln = /<c:spPr>[\s\S]*?(<a:ln\b[\s\S]*?<\/a:ln>)/.exec(outer)?.[1];
   const border = ln && !/<a:noFill\/>/.test(ln) ? firstColor(ln, theme) : undefined;
-  return { kind, ...(title ? { title } : {}), ...(border ? { border } : {}), categories, series };
+  return { kind, ...(stacked && kind !== "line" ? { stacked } : {}), ...(title ? { title } : {}), ...(border ? { border } : {}), categories, series };
 }
 
 export type ChartShape =
@@ -116,30 +133,33 @@ export function chartShapes(spec: ChartSpec, w: number, h: number): ChartShape[]
   if (spec.border) out.push({ kind: "path", d: `M0.5,0.5 L${w - 0.5},0.5 L${w - 0.5},${h - 0.5} L0.5,${h - 0.5} Z`, stroke: spec.border, width: 0.75 });
   const color = (i: number, s?: ChartSeries) => s?.color ?? CHART_COLORS[i % CHART_COLORS.length];
   const text = "595959";
+  const round = spec.kind === "pie" || spec.kind === "doughnut";
+  const stacked = !!spec.stacked && (spec.kind === "column" || spec.kind === "bar" || spec.kind === "area");
   let top = 8;
   if (spec.title) {
     out.push({ kind: "text", x: w / 2, y: top + 14, text: spec.title, size: 14, color: text, anchor: "middle" });
     top += 26;
   }
-  // The legend below: series (or, for a pie, categories), centred.
+  // The legend below: series (or, for a pie or doughnut, categories), centred.
   const order = spec.series.map((s, i) => ({ s, i }));
   if (spec.kind === "bar") order.reverse();
-  const legend = spec.kind === "pie" ? spec.categories : order.map((o) => o.s.name);
-  const legendH = legend.length > 1 || spec.kind === "pie" ? 20 : 0;
+  const legend = round ? spec.categories : order.map((o) => o.s.name);
+  const legendH = legend.length > 1 || round ? 20 : 0;
   if (legendH) {
     const items = legend.map((name) => ({ name, width: 10 + 4 + textWidth(name, 9) + 12 }));
     let x = (w - items.reduce((a, it) => a + it.width, 0)) / 2;
     const y = h - 14;
     items.forEach((it, n) => {
-      const i = spec.kind === "pie" ? n : order[n].i;
+      const i = round ? n : order[n].i;
       if (spec.kind === "line") out.push({ kind: "line", x1: x, y1: y - 3, x2: x + 12, y2: y - 3, color: color(i, spec.series[i]), width: 2.25 });
-      else out.push({ kind: "rect", x, y: y - 8, w: 8, h: 8, fill: spec.kind === "pie" ? color(i) : color(i, spec.series[i]) });
+      else if (spec.kind === "scatter") out.push({ kind: "path", d: circle(x + 4, y - 4, 3.5), fill: color(i, spec.series[i]) });
+      else out.push({ kind: "rect", x, y: y - 8, w: 8, h: 8, fill: round ? color(i) : color(i, spec.series[i]) });
       out.push({ kind: "text", x: x + 14, y, text: it.name, size: 9, color: text, anchor: "start" });
       x += it.width;
     });
   }
   const bottom = h - 8 - legendH;
-  if (spec.kind === "pie") {
+  if (round) {
     const values = spec.series[0]?.values.map((v) => Math.max(0, v || 0)) ?? [];
     const total = values.reduce((a, v) => a + v, 0) || 1;
     const r = Math.max(10, Math.min(w - 16, bottom - top - 8) / 2);
@@ -152,24 +172,49 @@ export function chartShapes(spec: ChartSpec, w: number, h: number): ChartShape[]
       const x1 = cx + r * Math.cos(a), y1 = cy + r * Math.sin(a);
       const x2 = cx + r * Math.cos(a + da), y2 = cy + r * Math.sin(a + da);
       const d = da >= Math.PI * 2 - 1e-6
-        ? `M${cx - r},${cy} A${r},${r} 0 1,1 ${cx + r},${cy} A${r},${r} 0 1,1 ${cx - r},${cy} Z`
+        ? circle(cx, cy, r)
         : `M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${da > Math.PI ? 1 : 0},1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`;
       out.push({ kind: "path", d, fill: color(i), stroke: "FFFFFF", width: 1 });
       a += da;
     });
+    // A doughnut: the middle cut out (half the radius, Word's hole size).
+    if (spec.kind === "doughnut") out.push({ kind: "path", d: circle(cx, cy, r * 0.5), fill: "FFFFFF", stroke: "FFFFFF", width: 1 });
     return out;
   }
-  // Axes: values from 0 (or below, for negatives) to a round maximum.
-  const all = spec.series.flatMap((s) => s.values.filter((v) => Number.isFinite(v)));
-  const max = Math.max(0, ...all);
-  const min = Math.min(0, ...all);
-  const step = niceStep(max - min);
-  const hi = Math.ceil((max + (max - min) * 0.05) / step) * step || step;
-  const lo = min < 0 ? Math.floor((min - (max - min) * 0.05) / step) * step : 0;
-  const ticks: number[] = [];
-  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
-  const labelW = Math.max(...ticks.map((t) => textWidth(fmt(t), 9))) + 6;
+  // The value range: each series' values, or (stacked) each category's total above and below zero.
+  const finite = (v: number | undefined) => (v !== undefined && Number.isFinite(v) ? v : 0);
   const n = spec.categories.length;
+  let all: number[];
+  if (stacked) {
+    all = [];
+    for (let i = 0; i < n; i++) {
+      all.push(spec.series.reduce((a, s) => a + Math.max(0, finite(s.values[i])), 0));
+      all.push(spec.series.reduce((a, s) => a + Math.min(0, finite(s.values[i])), 0));
+    }
+  } else all = spec.series.flatMap((s) => s.values.filter((v) => Number.isFinite(v)));
+  const range = (vals: number[]) => {
+    const max = Math.max(0, ...vals);
+    const min = Math.min(0, ...vals);
+    const step = niceStep(max - min);
+    const hi = Math.ceil((max + (max - min) * 0.05) / step) * step || step;
+    const lo = min < 0 ? Math.floor((min - (max - min) * 0.05) / step) * step : 0;
+    const ticks: number[] = [];
+    for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+    return { lo, hi, ticks };
+  };
+  const { lo, hi, ticks } = range(all);
+  const labelW = Math.max(...ticks.map((t) => textWidth(fmt(t), 9))) + 6;
+  // Where each bar segment starts and ends (stacked: on top of the series before it, by sign).
+  const segments = (i: number) => {
+    let up = 0, down = 0;
+    return spec.series.map((s) => {
+      const v = s.values[i];
+      if (v === undefined || !Number.isFinite(v)) return undefined;
+      if (!stacked) return { from: 0, to: v };
+      if (v >= 0) { const from = up; up += v; return { from, to: up }; }
+      const from = down; down += v; return { from, to: down };
+    });
+  };
   if (spec.kind === "bar") {
     // Horizontal bars: categories down the side, values along the bottom.
     const catW = Math.min(w * 0.3, Math.max(...spec.categories.map((c) => textWidth(c, 9))) + 8);
@@ -184,14 +229,15 @@ export function chartShapes(spec: ChartSpec, w: number, h: number): ChartShape[]
     }
     const band = (plotBottom - plotTop) / Math.max(1, n);
     const k = spec.series.length;
-    const barH = (band / (k + 1.2)) ;
+    const barH = stacked ? band * 0.6 : band / (k + 1.2);
     spec.categories.forEach((c, i) => {
       const y0 = plotBottom - band * (i + 1) + band * 0.1;
       out.push({ kind: "text", x: left - 4, y: y0 + band * 0.4 + 3, text: c, size: 9, color: text, anchor: "end" });
-      spec.series.forEach((s, j) => {
-        const v = s.values[i] ?? 0;
-        const xa = X(Math.min(0, v)), xb = X(Math.max(0, v));
-        out.push({ kind: "rect", x: xa, y: y0 + barH * (k - 1 - j + 0.1), w: Math.max(0.5, xb - xa), h: barH * 0.95, fill: color(j, s) });
+      segments(i).forEach((seg, j) => {
+        if (!seg) return;
+        const xa = X(Math.min(seg.from, seg.to)), xb = X(Math.max(seg.from, seg.to));
+        const y = stacked ? y0 + band * 0.1 : y0 + barH * (k - 1 - j + 0.1);
+        out.push({ kind: "rect", x: xa, y, w: Math.max(0.5, xb - xa), h: barH * 0.95, fill: color(j, spec.series[j]) });
       });
     });
     out.push({ kind: "line", x1: X(0), y1: plotTop, x2: X(0), y2: plotBottom, color: "BFBFBF", width: 0.75 });
@@ -206,19 +252,50 @@ export function chartShapes(spec: ChartSpec, w: number, h: number): ChartShape[]
     out.push({ kind: "line", x1: left, y1: Y(t), x2: right, y2: Y(t), color: "D9D9D9", width: 0.75 });
     out.push({ kind: "text", x: left - 4, y: Y(t) + 3, text: fmt(t), size: 9, color: text, anchor: "end" });
   }
+  if (spec.kind === "scatter") {
+    // Scatter: the categories are x values (numbers), on an axis of their own; a marker per point.
+    const xs = spec.categories.map((c) => Number(c));
+    const xr = range(xs.filter((v) => Number.isFinite(v)));
+    const X = (v: number) => left + ((v - xr.lo) / (xr.hi - xr.lo)) * (right - left);
+    for (const t of xr.ticks) {
+      out.push({ kind: "line", x1: X(t), y1: plotTop, x2: X(t), y2: plotBottom, color: "D9D9D9", width: 0.75 });
+      out.push({ kind: "text", x: X(t), y: plotBottom + 12, text: fmt(t), size: 9, color: text, anchor: "middle" });
+    }
+    out.push({ kind: "line", x1: left, y1: Y(0), x2: right, y2: Y(0), color: "BFBFBF", width: 0.75 });
+    spec.series.forEach((s, j) => {
+      s.values.forEach((v, i) => {
+        if (!Number.isFinite(v) || !Number.isFinite(xs[i])) return;
+        out.push({ kind: "path", d: circle(X(xs[i]), Y(v), 3.5), fill: color(j, s) });
+      });
+    });
+    return out;
+  }
   const band = (right - left) / Math.max(1, n);
   spec.categories.forEach((c, i) => {
     out.push({ kind: "text", x: left + band * (i + 0.5), y: plotBottom + 12, text: c, size: 9, color: text, anchor: "middle" });
   });
   if (spec.kind === "column") {
     const k = spec.series.length;
-    const barW = band / (k + 1.2);
-    spec.series.forEach((s, j) => {
-      s.values.forEach((v, i) => {
-        if (!Number.isFinite(v)) return;
-        const ya = Y(Math.max(0, v)), yb = Y(Math.min(0, v));
-        out.push({ kind: "rect", x: left + band * i + band * 0.1 + barW * (j + 0.1), y: ya, w: barW * 0.95, h: Math.max(0.5, yb - ya), fill: color(j, s) });
+    const barW = stacked ? band * 0.6 : band / (k + 1.2);
+    for (let i = 0; i < n; i++) {
+      segments(i).forEach((seg, j) => {
+        if (!seg) return;
+        const ya = Y(Math.max(seg.from, seg.to)), yb = Y(Math.min(seg.from, seg.to));
+        const x = stacked ? left + band * i + band * 0.2 : left + band * i + band * 0.1 + barW * (j + 0.1);
+        out.push({ kind: "rect", x, y: ya, w: barW * 0.95, h: Math.max(0.5, yb - ya), fill: color(j, spec.series[j]) });
       });
+    }
+  } else if (spec.kind === "area") {
+    // Areas: each series filled down to zero (or, stacked, down to the series below it); later ones in front.
+    const X = (i: number) => (left + band * (i + 0.5)).toFixed(2);
+    const base = new Array<number>(n).fill(0);
+    spec.series.forEach((s, j) => {
+      const lower = stacked ? [...base] : new Array<number>(n).fill(0);
+      const upper = lower.map((b, i) => b + finite(s.values[i]));
+      if (stacked) upper.forEach((v, i) => { base[i] = v; });
+      if (!n) return;
+      const d = `M${upper.map((v, i) => `${X(i)},${Y(v).toFixed(2)}`).join(" L")} L${lower.map((v, i) => `${X(i)},${Y(v).toFixed(2)}`).reverse().join(" L")} Z`;
+      out.push({ kind: "path", d, fill: color(j, s) });
     });
   } else {
     spec.series.forEach((s, j) => {
@@ -228,6 +305,11 @@ export function chartShapes(spec: ChartSpec, w: number, h: number): ChartShape[]
   }
   out.push({ kind: "line", x1: left, y1: Y(0), x2: right, y2: Y(0), color: "BFBFBF", width: 0.75 });
   return out;
+}
+
+/** A circle as a path (two arcs). */
+function circle(cx: number, cy: number, r: number): string {
+  return `M${(cx - r).toFixed(2)},${cy.toFixed(2)} A${r},${r} 0 1,1 ${(cx + r).toFixed(2)},${cy.toFixed(2)} A${r},${r} 0 1,1 ${(cx - r).toFixed(2)},${cy.toFixed(2)} Z`;
 }
 
 const escXml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");

@@ -2,24 +2,32 @@ import type { ChartData } from "@prime/docx";
 import { chartSvg } from "@prime/layout";
 import { useMemo, useState } from "react";
 
-const KINDS: [ChartData["kind"], string][] = [["column", "Column"], ["bar", "Bar"], ["line", "Line"], ["pie", "Pie"]];
+const KINDS: [ChartData["kind"], string][] = [
+  ["column", "Column"], ["bar", "Bar"], ["line", "Line"], ["area", "Area"], ["pie", "Pie"], ["doughnut", "Doughnut"], ["scatter", "Scatter"],
+];
+/** Kinds whose series can be stacked. */
+const STACKS: ChartData["kind"][] = ["column", "bar", "area"];
 
 /**
  * Insert → Chart (and double-click a chart to edit it): its kind, title and data — categories down the
- * side, a series per column — with a preview drawn as the page draws it. Pie charts use the first series.
+ * side, a series per column — with a preview drawn as the page draws it. Pie and doughnut charts use the
+ * first series; a scatter chart's first column holds the x values.
  */
 export function ChartDialog({ initial, editing, onOk, onClose }: {
   initial: ChartData; editing: boolean; onOk(data: ChartData): void; onClose(): void;
 }) {
   const [kind, setKind] = useState(initial.kind);
   const [title, setTitle] = useState(initial.title ?? "");
+  const [stacked, setStacked] = useState(!!initial.stacked);
   const [categories, setCategories] = useState(initial.categories);
-  const [series, setSeries] = useState(initial.series.map((s) => ({ name: s.name, values: s.values.map((v) => (Number.isFinite(v) ? String(v) : "")) })) as { name: string; values: string[] }[]);
+  const [series, setSeries] = useState(initial.series.map((s) => ({ name: s.name, ...(s.color ? { color: s.color } : {}), values: s.values.map((v) => (Number.isFinite(v) ? String(v) : "")) })) as { name: string; color?: string; values: string[] }[]);
+  const round = kind === "pie" || kind === "doughnut";
   const data: ChartData = useMemo(() => ({
-    kind, ...(title.trim() ? { title: title.trim() } : {}), categories,
-    series: series.map((s) => ({ name: s.name, values: categories.map((_, i) => (s.values[i] === undefined || s.values[i].trim() === "" ? NaN : Number(s.values[i]))) })),
-  }), [kind, title, categories, series]);
+    kind, ...(title.trim() ? { title: title.trim() } : {}), ...(stacked && STACKS.includes(kind) ? { stacked: true } : {}), categories,
+    series: series.map((s) => ({ name: s.name, ...(s.color ? { color: s.color } : {}), values: categories.map((_, i) => (s.values[i] === undefined || s.values[i].trim() === "" ? NaN : Number(s.values[i]))) })),
+  }), [kind, title, stacked, categories, series]);
   const svg = useMemo(() => chartSvg(data, 360, 216), [data]);
+  const badX = kind === "scatter" && categories.some((c) => !c.trim() || !Number.isFinite(Number(c)));
   const bad = data.series.some((s) => s.values.some((v, i) => series[data.series.indexOf(s)].values[i]?.trim() && !Number.isFinite(v)));
   const setValue = (j: number, i: number, v: string) => setSeries((ss) => ss.map((s, k) => (k === j ? { ...s, values: categories.map((_, n) => (n === i ? v : s.values[n] ?? "")) } : s)));
   return (
@@ -33,12 +41,17 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
                 <button key={k} role="radio" aria-checked={kind === k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{label}</button>
               ))}
             </div>
+            {STACKS.includes(kind) && (
+              <label className="choice" title="Each category's series on top of each other, showing their total">
+                <input type="checkbox" checked={stacked} onChange={(e) => setStacked(e.target.checked)} /> Stacked
+              </label>
+            )}
             <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chart title (optional)" aria-label="Chart title" /></label>
             <div className="chart-data" role="table" aria-label="Chart data">
               <table>
                 <thead>
                   <tr>
-                    <th />
+                    <th>{kind === "scatter" ? "X values" : ""}</th>
                     {series.map((s, j) => (
                       <th key={j}><input value={s.name} aria-label={`Series ${j + 1} name`} onChange={(e) => setSeries((ss) => ss.map((x, k) => (k === j ? { ...x, name: e.target.value } : x)))} /></th>
                     ))}
@@ -61,10 +74,12 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
             <div className="chart-rows">
               <button onClick={() => setCategories((cs) => [...cs, `Category ${cs.length + 1}`])}>+ Category</button>
               <button disabled={categories.length <= 1} onClick={() => { setCategories((cs) => cs.slice(0, -1)); setSeries((ss) => ss.map((s) => ({ ...s, values: s.values.slice(0, categories.length - 1) }))); }}>− Category</button>
-              <button disabled={kind === "pie"} onClick={() => setSeries((ss) => [...ss, { name: `Series ${ss.length + 1}`, values: categories.map(() => "") }])}>+ Series</button>
+              <button disabled={round} onClick={() => setSeries((ss) => [...ss, { name: `Series ${ss.length + 1}`, values: categories.map(() => "") }])}>+ Series</button>
               <button disabled={series.length <= 1} onClick={() => setSeries((ss) => ss.slice(0, -1))}>− Series</button>
             </div>
             {bad && <p className="error">Some values are not numbers; they are left out.</p>}
+            {badX && <p className="error">A scatter chart's x values (the first column) must be numbers.</p>}
+            {round && series.length > 1 && <p className="hint">A {kind} chart shows the first series only.</p>}
           </div>
           <div className="chart-preview" aria-label="Preview" dangerouslySetInnerHTML={{ __html: svg }} />
         </div>

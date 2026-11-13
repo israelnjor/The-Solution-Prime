@@ -9,8 +9,10 @@ import { EMU_PER_PT } from "./ooxml.js";
 import { toBase64 } from "./xml.js";
 
 export interface ChartData {
-  kind: "column" | "bar" | "line" | "pie";
+  kind: "column" | "bar" | "line" | "pie" | "area" | "doughnut" | "scatter";
   title?: string;
+  /** Column, bar and area: series stacked on each other. */
+  stacked?: boolean;
   categories: string[];
   series: { name: string; values: number[]; color?: string }[];
 }
@@ -34,29 +36,52 @@ export function chartXml(c: ChartData, workbookRelId: string): string {
   const strCache = (vals: string[]) => `<c:strCache><c:ptCount val="${vals.length}"/>${vals.map((v, i) => `<c:pt idx="${i}"><c:v>${esc(v)}</c:v></c:pt>`).join("")}</c:strCache>`;
   const numCache = (vals: number[]) => `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${vals.length}"/>${vals.map((v, i) => (Number.isFinite(v) ? `<c:pt idx="${i}"><c:v>${num(v)}</c:v></c:pt>` : "")).join("")}</c:numCache>`;
   const fill = (hex: string) => `<a:solidFill><a:srgbClr val="${hex}"/></a:solidFill>`;
+  const round = c.kind === "pie" || c.kind === "doughnut";
+  const stacked = !!c.stacked && (c.kind === "column" || c.kind === "bar" || c.kind === "area");
   const ser = (s: ChartData["series"][number], j: number) => {
     const color = s.color ?? NEW_CHART_COLORS[j % NEW_CHART_COLORS.length];
     const letter = col(j + 1);
     const look = c.kind === "line"
       ? `<c:spPr><a:ln w="28575" cap="rnd">${fill(color)}<a:round/></a:ln></c:spPr><c:marker><c:symbol val="none"/></c:marker>`
-      : c.kind === "pie"
+      : round
         ? `${c.categories.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr>${fill(NEW_CHART_COLORS[i % NEW_CHART_COLORS.length])}<a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join("")}`
-        : `<c:spPr>${fill(color)}<a:ln><a:noFill/></a:ln></c:spPr><c:invertIfNegative val="0"/>`;
-    return `<c:ser><c:idx val="${j}"/><c:order val="${j}"/><c:tx><c:strRef><c:f>Sheet1!$${letter}$1</c:f>${strCache([s.name])}</c:strRef></c:tx>${look}`
+        : c.kind === "scatter"
+          // Markers only (Word's default scatter): no line between the points.
+          ? `<c:spPr><a:ln w="25400" cap="rnd"><a:noFill/><a:round/></a:ln></c:spPr><c:marker><c:symbol val="circle"/><c:size val="5"/><c:spPr>${fill(color)}<a:ln w="9525">${fill(color)}</a:ln></c:spPr></c:marker>`
+          : c.kind === "area"
+            ? `<c:spPr>${fill(color)}<a:ln><a:noFill/></a:ln></c:spPr>`
+            : `<c:spPr>${fill(color)}<a:ln><a:noFill/></a:ln></c:spPr><c:invertIfNegative val="0"/>`;
+    const name = `<c:tx><c:strRef><c:f>Sheet1!$${letter}$1</c:f>${strCache([s.name])}</c:strRef></c:tx>`;
+    const values = `<c:numRef><c:f>Sheet1!$${letter}$2:$${letter}$${n + 1}</c:f>${numCache(s.values)}</c:numRef>`;
+    if (c.kind === "scatter") {
+      // The categories are the x values (numbers).
+      return `<c:ser><c:idx val="${j}"/><c:order val="${j}"/>${name}${look}`
+        + `<c:xVal><c:numRef><c:f>Sheet1!$A$2:$A$${n + 1}</c:f>${numCache(c.categories.map(Number))}</c:numRef></c:xVal>`
+        + `<c:yVal>${values}</c:yVal><c:smooth val="0"/></c:ser>`;
+    }
+    return `<c:ser><c:idx val="${j}"/><c:order val="${j}"/>${name}${look}`
       + `<c:cat><c:strRef><c:f>Sheet1!$A$2:$A$${n + 1}</c:f>${strCache(c.categories)}</c:strRef></c:cat>`
-      + `<c:val><c:numRef><c:f>Sheet1!$${letter}$2:$${letter}$${n + 1}</c:f>${numCache(s.values)}</c:numRef></c:val>`
+      + `<c:val>${values}</c:val>`
       + `${c.kind === "line" ? '<c:smooth val="0"/>' : ""}</c:ser>`;
   };
-  const series = (c.kind === "pie" ? c.series.slice(0, 1) : c.series).map(ser).join("");
+  const series = (round ? c.series.slice(0, 1) : c.series).map(ser).join("");
   const axes = `<c:axId val="508012001"/><c:axId val="508012002"/>`;
   const axisText = `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="900"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr>`;
+  // A scatter chart's x axis holds values too.
+  const xValAx = `<c:valAx><c:axId val="508012001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>${axisText}<c:crossAx val="508012002"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>`;
   const catAx = `<c:catAx><c:axId val="508012001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${c.kind === "bar" ? "l" : "b"}"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>${axisText}<c:crossAx val="508012002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>`;
   const valAx = `<c:valAx><c:axId val="508012002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${c.kind === "bar" ? "b" : "l"}"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${axisText}<c:crossAx val="508012001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>`;
   const group = c.kind === "pie"
     ? `<c:pieChart><c:varyColors val="1"/>${series}<c:firstSliceAng val="0"/></c:pieChart>`
-    : c.kind === "line"
-      ? `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${series}<c:marker val="1"/>${axes}</c:lineChart>${catAx}${valAx}`
-      : `<c:barChart><c:barDir val="${c.kind === "bar" ? "bar" : "col"}"/><c:grouping val="clustered"/><c:varyColors val="0"/>${series}<c:gapWidth val="219"/><c:overlap val="-27"/>${axes}</c:barChart>${catAx}${valAx}`;
+    : c.kind === "doughnut"
+      ? `<c:doughnutChart><c:varyColors val="1"/>${series}<c:firstSliceAng val="0"/><c:holeSize val="50"/></c:doughnutChart>`
+      : c.kind === "line"
+        ? `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${series}<c:marker val="1"/>${axes}</c:lineChart>${catAx}${valAx}`
+        : c.kind === "area"
+          ? `<c:areaChart><c:grouping val="${stacked ? "stacked" : "standard"}"/><c:varyColors val="0"/>${series}${axes}</c:areaChart>${catAx}${valAx}`
+          : c.kind === "scatter"
+            ? `<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series}${axes}</c:scatterChart>${xValAx}${valAx.replace('<c:crossBetween val="between"/>', '<c:crossBetween val="midCat"/>')}`
+            : `<c:barChart><c:barDir val="${c.kind === "bar" ? "bar" : "col"}"/><c:grouping val="${stacked ? "stacked" : "clustered"}"/><c:varyColors val="0"/>${series}<c:gapWidth val="${stacked ? 150 : 219}"/><c:overlap val="${stacked ? 100 : -27}"/>${axes}</c:barChart>${catAx}${valAx}`;
   const title = c.title
     ? `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1400"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:rPr><a:t>${esc(c.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>`
     : `<c:autoTitleDeleted val="1"/>`;
@@ -75,7 +100,7 @@ export function chartWorkbook(c: ChartData): Uint8Array {
     ? (Number.isFinite(v) ? `<c r="${ref}"><v>${v}</v></c>` : "")
     : `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`);
   const header = `<row r="1">${cell("A1", "")}${c.series.map((s, j) => cell(`${col(j + 1)}1`, s.name)).join("")}</row>`;
-  const rows = c.categories.map((cat, i) => `<row r="${i + 2}">${cell(`A${i + 2}`, cat)}${c.series.map((s, j) => cell(`${col(j + 1)}${i + 2}`, s.values[i])).join("")}</row>`).join("");
+  const rows = c.categories.map((cat, i) => `<row r="${i + 2}">${cell(`A${i + 2}`, c.kind === "scatter" && cat.trim() !== "" && Number.isFinite(Number(cat)) ? Number(cat) : cat)}${c.series.map((s, j) => cell(`${col(j + 1)}${i + 2}`, s.values[i])).join("")}</row>`).join("");
   const main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
   return zipSync({
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`),

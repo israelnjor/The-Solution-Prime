@@ -943,7 +943,7 @@ ${String(e)}`));
         const c = [at, at - 1].map((p) => chartAt(v2.state.doc, p, fileRef.current.base)).find(Boolean);
         if (c) {
           e.preventDefault();
-          setChartDialog({ pos: c.pos, data: c.spec ? { kind: c.spec.kind, ...(c.spec.title ? { title: c.spec.title } : {}), categories: c.spec.categories, series: c.spec.series } : SAMPLE_CHART });
+          setChartDialog({ pos: c.pos, data: c.spec ? { kind: c.spec.kind, ...(c.spec.title ? { title: c.spec.title } : {}), ...(c.spec.stacked ? { stacked: true } : {}), categories: c.spec.categories, series: c.spec.series } : SAMPLE_CHART });
         }
         return;
       }
