@@ -555,7 +555,19 @@ export function App() {
       if (!v2.dom.contains(e.target as Node)) return;
       // After the editor has taken the selection from the mouse.
       setTimeout(() => {
-        if (v2.state.selection.empty) return;
+        // A click on a word (no text selected): the whole word, as Word paints it. Between words: nothing.
+        if (v2.state.selection.empty) {
+          const $at = v2.state.selection.$from;
+          const text = $at.parent.textBetween(0, $at.parent.content.size, undefined, "￼");
+          const i = $at.parentOffset;
+          const isWord = (ch: string | undefined) => !!ch && /[\p{L}\p{N}_'’-]/u.test(ch);
+          if (!isWord(text[i]) && !isWord(text[i - 1])) return;
+          let a = i, b = i;
+          while (a > 0 && isWord(text[a - 1])) a--;
+          while (b < text.length && isWord(text[b])) b++;
+          const start = $at.start();
+          v2.dispatch(v2.state.tr.setSelection(TextSelection.create(v2.state.doc, start + a, start + b)));
+        }
         pasteFormat(painter.format)(v2.state, v2.dispatch);
         if (!painter.sticky) setPainter(undefined);
       }, 0);
