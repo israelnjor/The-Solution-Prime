@@ -975,3 +975,8 @@ button.link:hover { text-decoration: underline; }
    the letter takes no room and the paragraph it belongs to keeps the room beside its first lines (render.ts). */
 .pw-editor .ProseMirror.pw-columns > p.pw-dropcap.pw-span { float: none !important; height: 0 !important; margin-bottom: 0 !important; }
 .pw-editor .ProseMirror.pw-columns > p.pw-dropcap.pw-span + p.pw-dropcap-next::before { content: ""; float: left; width: var(--pw-dc-w); height: var(--pw-dc-h); }
+
+/* Insert → Chart: paste cells from Excel. */
+.chart-paste { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chart-paste button { padding: 4px 10px; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff; cursor: pointer; }
+.chart-paste .hint { color: var(--muted); font-size: 12px; }

@@ -955,6 +955,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group" aria-label="Data">
               <button className={state && isHeaderRow(state) ? "on" : ""} aria-pressed={!!(state && isHeaderRow(state))} onClick={run(toggleHeaderRows)} title="Repeat the selected top rows on every page the table runs onto">Repeat Header Rows</button>
               <button onClick={onSortTable} title="Sort the rows by a column">Sort…</button>
+              <button onClick={onChart} title="A chart of this table's numbers: the first row names the series, the first column the categories">Chart from Table…</button>
               <button onClick={run(tableToText())} title="Turn the table into text, cells separated by tabs">Convert to Text</button>
             </div>
           </>

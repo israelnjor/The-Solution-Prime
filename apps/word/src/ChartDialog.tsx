@@ -1,4 +1,5 @@
 import type { ChartData } from "@prime/docx";
+import { chartFromGrid } from "@prime/editor";
 import { CHART_PALETTES, chartSvg } from "@prime/layout";
 import { useMemo, useState } from "react";
 
@@ -35,6 +36,27 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
   // The colour set in use: the one chosen, or the one the series' own colours match.
   const own = series.map((s) => s.color).filter(Boolean).join(",");
   const activePalette = CHART_PALETTES.find((p) => (colors?.length ? p.colors.slice(0, colors.length).join(",") === colors.join(",") : own ? p.colors.slice(0, series.length).join(",") === own : p.id === "office"))?.id;
+  // Cells pasted from Excel (tab-separated rows) or a CSV: they become the chart's data.
+  const [pasteNote, setPasteNote] = useState<string>();
+  const usePasted = (text: string): boolean => {
+    if (!/[\t\n]/.test(text.trim())) return false;
+    const sep = text.includes("\t") ? "\t" : ",";
+    const grid = text.replace(/\r/g, "").split("\n").map((line) => line.split(sep));
+    const got = chartFromGrid(grid, kind);
+    if (!got) { setPasteNote("The pasted cells have no numbers to chart."); return true; }
+    setCategories(got.categories);
+    setSeries(got.series.map((s) => ({ name: s.name, values: s.values.map((v) => (Number.isFinite(v) ? String(v) : "")) })));
+    setPasteNote(`Pasted ${got.categories.length} ${got.categories.length === 1 ? "row" : "rows"} × ${got.series.length} ${got.series.length === 1 ? "series" : "series"}.`);
+    return true;
+  };
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!usePasted(text)) setPasteNote("Copy a block of cells first (in Excel, or a table), then paste.");
+    } catch {
+      setPasteNote("Click a cell in the table below and press Ctrl+V.");
+    }
+  };
   const choosePalette = (c: string[]) => { setColors(c); setSeries((ss) => ss.map(({ color: _, ...s }) => s)); };
   const svg = useMemo(() => chartSvg(data, 360, 216), [data]);
   const badX = kind === "scatter" && categories.some((c) => !c.trim() || !Number.isFinite(Number(c)));
@@ -79,7 +101,12 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
               </div>
             </fieldset>
             <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chart title (optional)" aria-label="Chart title" /></label>
-            <div className="chart-data" role="table" aria-label="Chart data">
+            <div className="chart-paste">
+              <button onClick={() => void pasteFromClipboard()} title="Use cells copied from Excel or a table: the first row names the series, the first column the categories">Paste from Excel</button>
+              <span className="hint">{pasteNote ?? "Or copy cells in Excel and press Ctrl+V in the table."}</span>
+            </div>
+            <div className="chart-data" role="table" aria-label="Chart data"
+              onPaste={(e) => { if (usePasted(e.clipboardData.getData("text/plain"))) e.preventDefault(); }}>
               <table>
                 <thead>
                   <tr>

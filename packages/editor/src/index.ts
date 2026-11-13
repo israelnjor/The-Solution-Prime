@@ -53,4 +53,4 @@ export { BODY, changeOutlineLevel, outlineKey, outlineLevelAt, outlinePlugin, ou
 export { compareDocuments } from "./compare.js";
 export { extensionOf, type FileFormat, FORMAT_NAMES, formatOf, readAnyFormat, WRITABLE, writeFormat } from "./formats/index.js";
 export { insertShape, type ShapeChoice, SHAPES, setShapeFill, setShapeLine, shapeAt } from "./shapes.js";
-export { chartAt, insertChart, SAMPLE_CHART, setChartData } from "./charts.js";
+export { chartAt, chartFromGrid, insertChart, insertChartAfter, parseChartNumber, SAMPLE_CHART, setChartData, tableAtCursor } from "./charts.js";

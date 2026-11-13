@@ -1,7 +1,7 @@
 import { Fragment, type Node as PmNode, type Schema, DOMParser as PmDOMParser } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, chartAt, insertChart, SAMPLE_CHART, setChartData, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, createRender, createSchema, exitEmptyListItem, splitParagraph, tabKey, shiftTabKey, backspaceAtParagraphStart, findPlugin, fromProseMirror,
+  blankDocument, chartAt, chartFromGrid, insertChart, insertChartAfter, SAMPLE_CHART, setChartData, tableAtCursor, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, createRender, createSchema, exitEmptyListItem, splitParagraph, tabKey, shiftTabKey, backspaceAtParagraphStart, findPlugin, fromProseMirror,
   caretBetweenAtoms, insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -162,7 +162,7 @@ export function App() {
   /** A text box being typed in (double-clicked): its position and its layer on the page. */
   const [editingBox, setEditingBox] = useState<{ pos: number; el: HTMLElement } | null>(null);
   /** Insert → Chart, or a chart double-clicked (its position) to edit. */
-  const [chartDialog, setChartDialog] = useState<{ pos?: number; data: import("@prime/docx").ChartData } | null>(null);
+  const [chartDialog, setChartDialog] = useState<{ pos?: number; afterTable?: number; data: import("@prime/docx").ChartData } | null>(null);
   // The Print dialog or Read Mode, over the PDF of the document's pages.
   const [pdfView, setPdfView] = useState<{ kind: "print" | "read"; pdf: ViewPdf; pages: number; current: number } | null>(null);
   // The navigation pane: open or not (remembered), and a counter that puts the cursor in its search box (Ctrl+F).
@@ -1203,7 +1203,13 @@ ${String(e)}`));
         showMarks={marksOn} onShowMarks={toggleMarks}
         onCompare={() => void compareWith()}
         onProtect={() => setPasswordAsk({ mode: "set" })}
-        onThesaurus={() => setThesaurusOpen(true)} onChart={() => setChartDialog({ data: SAMPLE_CHART })}
+        onThesaurus={() => setThesaurusOpen(true)} onChart={() => {
+          // The cursor in a table with numbers: a chart of the table, placed after it (as Word's charts from Excel data).
+          const t = v ? tableAtCursor(v.state) : undefined;
+          const fromTable = t ? chartFromGrid(t.grid) : undefined;
+          if (t && !fromTable) flash("This table has no numbers to chart: the chart starts with sample data.");
+          setChartDialog(fromTable && t ? { data: fromTable, afterTable: t.end } : { data: SAMPLE_CHART });
+        }}
         onEditChart={(pos) => {
           const c = v && chartAt(v.state.doc, pos, fileRef.current.base);
           if (c) setChartDialog({ pos, data: c.spec ? (({ border: _, ...spec }) => spec)(c.spec) : SAMPLE_CHART });
@@ -1330,6 +1336,7 @@ ${String(e)}`));
           onOk={(data) => {
             const base = () => fileRef.current.base;
             if (chartDialog.pos !== undefined) setChartData(base, chartDialog.pos, data)(v.state, v.dispatch);
+            else if (chartDialog.afterTable !== undefined) insertChartAfter(base, data, chartDialog.afterTable)(v.state, v.dispatch);
             else insertChart(base, data)(v.state, v.dispatch);
             setChartDialog(null);
             v.focus();
