@@ -25,7 +25,14 @@ export function ShareMenu({ onShare, className, label = "Share" }: { onShare(for
   return (
     <div className="share-menu" ref={box}>
       <button className={className} onClick={toggle} aria-expanded={open} aria-haspopup="menu"
-        title="Send a copy of this document: by email, WhatsApp, Nearby Share…">{label}</button>
+        title="Send a copy of this document: by email, WhatsApp, Nearby Share…">
+        {/* The share symbol: three connected dots. */}
+        <svg className="share-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <circle cx={12} cy={3.5} r={2} /><circle cx={4} cy={8} r={2} /><circle cx={12} cy={12.5} r={2} />
+          <path d="M5.8 7l4.4-2.5M5.8 9l4.4 2.5" />
+        </svg>
+        <span>{label}</span>
+      </button>
       {open && (
         <div className="share-popup" role="menu" style={at ? { position: "fixed", top: at.top, left: at.left, right: "auto" } : undefined}>
           <p>Send a copy as</p>

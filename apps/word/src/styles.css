@@ -1000,3 +1000,6 @@ button.link:hover { text-decoration: underline; }
 
 /* Insert tab: an icon before the Shapes and Drop Cap lists (as on its buttons). */
 .toolbar .select-icon { display: inline-flex; align-items: center; margin: 0 -2px 0 4px; color: #3b4a5e; }
+/* Share buttons: the share symbol before the word. */
+.share-menu > button { display: inline-flex; align-items: center; gap: 6px; }
+.share-menu > button .share-icon { flex-shrink: 0; }
