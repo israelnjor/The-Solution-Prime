@@ -195,22 +195,27 @@ export function createSchema(render?: Render): Schema {
       },
     },
     marks: {
-      // Containers, outermost first: the converter rebuilds nesting in this order.
+      // Containers, outermost first: the converter rebuilds nesting in this order. Each can hold another
+      // of its kind (excludes ""), as in Word: a link inside a link (tables of contents), a field inside a
+      // field, a content control inside another. `again` tells apart one inside an identical one (Word
+      // writes a mailto link inside the same link): marks are a set, and equal marks would merge.
       revision: {
-        attrs: { kind: {}, attrs: { default: {} } },
+        attrs: { kind: {}, attrs: { default: {} }, again: { default: 0 } },
         inclusive: false,
         excludes: "",
         toDOM: (m) => [m.attrs.kind === "del" ? "del" : "ins", { class: `pw-${m.attrs.kind}`, "data-pw-revision": json(m.attrs) }, 0],
         parseDOM: [{ tag: "[data-pw-revision]", priority: 100, getAttrs: (el) => parse(el as HTMLElement, "data-pw-revision") }],
       },
       inline_control: {
-        attrs: { settings: { default: [] } },
+        attrs: { settings: { default: [] }, again: { default: 0 } },
+        excludes: "",
         toDOM: (m) => ["span", { class: "pw-content-control", "data-pw-inlinecontrol": json(m.attrs.settings) }, 0],
         parseDOM: [own("span", "data-pw-inlinecontrol", (settings) => ({ settings }))],
       },
       link: {
-        attrs: { href: { default: null }, anchor: { default: null }, tooltip: { default: null } },
+        attrs: { href: { default: null }, anchor: { default: null }, tooltip: { default: null }, again: { default: 0 } },
         inclusive: false,
+        excludes: "",
         toDOM: (m) => ["a", {
           href: m.attrs.href ?? `#${m.attrs.anchor ?? ""}`, title: m.attrs.tooltip ?? m.attrs.href ?? "", "data-pw-link": json(m.attrs),
         }, 0],
@@ -226,8 +231,9 @@ export function createSchema(render?: Render): Schema {
         ],
       },
       field: {
-        attrs: { instr: { default: "" } },
+        attrs: { instr: { default: "" }, again: { default: 0 } },
         inclusive: false,
+        excludes: "",
         toDOM: (m) => ["span", { class: "pw-field", "data-pw-field": m.attrs.instr }, 0],
         parseDOM: [{ tag: "span[data-pw-field]", priority: 100, getAttrs: (el) => ({ instr: (el as HTMLElement).getAttribute("data-pw-field") }) }],
       },

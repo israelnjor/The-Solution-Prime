@@ -60,7 +60,8 @@ export function setLink(href: string, text?: string): Command {
     } else if (empty) {
       const label = text || href;
       tr.insertText(label, from);
-      tr.addMark(from, from + label.length, link.create({ href }));
+      // (Typed inside another link: this one replaces it there, rather than nesting in it.)
+      tr.removeMark(from, from + label.length, link).addMark(from, from + label.length, link.create({ href }));
       tr.setSelection(TextSelection.create(tr.doc, from + label.length));
     } else {
       tr.removeMark(from, to, link).addMark(from, to, link.create({ href }));

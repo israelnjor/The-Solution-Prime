@@ -50,6 +50,12 @@ function table(t: Table, schema: Schema): Node {
 function inlines(items: Inline[], schema: Schema, marks: readonly Mark[]): Node[] {
   const out: Node[] = [];
   const n = schema.nodes;
+  // A container inside an identical one (Word writes a mailto link inside the same link): numbered
+  // (`again`), or the editor's set of marks would merge the two and the file would lose one.
+  const within = (m: Mark) => {
+    const same = marks.filter((x) => x.type === m.type && x.eq(m.type.create({ ...m.attrs, again: x.attrs.again })));
+    return [...marks, same.length ? m.type.create({ ...m.attrs, again: same.length }) : m];
+  };
   for (const i of items) {
     const runMarks = "props" in i && i.props ? [...marks, schema.marks.run.create({ props: i.props })] : marks;
     switch (i.type) {
@@ -71,16 +77,16 @@ function inlines(items: Inline[], schema: Schema, marks: readonly Mark[]): Node[
       case "runPreserved": out.push(n.run_preserved.create({ props: i.props ?? {}, preserved: i.preserved, float: i.float ?? null }, null, marks)); break;
       case "preserved": out.push(n.inline_preserved.create({ preserved: i.preserved }, null, marks)); break;
       case "link":
-        out.push(...inlines(i.content, schema, [...marks, schema.marks.link.create({
+        out.push(...inlines(i.content, schema, within(schema.marks.link.create({
           href: i.href ?? null, anchor: i.anchor ?? null, tooltip: i.tooltip ?? null,
-        })]));
+        }))));
         break;
-      case "field": out.push(...inlines(i.content, schema, [...marks, schema.marks.field.create({ instr: i.instr })])); break;
+      case "field": out.push(...inlines(i.content, schema, within(schema.marks.field.create({ instr: i.instr })))); break;
       case "contentControl":
-        out.push(...inlines(i.content, schema, [...marks, schema.marks.inline_control.create({ settings: i.settings })]));
+        out.push(...inlines(i.content, schema, within(schema.marks.inline_control.create({ settings: i.settings }))));
         break;
       case "revision":
-        out.push(...inlines(i.content, schema, [...marks, schema.marks.revision.create({ kind: i.kind, attrs: i.attrs })]));
+        out.push(...inlines(i.content, schema, within(schema.marks.revision.create({ kind: i.kind, attrs: i.attrs }))));
         break;
     }
   }
@@ -162,7 +168,10 @@ function paragraph(node: Node): Paragraph {
 
 const sameMark = (a: Mark | undefined, b: Mark | undefined) => (!a && !b) || (!!a && !!b && a.eq(b));
 
-/** Rebuilds container nesting (revision > content control > link > field) from marks. */
+/**
+ * Rebuilds container nesting (revision > content control > link > field) from marks. A container
+ * inside one of its own kind (a link in a link) is a second mark of that type, after the outer one.
+ */
 function nest(nodes: Node[], level: number): Inline[] {
   if (level === CONTAINER_MARKS.length) return nodes.map(leaf);
   const type = CONTAINER_MARKS[level];
@@ -173,7 +182,8 @@ function nest(nodes: Node[], level: number): Inline[] {
     let j = i + 1;
     while (j < nodes.length && sameMark(nodes[j].marks.find((m) => m.type.name === type), mark)) j++;
     const group = nodes.slice(i, j);
-    const inner = nest(group, level + 1);
+    // Inside it: the same level again without this mark (for one of its own kind within), then the next.
+    const inner = mark ? nest(group.map((n) => n.mark(mark.removeFromSet(n.marks))), level) : nest(group, level + 1);
     if (!mark) out.push(...inner);
     else if (type === "revision") out.push({ type: "revision", kind: mark.attrs.kind, attrs: mark.attrs.attrs, content: inner });
     else if (type === "inline_control") out.push({ type: "contentControl", settings: mark.attrs.settings, content: inner });

@@ -6,7 +6,10 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-10, after Waves 0–6): about 75%
+## Where we are (2026-11-13, after Waves 0–6 and a round of polish from real use): about 75–78%
+
+The 1.0 target is reached. **Feature freeze for 1.0**: from here the work is shipping (see Release
+below); a new feature goes in only if a test user is blocked without it.
 
 | Area | Feature | Status |
 |---|---|---|
@@ -14,16 +17,19 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Export PDF, PDF → Word converter; Print dialog (pages, preview; printer, copies and two-sided in the system's window) | ✅ |
 | | Open .doc, .rtf, .odt, .txt; save as .rtf, .odt, .txt (and .docx) | ✅ |
 | | Document properties (File → Info: title, author, tags, statistics), password protection (Word's encryption: opens Word's, Word opens ours) | ✅ |
+| | Share (Windows' share panel: a Word copy or a PDF, to WhatsApp, email, Nearby Share…), delete pages | ✅ |
+| | Drop files on the window (documents open in a tab; a PDF goes to the converter, confirmed with its first page, pages and size) | ✅ |
 | | Save as .doc, version history | ❌ |
-| **Home: font** | Font, size, colour, highlight, bold/italic/underline/strike | ✅ |
+| **Home: font** | Font, size, colour, bold/italic/underline/strike; highlight in any colour (Word's highlighter colours, any other as shading) | ✅ |
 | | Superscript/subscript, grow/shrink font, change case, clear formatting, underline styles, character spacing, font dialog | ✅ |
 | | Small caps (saved, not drawn), text effects (shadow, outline, glow) | ❌ |
 | **Home: clipboard** | Cut/copy/paste (Word and web formatting kept) | ✅ |
 | | Paste options (keep source, merge, text only), format painter, Ctrl+Shift+C / V | ✅ |
-| **Home: paragraph** | Alignment, line/paragraph spacing, indents, bullets, numbering, list levels | ✅ |
+| **Home: paragraph** | Alignment, line/paragraph spacing, indents (buttons, Tab/Shift+Tab), bullets, numbering, list levels | ✅ |
+| | Sub-lists (Bullets/Numbering in a list item; bullets under numbers and the reverse), bullet library (9 symbols), numbering library (7 styles); Enter keeps the paragraph's formatting, as Word does | ✅ |
 | | Borders (basic) | 🟡 |
 | | Show ¶ marks, ruler (indents, tab stops), tab stops on screen, line and page breaks, tabs dialog | ✅ |
-| | Multilevel list library, shading, sort | ❌ |
+| | Multilevel numbering (1, 1.1, 1.1.1), paragraph shading, sort | ❌ |
 | **Home: styles** | Apply paragraph styles | ✅ |
 | | Create / modify styles (Styles dialog), style sets, theme fonts and colours (Design tab) | ✅ |
 | **Home: editing** | Find / Replace | ✅ |
@@ -31,10 +37,11 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Find options (formatting, wildcards), Go To | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
 | | Equations: insert and edit (LaTeX notation, live preview, saved as Word equations) | ✅ |
-| | Text boxes (insert, type in them, move, resize, fill and border), shapes (13 everyday shapes: insert, fill, outline, wrap), charts (column, bar, line, pie: insert, edit data; Word's charts shown) | ✅ |
+| | Text boxes (insert, type in them, move, resize, fill and border), shapes (13 everyday shapes: insert, fill, outline, wrap) | ✅ |
+| | Charts: column, bar, line, area, pie, doughnut, scatter, stacked; colour sets, legend, data labels, gridlines, title; a Chart Design tab; data typed, pasted from Excel, or taken from a table in the document; Word's charts shown and editable | ✅ |
 | | Symbol (with ₵ and ₦), date & time (as text or a DATE field) | ✅ |
 | | Section and column breaks, drop cap | ✅ |
-| | SmartArt, WordArt, other chart kinds (area, scatter, 3-D), shape effects | ❌ |
+| | SmartArt, WordArt, 3-D charts, shape effects | ❌ |
 | **Design** | Style sets, theme fonts and colours, watermark, page colour, page borders | ✅ |
 | **Layout** | Margins, orientation, size, indents/spacing | ✅ |
 | | Floating objects: move/resize | ✅ |
@@ -47,7 +54,7 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 | | Restrict editing, full grammar and style checking | ❌ |
 | **View** | Print / Web layout, zoom, ruler, formatting marks, navigation pane (headings: jump, collapse, drag to move a section) | ✅ |
 | | Read mode (one or two pages side by side), outline view (levels, promote/demote, show level, fold), One Page / Page Width zoom | ✅ |
-| | Pages side by side while editing, vertical ruler, dark mode | ❌ |
+| | Pages side by side while editing, vertical ruler, dark mode; on screen, a section with a different column count or page width shows its text in one column (it prints right) | ❌ |
 | **Tables** | Insert, add/delete rows and columns, Tab navigation, merge/split cells, borders & shading per cell, table styles (Word's conditional formats: header/total row, banding, first/last column) with options, cell alignment, column resize by dragging, distribute/AutoFit, repeat header rows, sort, text↔table | ✅ |
 | | Row height, cell margins, nested-table tools, formulas, draw table | ❌ |
 | **Pictures** | Insert, inline/floating display, wrap options, drag anywhere, crop, rotate, alt text | ✅ |
@@ -61,7 +68,7 @@ Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) ·
 - **PDF → Word built in**, offline, free — Word needs Acrobat or online services for good results.
 - **Offline and private**: nothing leaves the computer; no account, no subscription.
 - **Fast on long documents** (145 pages: ~28 ms per keystroke until painted, no freezes while typing)
-  and a small installer (6.2 MB, PDF converter and thesaurus included).
+  and a small installer (6.3 MB, PDF converter and thesaurus included).
 - **Faithful to Word's layout**: same pages, same line positions (measured against Word itself).
 - **Make it yours**: design a letterhead in a minute; turn a phone photo of a signature into a clean
   e-signature; keep signature blocks, addresses and company stamps and insert them left, centre or
@@ -112,8 +119,51 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    documents and converted PDFs are saved straight into it; files can be copied in; tabs and the window
    title show the project. Next: version history per document (restore, compare) and zip backup (phase 2);
    notes, checklist, activity and search across a project (phase 3); project templates (phase 4).
-8. **Release** — text recognition for PDFs without text ✅ (2026-11-10: scanned pages and pages printed
-   as outlines, e.g. by Microsoft Print to PDF, read by Windows' own offline recogniser — about half a
-   second a page; macOS and Linux not yet), code signing, automatic updates, About/version, user guide.
+   **Polish from real use** ✅ (2026-11-11 to 11-13) — share (Windows' share panel), delete pages; lists
+   (Enter continues a list, sub-lists, bullet and numbering libraries, Tab and the indent buttons on any
+   paragraph); highlight in any colour; charts completed (see Insert); format painter on a single click;
+   files dropped on the window; the PDF converter confirms before converting. Fixed: typing after a page
+   break (and between two breaks), lines overlapping after the text was made bigger, list formatting lost
+   on screen, landscape sections in a portrait document (a new page, as Word does; margins kept while
+   typing), drop caps beside the text where the page has text columns, the ribbon at half-screen width.
+8. **Release** (next — feature freeze) — text recognition for PDFs without text ✅ (2026-11-10: scanned
+   pages and pages printed as outlines, e.g. by Microsoft Print to PDF, read by Windows' own offline
+   recogniser — about half a second a page; macOS and Linux not yet). To do, in order:
+   1. Code signing (without it Windows SmartScreen warns people off the installer).
+   2. Automatic updates (so fixes reach people after they install).
+   3. About / version.
+   4. User guide (short: the everyday tasks and what is ours — PDF → Word, letterheads, signatures).
+   5. Bug-fix pass: real documents (reports, papers, company documents); every problem found is fixed
+      and re-checked.
+   6. Test users: 5–10 people from the target market (colleagues, researchers, small offices) on the
+      installer before a wide release.
 
-Later (1.x): mailings and mail merge, SmartArt, index, macros, collaboration, AI features.
+Later (1.x), in order of value to the target market: multilevel numbering (1, 1.1, 1.1.1), restrict
+editing, fuller grammar and style checking, index and table of authorities, paragraph shading, Find
+options and Go To, row height and cell margins, picture styles and adjustments, mailings and mail
+merge, SmartArt, macros, version history (Projects phase 2), real-time collaboration, AI features.
+
+## Business: users, licences and payments (decided 2026-11-13, details pending)
+
+- **Who it is for:** professionals — workers, researchers, publishers and corporate staff (not mainly
+  students).
+- **Who pays:** individuals, and companies buying licences (seats) for their workers.
+- **How:** yearly licences.
+- **What is free and what is paid:** to be decided.
+- **Proposed design** (to confirm before building):
+  - No account to use Prime Word. A licence key carries its expiry date and a signature that the app
+    checks offline. Renewal: the app fetches the renewed key when online, or the person pastes it; a
+    grace period after expiry. When a licence lapses, documents stay openable, readable and exportable.
+  - Companies: an admin page for the buyer (seats bought, who has one, assign / move / revoke), signed in
+    with an emailed link. The only online service, and it holds licences, never documents.
+  - Payments: a merchant of record (Paddle or Lemon Squeezy) for international buyers (VAT, yearly
+    billing, invoices); Paystack for Ghana and Africa (MoMo, cards, cedis); bank transfer against an
+    invoice for larger companies (by hand at first). Payout support and fees to be checked for each.
+- **Waits for:** the company's registration (planned within 2026); the Microsoft Store account is then
+  opened as the company.
+
+Other systems (after 1.0, which is Windows only): **Linux** first (no signing cost; AppImage/.deb, Flathub),
+then **macOS** (Apple Developer Program, $99/year, for signing and notarisation; built and tested on a Mac).
+Both need: the share panel (Windows-only today), text recognition for scanned PDFs (Windows' recogniser
+today; macOS has its own), metric-compatible fonts where Calibri/Cambria are missing (layout fidelity),
+and a check of the system web view's differences.

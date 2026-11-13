@@ -1717,6 +1717,10 @@ export class LayoutEngine {
               }
               // No room beside: the line moves below all the objects beside it (as Word does: with a
               // picture on each side, below the lower one). A paragraph pushed down keeps its space before.
+              // Known gap: with two caption boxes side by side (square wrap), Word continues beside the
+              // longer once the shorter ends (a real document: 14pt lower here); stepping to the first end
+              // fixed that page but broke one with a square and a tight picture side by side, where Word
+              // waits for the lower — the rule that tells them apart is not known yet.
               return { skipTo: Math.max(...over.map((e) => e.y2)) - paraTop + (dy === 0 ? rp.spaceBefore : 0) };
             };
             remaining = exclusions.some((e) => e.y2 > y) ? this.breakLines(box.para, rp, width, slot) : box.lines;
