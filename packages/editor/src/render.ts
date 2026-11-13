@@ -219,6 +219,39 @@ function textOnly(tr: Transaction): boolean {
 }
 
 /**
+ * Whether an edit changed the kinds of text in a paragraph (font, size, bold, italic, raised/lowered):
+ * the paragraph's line height follows its text (paragraphStyles), so a bigger font must not keep the
+ * old, shorter lines (they overlapped). Typing more of the same text changes nothing here.
+ */
+function runsChanged(tr: Transaction): boolean {
+  const kinds = (para: Node) => {
+    const out = new Set<string>();
+    para.forEach((n) => {
+      if (!n.isText) return;
+      const p = n.marks.find((m) => m.type.name === "run")?.attrs.props ?? {};
+      out.add(JSON.stringify([p.font, p.size, p.bold, p.italic, p.vertAlign, p.style]));
+    });
+    return out;
+  };
+  return tr.steps.some((step, i) => {
+    const before = tr.docs[i];
+    const after = i + 1 < tr.docs.length ? tr.docs[i + 1] : tr.doc;
+    const { from, to } = step as ReplaceStep | AddMarkStep | RemoveMarkStep;
+    let changed = false;
+    before.nodesBetween(from, Math.max(from, to), (node, pos) => {
+      if (changed) return false;
+      if (!node.isTextblock) return true;
+      const now = after.nodeAt(step.getMap().map(pos, -1));
+      if (!now) return false;
+      const a = kinds(node), b = kinds(now);
+      changed = a.size !== b.size || [...a].some((k) => !b.has(k));
+      return false;
+    });
+    return changed;
+  });
+}
+
+/**
  * Web Layout (no pages, no layout engine): a paragraph's floating objects in one block below it,
  * placed relative to each other as in the document (offsets from the column and the paragraph);
  * the text continues below them. Text box heights are estimated from their text.
@@ -596,7 +629,7 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
     key,
     state: {
       init: (_, state) => build(state.doc),
-      apply: (tr, old) => (!tr.docChanged ? old : textOnly(tr) ? timed("styles.map", () => carry(tr, old)) : timed("styles.build", () => build(tr.doc))),
+      apply: (tr, old) => (!tr.docChanged ? old : textOnly(tr) && !runsChanged(tr) ? timed("styles.map", () => carry(tr, old)) : timed("styles.build", () => build(tr.doc))),
     },
     props: {
       decorations: (state) => key.getState(state)?.decorations,
