@@ -50,10 +50,7 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 .toolbar button:disabled { opacity: 0.4; cursor: default; }
 .toolbar button.on { background: #d0dcef; border-color: #a9bfe0; }
 .toolbar button:has(> .icon) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
-/* Buttons show they can be clicked: a very light fill (lighter than hover). */
-.toolbar button:not(.on):not(:disabled) { background: #f5f7fa; }
-.toolbar button:not(.on):not(:disabled):hover { background: #e9edf3; }
-.toolbar button.launcher { background: transparent; }
+/* Buttons are plain (no fill) until hovered; a button that is on (Bold, a chosen alignment) stays blue. */
 /* Ends a toolbar row: what follows starts the next one. */
 .toolbar .row-break { flex-basis: 100%; height: 0; }
 /* A thin line between kinds of buttons inside one group (alignment | lists). */
