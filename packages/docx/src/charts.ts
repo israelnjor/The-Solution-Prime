@@ -13,6 +13,14 @@ export interface ChartData {
   title?: string;
   /** Column, bar and area: series stacked on each other. */
   stacked?: boolean;
+  /** The legend's place (default bottom; none: no legend). */
+  legend?: "bottom" | "top" | "right" | "none";
+  /** Each value written on its bar, point or slice. */
+  labels?: boolean;
+  /** The value gridlines (default: shown). */
+  gridlines?: boolean;
+  /** The colour set, for series without a colour of their own (and a pie's slices). */
+  colors?: string[];
   categories: string[];
   series: { name: string; values: number[]; color?: string }[];
 }
@@ -37,14 +45,15 @@ export function chartXml(c: ChartData, workbookRelId: string): string {
   const numCache = (vals: number[]) => `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${vals.length}"/>${vals.map((v, i) => (Number.isFinite(v) ? `<c:pt idx="${i}"><c:v>${num(v)}</c:v></c:pt>` : "")).join("")}</c:numCache>`;
   const fill = (hex: string) => `<a:solidFill><a:srgbClr val="${hex}"/></a:solidFill>`;
   const round = c.kind === "pie" || c.kind === "doughnut";
+  const palette = c.colors?.length ? c.colors : NEW_CHART_COLORS;
   const stacked = !!c.stacked && (c.kind === "column" || c.kind === "bar" || c.kind === "area");
   const ser = (s: ChartData["series"][number], j: number) => {
-    const color = s.color ?? NEW_CHART_COLORS[j % NEW_CHART_COLORS.length];
+    const color = s.color ?? palette[j % palette.length];
     const letter = col(j + 1);
     const look = c.kind === "line"
       ? `<c:spPr><a:ln w="28575" cap="rnd">${fill(color)}<a:round/></a:ln></c:spPr><c:marker><c:symbol val="none"/></c:marker>`
       : round
-        ? `${c.categories.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr>${fill(NEW_CHART_COLORS[i % NEW_CHART_COLORS.length])}<a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join("")}`
+        ? `${c.categories.map((_, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr>${fill(palette[i % palette.length])}<a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join("")}`
         : c.kind === "scatter"
           // Markers only (Word's default scatter): no line between the points.
           ? `<c:spPr><a:ln w="25400" cap="rnd"><a:noFill/><a:round/></a:ln></c:spPr><c:marker><c:symbol val="circle"/><c:size val="5"/><c:spPr>${fill(color)}<a:ln w="9525">${fill(color)}</a:ln></c:spPr></c:marker>`
@@ -64,13 +73,20 @@ export function chartXml(c: ChartData, workbookRelId: string): string {
       + `<c:val>${values}</c:val>`
       + `${c.kind === "line" ? '<c:smooth val="0"/>' : ""}</c:ser>`;
   };
-  const series = (round ? c.series.slice(0, 1) : c.series).map(ser).join("");
+  // Data labels (the values), after the series in every kind of chart group.
+  const dLbls = c.labels
+    ? `<c:dLbls><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="800"><a:solidFill><a:srgbClr val="404040"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr>`
+      + `<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`
+    : "";
+  const series = (round ? c.series.slice(0, 1) : c.series).map(ser).join("") + dLbls;
+  // Gridlines off: the value axis (and a scatter chart's x axis) without them.
+  const grid = (axis: string) => (c.gridlines === false ? axis.replace(/<c:majorGridlines>[\s\S]*?<\/c:majorGridlines>/, "") : axis);
   const axes = `<c:axId val="508012001"/><c:axId val="508012002"/>`;
   const axisText = `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="900"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr>`;
   // A scatter chart's x axis holds values too.
-  const xValAx = `<c:valAx><c:axId val="508012001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>${axisText}<c:crossAx val="508012002"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>`;
+  const xValAx = grid(`<c:valAx><c:axId val="508012001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>${axisText}<c:crossAx val="508012002"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>`);
   const catAx = `<c:catAx><c:axId val="508012001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${c.kind === "bar" ? "l" : "b"}"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>${axisText}<c:crossAx val="508012002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>`;
-  const valAx = `<c:valAx><c:axId val="508012002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${c.kind === "bar" ? "b" : "l"}"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${axisText}<c:crossAx val="508012001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>`;
+  const valAx = grid(`<c:valAx><c:axId val="508012002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="${c.kind === "bar" ? "b" : "l"}"/><c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${axisText}<c:crossAx val="508012001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>`);
   const group = c.kind === "pie"
     ? `<c:pieChart><c:varyColors val="1"/>${series}<c:firstSliceAng val="0"/></c:pieChart>`
     : c.kind === "doughnut"
@@ -82,13 +98,15 @@ export function chartXml(c: ChartData, workbookRelId: string): string {
           : c.kind === "scatter"
             ? `<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>${series}${axes}</c:scatterChart>${xValAx}${valAx.replace('<c:crossBetween val="between"/>', '<c:crossBetween val="midCat"/>')}`
             : `<c:barChart><c:barDir val="${c.kind === "bar" ? "bar" : "col"}"/><c:grouping val="${stacked ? "stacked" : "clustered"}"/><c:varyColors val="0"/>${series}<c:gapWidth val="${stacked ? 150 : 219}"/><c:overlap val="${stacked ? 100 : -27}"/>${axes}</c:barChart>${catAx}${valAx}`;
+  const legend = c.legend === "none" ? ""
+    : `<c:legend><c:legendPos val="${c.legend === "top" ? "t" : c.legend === "right" ? "r" : "b"}"/><c:overlay val="0"/>${axisText}</c:legend>`;
   const title = c.title
     ? `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1400"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:rPr><a:t>${esc(c.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>`
     : `<c:autoTitleDeleted val="1"/>`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
     + `<c:date1904 val="0"/><c:lang val="en-US"/><c:roundedCorners val="0"/>`
     + `<c:chart>${title}<c:plotArea><c:layout/>${group}</c:plotArea>`
-    + `<c:legend><c:legendPos val="b"/><c:overlay val="0"/>${axisText}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>`
+    + `${legend}<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>`
     + `<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>`
     + `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr>`
     + `<c:externalData r:id="${workbookRelId}"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`;

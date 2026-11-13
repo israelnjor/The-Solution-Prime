@@ -1,5 +1,5 @@
 import type { ChartData } from "@prime/docx";
-import { chartSvg } from "@prime/layout";
+import { CHART_PALETTES, chartSvg } from "@prime/layout";
 import { useMemo, useState } from "react";
 
 const KINDS: [ChartData["kind"], string][] = [
@@ -19,13 +19,23 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
   const [kind, setKind] = useState(initial.kind);
   const [title, setTitle] = useState(initial.title ?? "");
   const [stacked, setStacked] = useState(!!initial.stacked);
+  const [legend, setLegend] = useState(initial.legend ?? "bottom");
+  const [labels, setLabels] = useState(!!initial.labels);
+  const [gridlines, setGridlines] = useState(initial.gridlines !== false);
+  const [colors, setColors] = useState(initial.colors);
   const [categories, setCategories] = useState(initial.categories);
   const [series, setSeries] = useState(initial.series.map((s) => ({ name: s.name, ...(s.color ? { color: s.color } : {}), values: s.values.map((v) => (Number.isFinite(v) ? String(v) : "")) })) as { name: string; color?: string; values: string[] }[]);
   const round = kind === "pie" || kind === "doughnut";
   const data: ChartData = useMemo(() => ({
-    kind, ...(title.trim() ? { title: title.trim() } : {}), ...(stacked && STACKS.includes(kind) ? { stacked: true } : {}), categories,
+    kind, ...(title.trim() ? { title: title.trim() } : {}), ...(stacked && STACKS.includes(kind) ? { stacked: true } : {}),
+    ...(legend !== "bottom" ? { legend } : {}), ...(labels ? { labels: true } : {}), ...(!gridlines && !round ? { gridlines: false } : {}),
+    ...(colors?.length ? { colors } : {}), categories,
     series: series.map((s) => ({ name: s.name, ...(s.color ? { color: s.color } : {}), values: categories.map((_, i) => (s.values[i] === undefined || s.values[i].trim() === "" ? NaN : Number(s.values[i]))) })),
-  }), [kind, title, stacked, categories, series]);
+  }), [kind, title, stacked, legend, labels, gridlines, colors, round, categories, series]);
+  // The colour set in use: the one chosen, or the one the series' own colours match.
+  const own = series.map((s) => s.color).filter(Boolean).join(",");
+  const activePalette = CHART_PALETTES.find((p) => (colors?.length ? p.colors.join(",") === colors.join(",") : own ? p.colors.slice(0, series.length).join(",") === own : p.id === "office"))?.id;
+  const choosePalette = (c: string[]) => { setColors(c); setSeries((ss) => ss.map(({ color: _, ...s }) => s)); };
   const svg = useMemo(() => chartSvg(data, 360, 216), [data]);
   const badX = kind === "scatter" && categories.some((c) => !c.trim() || !Number.isFinite(Number(c)));
   const bad = data.series.some((s) => s.values.some((v, i) => series[data.series.indexOf(s)].values[i]?.trim() && !Number.isFinite(v)));
@@ -46,6 +56,28 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
                 <input type="checkbox" checked={stacked} onChange={(e) => setStacked(e.target.checked)} /> Stacked
               </label>
             )}
+            <fieldset className="chart-style">
+              <legend>Style</legend>
+              <div className="chart-palettes" role="radiogroup" aria-label="Colours">
+                {CHART_PALETTES.map((p) => (
+                  <button key={p.id} role="radio" aria-checked={activePalette === p.id} className={activePalette === p.id ? "on" : ""} title={p.name} aria-label={`${p.name} colours`}
+                    onClick={() => choosePalette(p.colors)}>
+                    {p.colors.slice(0, 5).map((c) => <span key={c} style={{ background: `#${c}` }} />)}
+                  </button>
+                ))}
+              </div>
+              <div className="chart-options">
+                <label>Legend
+                  <select value={legend} onChange={(e) => setLegend(e.target.value as typeof legend)} aria-label="Legend">
+                    <option value="bottom">Bottom</option><option value="top">Top</option><option value="right">Right</option><option value="none">None</option>
+                  </select>
+                </label>
+                <label className="choice"><input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Data labels</label>
+                <label className="choice" title={round ? "Pie and doughnut charts have no gridlines" : undefined}>
+                  <input type="checkbox" checked={gridlines && !round} disabled={round} onChange={(e) => setGridlines(e.target.checked)} /> Gridlines
+                </label>
+              </div>
+            </fieldset>
             <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Chart title (optional)" aria-label="Chart title" /></label>
             <div className="chart-data" role="table" aria-label="Chart data">
               <table>

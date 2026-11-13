@@ -953,3 +953,14 @@ button.link:hover { text-decoration: underline; }
 .highlight-popup .wide { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 30px; margin-top: 4px; padding: 0 8px; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff !important; font: inherit; font-size: 13px; cursor: pointer; box-sizing: border-box; }
 .highlight-popup .wide:hover { background: #e9edf3 !important; }
 .highlight-popup .more input { width: 36px; height: 22px; padding: 0; border: 0; background: none; cursor: pointer; }
+
+/* Insert → Chart: style (colours, legend, data labels, gridlines). */
+.chart-style { border: 1px solid var(--chrome-border); border-radius: 6px; margin: 0; padding: 6px 10px 10px; display: grid; gap: 8px; }
+.chart-style legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.chart-palettes { display: flex; flex-wrap: wrap; gap: 6px; }
+.chart-palettes button { display: flex; gap: 0; padding: 3px; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff; cursor: pointer; }
+.chart-palettes button span { width: 11px; height: 16px; }
+.chart-palettes button.on, .chart-palettes button:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chart-options { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 13px; }
+.chart-options > label:first-child { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.chart-options select { font: inherit; padding: 2px 4px; }
