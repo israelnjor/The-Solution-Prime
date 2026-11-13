@@ -1204,6 +1204,11 @@ ${String(e)}`));
         onCompare={() => void compareWith()}
         onProtect={() => setPasswordAsk({ mode: "set" })}
         onThesaurus={() => setThesaurusOpen(true)} onChart={() => setChartDialog({ data: SAMPLE_CHART })}
+        onEditChart={(pos) => {
+          const c = v && chartAt(v.state.doc, pos, fileRef.current.base);
+          if (c) setChartDialog({ pos, data: c.spec ? (({ border: _, ...spec }) => spec)(c.spec) : SAMPLE_CHART });
+        }}
+        onChartData={(pos, data) => { if (v) { setChartData(() => fileRef.current.base, pos, data)(v.state, v.dispatch); v.focus(); } }}
         onInfo={() => setInfo(true)} onReadAloud={() => setReading((r) => !r)}
         navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}

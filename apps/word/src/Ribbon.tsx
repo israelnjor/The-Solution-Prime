@@ -1,5 +1,5 @@
 import {
-  addColumn, addRow, applyListStyle, indentParagraphs, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
+  chartAt, addColumn, addRow, applyListStyle, indentParagraphs, deleteColumn, deleteRow, deleteTable, inTable, insertImage, insertPageBreak,
   insertTable, isActive, linkAt, listKind, PAPER, pageSetup, paragraphProp, runAtSelection, setColor, setFont, setFontSize,
   setHighlightColor, setLink, setPageSetup, setParagraph, toggleList, toggleRun, bordersAt, type BorderKind, setBorders,
   setLineSpacing, acceptOrReject, gotoChange, pictureAt, pictureWrap, type PictureWrap, setPictureWrap, setAltText,
@@ -11,10 +11,11 @@ import {
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
-import { Resolver } from "@prime/layout";
+import { CHART_PALETTES, type ChartSpec, Resolver } from "@prime/layout";
+import type { ChartData } from "@prime/docx";
 import type { PrimeDocument } from "@prime/pdm";
 import { redo, undo } from "prosemirror-history";
-import type { Command } from "prosemirror-state";
+import { type Command, NodeSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { useEffect, useMemo, useState } from "react";
 import { RecentMenu } from "./RecentList";
@@ -31,7 +32,11 @@ const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 7
 export const LINK_EVENT = "prime-word:link";
 
 
-type Tab = "file" | "home" | "insert" | "design" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture" | "outlining";
+type Tab = "file" | "home" | "insert" | "design" | "layout" | "references" | "review" | "view" | "tableDesign" | "table" | "picture" | "chart" | "outlining";
+
+const CHART_KINDS: [ChartData["kind"], string][] = [
+  ["column", "Column"], ["bar", "Bar"], ["line", "Line"], ["area", "Area"], ["pie", "Pie"], ["doughnut", "Doughnut"], ["scatter", "Scatter"],
+];
 /** Word's keys for the tabs: Alt+F, Alt+H, Alt+N, Alt+P, Alt+S, Alt+R, Alt+W. */
 const TAB_KEYS: Record<string, string> = { file: "F", home: "H", insert: "N", design: "G", layout: "P", references: "S", review: "R", view: "W" };
 export type Markup = "all" | "none" | "original";
@@ -93,6 +98,10 @@ export interface RibbonProps {
   onInfo(): void;
   onThesaurus(): void;
   onChart(): void;
+  /** Chart Design → Edit Data: the chart at `pos` in the chart dialog. */
+  onEditChart(pos: number): void;
+  /** Chart Design: the chart at `pos` shown with `data` (its kind, style). */
+  onChartData(pos: number, data: ChartData): void;
   onProtect(): void;
   onCompare(): void;
   onReadAloud(): void;
@@ -163,7 +172,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -203,7 +212,15 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
   const picture = state ? pictureAt(state) : undefined;
   // A shape or text box selected: its own tab (Shape Format), in the picture tab's place.
   const shape = state ? shapeAt(state) : undefined;
-  const activeTab = ((tab === "table" || tab === "tableDesign") && !tableActive) || (tab === "picture" && !picture) ? "home" : tab === "outlining" && mode !== "outline" ? "view" : tab;
+  // A chart selected: its own tab (Chart Design).
+  const chart = state && state.selection instanceof NodeSelection ? chartAt(state.doc, state.selection.from, doc) : undefined;
+  const chartSpec: ChartSpec | undefined = chart?.spec;
+  const setChart = (patch: Partial<ChartData>) => {
+    if (!chart || !chartSpec) return;
+    const { border: _, ...data } = chartSpec;
+    onChartData(chart.pos, { ...data, ...patch });
+  };
+  const activeTab = ((tab === "table" || tab === "tableDesign") && !tableActive) || (tab === "picture" && !picture) || (tab === "chart" && !chart) ? "home" : tab === "outlining" && mode !== "outline" ? "view" : tab;
   // Outline view opens on its Outlining tab.
   useEffect(() => { if (mode === "outline") setTab("outlining"); }, [mode]);
   const look = state && tableActive ? tableLookAt(state) : undefined;
@@ -217,6 +234,11 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
   useEffect(() => {
     if (pictureKey) setTab((t) => (t === "picture" ? t : "picture"));
   }, [pictureKey]);
+  // Selecting a chart shows Chart Design.
+  const chartKey = chart ? `${chart.pos}` : "";
+  useEffect(() => {
+    if (chartKey) setTab("chart");
+  }, [chartKey]);
 
   const openLink = () => {
     setLinkUrl((state && linkAt(state)) ?? "https://");
@@ -240,6 +262,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
         ))}
         {tableActive && <button className={`contextual ${activeTab === "tableDesign" ? "on" : ""}`} onClick={() => setTab("tableDesign")}>Table Design</button>}
         {tableActive && <button className={`contextual ${activeTab === "table" ? "on" : ""}`} onClick={() => setTab("table")}>Table Layout</button>}
+        {chart && <button className={`contextual ${activeTab === "chart" ? "on" : ""}`} onClick={() => setTab("chart")}>Chart Design</button>}
         {picture && <button className={`contextual ${activeTab === "picture" ? "on" : ""}`} onClick={() => setTab("picture")}>{shape ? "Shape Format" : "Picture"}</button>}
         {mode === "outline" && <button className={`contextual ${activeTab === "outlining" ? "on" : ""}`} onClick={() => setTab("outlining")}>Outlining</button>}
         <span className="spacer" />
@@ -763,6 +786,54 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
                 <option value="original">Original</option>
               </select>
             </div>
+          </>
+        )}
+
+        {activeTab === "chart" && chart && (
+          <>
+            <div className="group">
+              <button onClick={() => onEditChart(chart.pos)} title="Change the chart's numbers, categories and series">Edit Data…</button>
+            </div>
+            {chartSpec ? (
+              <>
+                <div className="group" aria-label="Chart type">
+                  <select value={chartSpec.kind} onChange={(e) => setChart({ kind: e.target.value as ChartData["kind"] })} title="Chart type" aria-label="Chart type">
+                    {CHART_KINDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                  </select>
+                  {(chartSpec.kind === "column" || chartSpec.kind === "bar" || chartSpec.kind === "area") && (
+                    <button className={chartSpec.stacked ? "on" : ""} onClick={() => setChart({ stacked: !chartSpec.stacked })}
+                      title="Each category's series on top of each other, showing their total">Stacked</button>
+                  )}
+                </div>
+                <div className="group chart-palettes" role="radiogroup" aria-label="Chart colours">
+                  {CHART_PALETTES.map((p) => {
+                    const own = chartSpec.series.map((x) => x.color).filter(Boolean).join(",");
+                    const on = chartSpec.colors?.length ? chartSpec.colors.join(",") === p.colors.slice(0, chartSpec.colors.length).join(",")
+                      : own ? p.colors.slice(0, chartSpec.series.length).join(",") === own : p.id === "office";
+                    return (
+                      <button key={p.id} role="radio" aria-checked={on} className={on ? "on" : ""} title={`${p.name} colours`} aria-label={`${p.name} colours`}
+                        onClick={() => setChart({ colors: p.colors, series: chartSpec.series.map(({ color: _c, ...x }) => x) })}>
+                        {p.colors.slice(0, 5).map((c) => <span key={c} style={{ background: `#${c}` }} />)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="group" aria-label="Chart elements">
+                  <select value={chartSpec.legend ?? "bottom"} onChange={(e) => setChart({ legend: e.target.value as ChartData["legend"] })} title="Legend" aria-label="Legend">
+                    <option value="bottom">Legend: Bottom</option><option value="top">Legend: Top</option><option value="right">Legend: Right</option><option value="none">Legend: None</option>
+                  </select>
+                  <button className={chartSpec.labels ? "on" : ""} onClick={() => setChart({ labels: !chartSpec.labels })} title="Write each value on its bar, point or slice">Data Labels</button>
+                  {chartSpec.kind !== "pie" && chartSpec.kind !== "doughnut" && (
+                    <button className={chartSpec.gridlines !== false ? "on" : ""} onClick={() => setChart({ gridlines: chartSpec.gridlines === false })} title="Lines across the chart at each value step">Gridlines</button>
+                  )}
+                </div>
+                <div className="group" aria-label="Chart title">
+                  <input key={`${chart.pos}-${chartSpec.title ?? ""}`} className="chart-title-input" defaultValue={chartSpec.title ?? ""} placeholder="Chart title" aria-label="Chart title"
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    onBlur={(e) => { const t = e.target.value.trim(); if (t !== (chartSpec.title ?? "")) setChart({ title: t || undefined }); }} />
+                </div>
+              </>
+            ) : <span className="hint">This kind of chart (from Word) is shown but cannot be changed here yet.</span>}
           </>
         )}
 

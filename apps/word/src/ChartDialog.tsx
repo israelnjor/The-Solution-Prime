@@ -34,7 +34,7 @@ export function ChartDialog({ initial, editing, onOk, onClose }: {
   }), [kind, title, stacked, legend, labels, gridlines, colors, round, categories, series]);
   // The colour set in use: the one chosen, or the one the series' own colours match.
   const own = series.map((s) => s.color).filter(Boolean).join(",");
-  const activePalette = CHART_PALETTES.find((p) => (colors?.length ? p.colors.join(",") === colors.join(",") : own ? p.colors.slice(0, series.length).join(",") === own : p.id === "office"))?.id;
+  const activePalette = CHART_PALETTES.find((p) => (colors?.length ? p.colors.slice(0, colors.length).join(",") === colors.join(",") : own ? p.colors.slice(0, series.length).join(",") === own : p.id === "office"))?.id;
   const choosePalette = (c: string[]) => { setColors(c); setSeries((ss) => ss.map(({ color: _, ...s }) => s)); };
   const svg = useMemo(() => chartSvg(data, 360, 216), [data]);
   const badX = kind === "scatter" && categories.some((c) => !c.trim() || !Number.isFinite(Number(c)));

@@ -964,3 +964,9 @@ button.link:hover { text-decoration: underline; }
 .chart-options { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 13px; }
 .chart-options > label:first-child { display: flex; flex-direction: row; align-items: center; gap: 6px; }
 .chart-options select { font: inherit; padding: 2px 4px; }
+
+/* Chart Design tab (a chart selected). */
+.toolbar .chart-palettes { gap: 4px; }
+.toolbar .chart-palettes button { display: inline-flex; padding: 3px; height: auto; }
+.toolbar .chart-palettes button span { width: 8px; height: 16px; }
+.toolbar .chart-title-input { width: 170px; height: 28px; padding: 0 8px; border: 1px solid var(--chrome-border); border-radius: 4px; font: inherit; font-size: 13px; }
