@@ -489,6 +489,8 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
     const decorations: Decoration[] = [];
     const visit = (node: Node, pos: number, tableStyle?: string, cond?: RunProps) => {
       let prev: { styleId: string; contextual: boolean } | undefined;
+      // A dropped capital just before: the room it takes beside this paragraph's first lines.
+      let capRoom: string | undefined;
       node.forEach((child, offset, index) => {
         const at = pos + offset;
         if (child.type.name !== "paragraph") prev = undefined;
@@ -543,6 +545,8 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
           // paragraph's first lines wrap beside it, and moved down so its baseline sits on the baseline
           // of that paragraph's `lines`-th line (as the layout places it). "In margin": left of the text.
           let drop = "";
+          const room = capRoom;
+          capRoom = undefined;
           if (rp.dropCap && nrp) {
             const m = (r: typeof run) => measurer.metrics({ family: r.font, bold: r.bold, italic: r.italic });
             const nm = m(nrp.mark);
@@ -558,8 +562,17 @@ export function paragraphStyles(doc: PrimeDocument, measurer: Measurer): Plugin 
               ? `;float:left;margin:${pt(nrp.spaceBefore)} 0 0 0;width:0;overflow:visible;direction:rtl;position:relative;top:${pt(target - baseline)};left:${pt(-space)}`
               // As tall as the lines beside it (the letter's own glyph box is taller, and would narrow one more).
               : `;float:left;margin:${pt(nrp.spaceBefore)} ${pt(space)} 0 0;text-indent:0;height:${pt(rp.dropCap.lines * nLine - 0.5)};overflow:visible;position:relative;top:${pt(target - baseline)}`;
+            // Where the page spans text columns (each paragraph a block of its own, styles.css), the letter
+            // cannot float into the next paragraph: that paragraph keeps the room for it instead.
+            if (rp.dropCap.kind !== "margin") {
+              const first = child.firstChild;
+              const r = resolver.run(rp.styleId, first?.marks.find((mk) => mk.type.name === "run")?.attrs.props, tableStyle, cond);
+              const width = measurer.width(child.textContent, { family: r.font, bold: r.bold, italic: r.italic }) * r.size;
+              capRoom = `--pw-dc-w:${pt(width + space)};--pw-dc-h:${pt(rp.dropCap.lines * nLine - 0.5)}`;
+            }
           }
-          looks.set(child, { style: css + (rp.shading ? `;background:#${rp.shading}` : "") + drop, styleId: rp.styleId, className: drop ? [classes, "pw-dropcap"].filter(Boolean).join(" ") : classes });
+          if (room) drop += `;${room}`;
+          looks.set(child, { style: css + (rp.shading ? `;background:#${rp.shading}` : "") + drop, styleId: rp.styleId, className: rp.dropCap && nrp ? [classes, "pw-dropcap"].filter(Boolean).join(" ") : room ? [classes, "pw-dropcap-next"].filter(Boolean).join(" ") : classes });
           const floats: FloatInfo[] = [];
           child.forEach((n) => {
             if (n.type.name === "run_preserved" && n.attrs.float) floats.push(n.attrs.float);

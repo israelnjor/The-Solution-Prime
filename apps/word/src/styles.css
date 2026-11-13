@@ -970,3 +970,8 @@ button.link:hover { text-decoration: underline; }
 .toolbar .chart-palettes button { display: inline-flex; padding: 3px; height: auto; }
 .toolbar .chart-palettes button span { width: 8px; height: 16px; }
 .toolbar .chart-title-input { width: 170px; height: 28px; padding: 0 8px; border: 1px solid var(--chrome-border); border-radius: 4px; font: inherit; font-size: 13px; }
+
+/* A drop cap where the page spans text columns: each paragraph is a block of its own there (pw-span), so
+   the letter takes no room and the paragraph it belongs to keeps the room beside its first lines (render.ts). */
+.pw-editor .ProseMirror.pw-columns > p.pw-dropcap.pw-span { float: none !important; height: 0 !important; margin-bottom: 0 !important; }
+.pw-editor .ProseMirror.pw-columns > p.pw-dropcap.pw-span + p.pw-dropcap-next::before { content: ""; float: left; width: var(--pw-dc-w); height: var(--pw-dc-h); }
