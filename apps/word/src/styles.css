@@ -980,3 +980,16 @@ button.link:hover { text-decoration: underline; }
 .chart-paste { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .chart-paste button { padding: 4px 10px; border: 1px solid var(--chrome-border); border-radius: 4px; background: #fff; cursor: pointer; }
 .chart-paste .hint { color: var(--muted); font-size: 12px; }
+
+/* Convert PDF to Word: the PDF to confirm (its first page, pages, size) before converting. */
+.pdfconv-confirm { padding: 28px 40px; }
+.pdfconv-card { display: grid; justify-items: center; gap: 6px; width: 240px; padding: 16px 14px 14px; border: 1px solid var(--chrome-border); border-radius: 10px; background: #fff; }
+.pdfconv-thumb { width: 180px; min-height: 120px; display: grid; place-items: center; background: #f4f6f9; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+.pdfconv-thumb canvas { display: block; width: 180px; height: auto; background: #fff; }
+.pdfconv-file { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; margin-top: 6px; }
+.pdfconv-actions { display: flex; gap: 10px; justify-content: center; }
+.pdfconv-drop button { padding: 7px 16px; border: 1px solid var(--chrome-border); border-radius: 6px; background: #fff; font: inherit; font-size: 14px; cursor: pointer; }
+.pdfconv-drop button:hover:not(:disabled) { background: #f0f4fa; }
+.pdfconv-drop button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pdfconv-drop button.primary:hover:not(:disabled) { background: #234a85; }
+.pdfconv-drop button:disabled { opacity: 0.55; cursor: default; }

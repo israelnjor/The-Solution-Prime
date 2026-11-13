@@ -1109,6 +1109,28 @@ ${String(e)}`));
     });
   }, [layout, layoutOf, file.base]);
 
+  // Files dropped on the window (from File Explorer): a document opens, a PDF goes to the converter.
+  // Places with their own drop (the converter's drop area) handle theirs first; anything else dropped is
+  // ignored, never opened in place of the app (what the web view does with a file by default).
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+    const over = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      const handled = e.defaultPrevented;
+      e.preventDefault();
+      if (handled) return;
+      const f = [...(e.dataTransfer?.files ?? [])][0];
+      if (!f) return;
+      if (/\.pdf$/i.test(f.name)) void f.arrayBuffer().then((b) => setConverter({ initial: { bytes: new Uint8Array(b), name: f.name } }));
+      else if (/\.(docx|docm|dotx|doc|odt|rtf|txt|md|markdown|html?)$/i.test(f.name)) void f.arrayBuffer().then((b) => loadRef.current(new Uint8Array(b), f.name));
+      else flash(`${f.name} cannot be opened here: drop a Word document, PDF, ODT, RTF or text file.`);
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
+  }, []);
+
   // Dev convenience (browser only): ?file=<absolute path> opens a document from disk.
   useEffect(() => {
     const path = new URLSearchParams(location.search).get("file");

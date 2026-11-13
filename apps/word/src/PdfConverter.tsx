@@ -7,18 +7,21 @@ import { convertPdfFile, drawLayoutPage, drawPdfPage, layoutOf, openPdfForView }
 type PdfView = Awaited<ReturnType<typeof openPdfForView>>;
 type Stage =
   | { step: "choose" }
+  // A PDF chosen or dropped, shown (its first page, pages, size) for the person to confirm.
+  | { step: "confirm"; name: string; bytes: Uint8Array; view?: PdfView; error?: string }
   | { step: "converting"; name: string; done: number; total: number }
   | { step: "review"; name: string; result: ConversionResult; original: PdfView; layout: LayoutResult }
   | { step: "failed"; name: string; message: string };
 
 /**
- * PDF → Word, as its own workspace: choose a PDF; it is converted (page by page); review the original
+ * PDF → Word, as its own workspace: choose (or drop) a PDF and confirm it — its first page, pages and size
+ * shown — before it is converted (page by page); review the original
  * and the converted document side by side; then open the result in the editor or save it as .docx.
  * The PDF itself is never changed.
  */
 export function PdfConverter({ measurer, initial, onOpenInEditor, onSave, onClose }: {
   measurer: () => Measurer;
-  /** A PDF to convert straight away (otherwise the person chooses one). */
+  /** A PDF chosen or dropped elsewhere: shown to confirm first (otherwise the person chooses one). */
   initial?: { bytes: Uint8Array; name: string };
   onOpenInEditor(result: ConversionResult, pdfName: string): void;
   onSave(result: ConversionResult, pdfName: string): void;
@@ -29,6 +32,7 @@ export function PdfConverter({ measurer, initial, onOpenInEditor, onSave, onClos
   const [dragging, setDragging] = useState(false);
   const left = useRef<HTMLCanvasElement>(null);
   const right = useRef<HTMLCanvasElement>(null);
+  const thumb = useRef<HTMLCanvasElement>(null);
 
   const convert = useCallback(async (bytes: Uint8Array, name: string) => {
     setStage({ step: "converting", name, done: 0, total: 0 });
@@ -42,11 +46,41 @@ export function PdfConverter({ measurer, initial, onOpenInEditor, onSave, onClos
     }
   }, [measurer]);
 
-  useEffect(() => { if (initial) void convert(initial.bytes, initial.name); }, [initial, convert]);
+  // A PDF to confirm: opened to show its first page and count its pages (nothing is converted yet).
+  const ask = useCallback(async (bytes: Uint8Array, name: string) => {
+    setStage({ step: "confirm", name, bytes });
+    try {
+      const view = await openPdfForView(bytes);
+      setStage((st) => (st.step === "confirm" && st.bytes === bytes ? { ...st, view } : st));
+    } catch (e) {
+      const message = (e as Error).message ?? String(e);
+      setStage((st) => (st.step === "confirm" && st.bytes === bytes
+        ? { ...st, error: /password/i.test(message) ? "This PDF is protected with a password." : "This file could not be read as a PDF." } : st));
+    }
+  }, []);
+
+  useEffect(() => { if (initial) void ask(initial.bytes, initial.name); }, [initial, ask]);
 
   const pick = async () => {
     const file = await choosePdf();
-    if (file) await convert(file.bytes, file.name);
+    if (file) await ask(file.bytes, file.name);
+  };
+
+  // The first page, small, on the confirm card.
+  useEffect(() => {
+    if (stage.step !== "confirm" || !stage.view || !thumb.current) return;
+    void stage.view.getPage(1).then((p) => {
+      const vp = p.getViewport({ scale: 1 });
+      // Drawn at twice its size (or the screen's density), shown at 180px: sharp on high-DPI screens.
+      return drawPdfPage(stage.view!, 1, thumb.current!, (180 / vp.width) * Math.max(2, window.devicePixelRatio || 1));
+    }).catch(() => undefined);
+  }, [stage]);
+
+  const onDropPdf = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = [...e.dataTransfer.files].find((x) => /\.pdf$/i.test(x.name));
+    if (f) void f.arrayBuffer().then((b) => ask(new Uint8Array(b), f.name));
   };
 
   // Draw the current page of both documents (the original as pdf.js shows it; ours as the editor lays it out).
@@ -107,16 +141,31 @@ export function PdfConverter({ measurer, initial, onOpenInEditor, onSave, onClos
       {stage.step === "choose" && (
         <div className={`pdfconv-drop ${dragging ? "over" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            const f = [...e.dataTransfer.files].find((x) => /\.pdf$/i.test(x.name));
-            if (f) void f.arrayBuffer().then((b) => convert(new Uint8Array(b), f.name));
-          }}>
+          onDrop={onDropPdf}>
           <h2>Turn a PDF into an editable Word document</h2>
           <p>The text, formatting, lists, tables, headers, footers and pictures are rebuilt. Everything happens on this computer; the PDF is not changed.</p>
           <button className="primary" onClick={() => void pick()} autoFocus>Choose a PDF…</button>
           <p className="hint">or drop a PDF here</p>
+        </div>
+      )}
+
+      {stage.step === "confirm" && (
+        <div className={`pdfconv-drop pdfconv-confirm ${dragging ? "over" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDropPdf}>
+          <h2>Convert this PDF?</h2>
+          <div className="pdfconv-card">
+            <div className="pdfconv-thumb">
+              {stage.error ? <span className="hint">No preview</span> : <canvas ref={thumb} aria-label={`First page of ${stage.name}`} />}
+            </div>
+            <strong className="pdfconv-file" title={stage.name}>{stage.name.replace(/\.pdf$/i, "")}</strong>
+            <span className="hint">
+              {stage.error ?? [stage.view ? `${stage.view.numPages} ${stage.view.numPages === 1 ? "page" : "pages"}` : "Reading…", sizeOf(stage.bytes.length)].join(" · ")}
+            </span>
+          </div>
+          <div className="pdfconv-actions">
+            <button onClick={() => void pick()}>Choose another…</button>
+            <button className="primary" autoFocus disabled={!!stage.error || !stage.view} onClick={() => void convert(stage.bytes, stage.name)}>Convert</button>
+          </div>
         </div>
       )}
 
@@ -158,6 +207,11 @@ export function PdfConverter({ measurer, initial, onOpenInEditor, onSave, onClos
       )}
     </div>
   );
+}
+
+/** A file size for people: 820 KB, 3.4 MB. */
+function sizeOf(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** Counts for the review panel. */
