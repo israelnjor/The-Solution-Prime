@@ -1009,3 +1009,8 @@ button.link:hover { text-decoration: underline; }
 .shape-popup { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(5, 46px); gap: 4px; padding: 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
 .shape-popup button { height: 38px !important; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: #fff !important; cursor: pointer; }
 .shape-popup button:hover, .shape-popup button:focus-visible { border-color: var(--accent); background: #eef3fa !important; }
+
+/* A picture behind the text (a letterhead): the mouse reaches the text through it; floats.ts selects it
+   where no text is. Its corner handles still take the mouse once it is selected. */
+.pw-float.pw-float-behind { pointer-events: none; }
+.pw-float.pw-float-behind .pw-float-handle { pointer-events: auto; }

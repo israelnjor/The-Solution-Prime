@@ -201,7 +201,7 @@ function resourceUrl(base: PrimeDocument, id: string): string | undefined {
 function floatKey(f: PlacedFloat, left: number): string {
   const text = f.lines.map((l) => l.segments.map((g) => `${g.text}${g.font.bold ? "b" : ""}${g.font.italic ? "i" : ""}${g.color ?? ""}`).join("")).join("|");
   const style = f.shape ? `${f.shape.geometry}:${f.shape.fill ?? ""}:${f.shape.line ? `${f.shape.line.color}@${f.shape.line.width}` : ""}` : "";
-  return `float-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.image?.imageId ?? ""}-${left}-${style}-${text}`;
+  return `float-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.image?.imageId ?? ""}-${left}-${style}-${f.behind ? "behind" : ""}-${text}`;
 }
 
 /**
@@ -211,7 +211,8 @@ function floatKey(f: PlacedFloat, left: number): string {
 function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HTMLElement {
   return () => {
     const el = document.createElement("span");
-    el.className = "pw-float";
+    // Behind the text: the mouse reaches the text through it (floats.ts selects it where no text is).
+    el.className = f.behind ? "pw-float pw-float-behind" : "pw-float";
     el.contentEditable = "false";
     el.style.cssText = `left:${f.x - left}pt;top:${f.y}pt;width:${f.width}pt;height:${f.height}pt`;
     // For moving and resizing (floats.ts): which float, and its box in layout terms.

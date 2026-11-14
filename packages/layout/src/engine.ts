@@ -162,6 +162,8 @@ export interface PlacedFloat {
   shape?: ShapeStyle;
   /** A text box (its text can be edited). */
   textbox?: boolean;
+  /** Behind the text (a letterhead, a watermark picture): clicks on the text go to the text. */
+  behind?: boolean;
 }
 
 /**
@@ -1527,6 +1529,7 @@ export class LayoutEngine {
         ...(f.kind === "ink" && f.ink ? { ink: f.ink } : {}),
         ...(f.shape ? { shape: f.shape } : {}),
         ...(f.kind === "textbox" ? { textbox: true } : {}),
+        ...(f.behind && f.wrap === "none" ? { behind: true } : {}),
         lines: f.kind === "textbox" ? page.lines.slice(from).filter((l) => !l.shape).map(shift) : [],
       });
       if (f.wrap === "none") return undefined;

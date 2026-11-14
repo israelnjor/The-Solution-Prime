@@ -319,6 +319,8 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   const firstWithFooter = pageLines.findIndex((ls) => ls.some((l) => footerKeys.has(keyOf(l))));
   if (firstWithFooter >= 0) section.footers.default = { blocks: storyFrom(pageLines[firstWithFooter].filter((l) => footerKeys.has(keyOf(l))), pages[firstWithFooter]) };
 
+  /** Each picture's image id in the document (a picture repeated in the header is added once). */
+  const imageIds = new Map<Picture, string>();
   // Pictures at the same place near the top or bottom of most pages (a logo): the header's or footer's.
   const picKey = (p: Picture) => [p.x, p.y, p.w, p.h].map((v) => Math.round(v)).join(",");
   const picCounts = new Map<string, number>();
@@ -335,6 +337,45 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       story.blocks.unshift(pictureParagraph(pic, left, right));
       chromePictures.add(k);
     }
+  }
+
+  // Backgrounds: a large picture with the page's text on it (a letterhead drawn as one picture: logo,
+  // bars, the footer's contacts). It goes behind the text, where it was on the page — not into the text,
+  // where it pushed the letter onto the next page. On most pages alike: the header's (every page has it).
+  const isBackground = (pic: Picture, i: number) => !pages[i].recognized
+    && pic.w * pic.h >= pages[i].width * pages[i].height * 0.4
+    && pageLines[i].some((l) => { const cx = (l.x0 + l.x1) / 2; return cx > pic.x && cx < pic.x + pic.w && l.y > pic.y && l.y < pic.y + pic.h; });
+  const backdrops = new Map<number, Picture[]>();
+  pages.forEach((pg, i) => {
+    for (const pic of pg.pictures) if (!chromePictures.has(picKey(pic)) && isBackground(pic, i)) backdrops.set(pg.number, [...(backdrops.get(pg.number) ?? []), pic]);
+  });
+  if (pages.length > 1) {
+    for (const [k, n] of picCounts) {
+      if (n < Math.max(2, Math.ceil(pages.length * 0.6)) || chromePictures.has(k)) continue;
+      const i = pages.findIndex((x) => x.pictures.some((p) => picKey(p) === k && isBackground(p, pages.indexOf(x))));
+      if (i < 0) continue;
+      const pic = pages[i].pictures.find((p) => picKey(p) === k)!;
+      const header = (section.headers.default ??= { blocks: [] });
+      const first = header.blocks[0];
+      if (first?.type === "paragraph") first.content.unshift(backgroundImage(pic));
+      else header.blocks.unshift({ type: "paragraph", props: {}, content: [backgroundImage(pic)] });
+      chromePictures.add(k);
+      for (const [page, pics] of backdrops) backdrops.set(page, pics.filter((p) => picKey(p) !== k));
+    }
+  }
+
+  /** A picture behind the text, at its place on the page. */
+  function backgroundImage(pic: Picture): Inline {
+    const id = addImage(pic);
+    const width = round(pic.w, 0.1), height = round(pic.h, 0.1);
+    return {
+      type: "image", imageId: id, width, height, name: "Background",
+      float: {
+        kind: "picture", width, height, imageId: id, wrap: "none", behind: true,
+        x: { from: "page", offset: round(pic.x, 0.1) }, y: { from: "page", offset: round(pic.y, 0.1) },
+        dist: { top: 0, bottom: 0, left: 0, right: 0 },
+      },
+    };
   }
 
   /** Run formatting that differs from a paragraph's style (base). */
@@ -373,7 +414,7 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       items.push({ kind: "table", grid: g, lines: inside, pictures: pics, y: g.ys[0], page: page.number });
     }
     for (const pic of page.pictures) {
-      if (chromePictures.has(picKey(pic)) || grids.some((g) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2))) continue;
+      if (chromePictures.has(picKey(pic)) || backdrops.get(page.number)?.includes(pic) || grids.some((g) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2))) continue;
       items.push({ kind: "picture", picture: pic, y: pic.y, page: page.number });
     }
     let run: Line[] = [];
@@ -644,6 +685,8 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   const byFirstLine = new Map(paragraphs.map((p) => [p.lines[0], p]));
   let pendingBreak = false;
   let lastPage = 0;
+  /** The page's background pictures, for its first block. */
+  let pendingBackground: Inline[] = [];
   for (const item of items) {
     const page = pageOf(item);
     if (page !== lastPage) {
@@ -651,6 +694,7 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       if (lastPage && previousBottom && previousBottom.y < pageHeight * 0.75) pendingBreak = true;
       lastPage = page;
       previousBottom = undefined;
+      pendingBackground = (backdrops.get(page) ?? []).map(backgroundImage);
     }
     let block: Block | undefined;
     let y = item.y;
@@ -664,7 +708,8 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
         const gap = gapBefore(page, startY);
         const last = blocks[blocks.length - 1];
         // Continuation across a page: no break pending, same look, previous paragraph ran to the margin.
-        if (!previousBottom && last?.type === "paragraph" && !pendingBreak && !para.label && !para.style && !last.props.style && !last.props.list) {
+        // (Not onto a page with a background: that is anchored in the page’s own first paragraph.)
+        if (!previousBottom && !pendingBackground.length && last?.type === "paragraph" && !pendingBreak && !para.label && !para.style && !last.props.style && !last.props.list) {
           const prevText = last.content.map((c) => (c.type === "text" ? c.text : "")).join("");
           if (prevText && !/[.!?:]["')\]]?$/.test(prevText.trim())) {
             last.content.push({ type: "text", text: " " }, ...p.content);
@@ -674,6 +719,7 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
         }
         if (gap > 0) setSpaceBefore(p, gap, para.lines[0]);
         if (pendingBreak) { p.props.pageBreakBefore = true; pendingBreak = false; }
+        if (pendingBackground.length) { p.content.unshift(...pendingBackground); pendingBackground = []; }
         blocks.push(p);
         previousBottom = { page, y: bottom(para.lines[para.lines.length - 1]) };
       }
@@ -709,15 +755,30 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       blocks.push({ type: "paragraph", props: { pageBreakBefore: true, spacing: { after: 0, line: 240, lineRule: "auto" } }, content: [] });
       pendingBreak = false;
     }
+    // The page's background: anchored in its first paragraph (before a table: a paragraph of its own).
+    if (pendingBackground.length) {
+      if (block.type === "paragraph") block.content.unshift(...pendingBackground);
+      else blocks.push({ type: "paragraph", props: { spacing: { after: 0, line: 240, lineRule: "auto" } }, content: pendingBackground });
+      pendingBackground = [];
+    }
     blocks.push(block);
     previousBottom = { page, y: endY };
   }
 
-  /** A picture in a paragraph of its own, aligned as it sits between `from` and `to`. */
-  function pictureParagraph(pic: Picture, from: number, to: number): Paragraph {
+  /** A picture's image, added to the document's images (once per picture). */
+  function addImage(pic: Picture): string {
+    const known = imageIds.get(pic);
+    if (known) return known;
     const extension = pic.contentType === "image/jpeg" ? "jpeg" : "png";
     const id = `media/import${Object.keys(doc.images).length + 1}.${extension}`;
     doc.images[id] = { contentType: pic.contentType, extension, data: base64(pic.data) };
+    imageIds.set(pic, id);
+    return id;
+  }
+
+  /** A picture in a paragraph of its own, aligned as it sits between `from` and `to`. */
+  function pictureParagraph(pic: Picture, from: number, to: number): Paragraph {
+    const id = addImage(pic);
     const center = pic.x + pic.w / 2;
     const align = Math.abs(center - (from + to) / 2) < 12 && pic.x > from + 12 ? "center" : pic.x > from + 24 && Math.abs(pic.x + pic.w - to) < 6 ? "right" : undefined;
     return { type: "paragraph", props: align ? { align } : {}, content: [{ type: "image", imageId: id, width: round(pic.w, 0.1), height: round(pic.h, 0.1) }] };

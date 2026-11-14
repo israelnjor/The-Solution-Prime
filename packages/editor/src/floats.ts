@@ -104,6 +104,29 @@ export function floatNodeOf(view: EditorView, el: HTMLElement): { pos: number; n
   return where ? floatAt(view.state.doc, where.paraPos, where.index) : undefined;
 }
 
+/** The topmost picture behind the text under a point, if any. */
+function behindAt(view: EditorView, x: number, y: number): HTMLElement | null {
+  const all = Array.from(view.dom.querySelectorAll<HTMLElement>(".pw-float-behind")).reverse();
+  return all.find((el) => { const r = el.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; }) ?? null;
+}
+
+/** Whether a point is on a character of the text (its letter's box). */
+function overText(x: number, y: number): boolean {
+  const range = (document as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(x, y);
+  const node = range?.startContainer;
+  if (!range || !node || node.nodeType !== 3) return false; // a text node
+  const length = node.textContent?.length ?? 0;
+  for (const at of [range.startOffset, range.startOffset - 1]) {
+    if (at < 0 || at >= length) continue;
+    const letter = document.createRange();
+    letter.setStart(node, at);
+    letter.setEnd(node, at + 1);
+    const b = letter.getBoundingClientRect();
+    if (x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2) return true;
+  }
+  return false;
+}
+
 /**
  * Click a floating object to select it; drag it to move it; drag a corner handle to resize it
  * (pictures keep their proportions); Delete removes it, Escape deselects.
@@ -115,59 +138,73 @@ export function floatEditing(): Plugin {
     selected = el;
     el?.classList.add("pw-float-selected");
   };
+  function onMouseDown(view: EditorView, event: MouseEvent): boolean {
+    const target = event.target as HTMLElement;
+    // A picture behind the text lets the mouse through (styles.css): a click on text places the
+    // cursor; a click where no text is selects it (as Word does).
+    const el = (target.closest?.(".pw-float") as HTMLElement | null)
+      ?? (overText(event.clientX, event.clientY) ? null : behindAt(view, event.clientX, event.clientY));
+    if (!el) { select(undefined); return false; }
+    event.preventDefault();
+    select(el);
+    // Also select it in the document, so the ribbon shows the picture's options.
+    const where = locate(view, el);
+    const node = where && floatAt(view.state.doc, where.paraPos, where.index);
+    if (node) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, node.pos)));
+    const handle = target.dataset.handle; // "nw" | "ne" | "sw" | "se" when resizing
+    const start = { x: event.clientX, y: event.clientY };
+    const box: FloatBox = { x: Number(el.dataset.x), y: Number(el.dataset.y), width: Number(el.dataset.w), height: Number(el.dataset.h) };
+    // Screen pixels per point, including any zoom.
+    const scale = el.getBoundingClientRect().width / box.width || 96 / 72;
+    const picture = el.dataset.kind === "picture";
+    let next = box;
+    const move = (e: MouseEvent) => {
+      const dx = (e.clientX - start.x) / scale;
+      const dy = (e.clientY - start.y) / scale;
+      if (!handle) {
+        next = { ...box, x: box.x + dx, y: box.y + dy };
+        el.style.transform = `translate(${dx * scale}px, ${dy * scale}px)`;
+        return;
+      }
+      const west = handle.includes("w");
+      const north = handle.includes("n");
+      let width = Math.max(12, box.width + (west ? -dx : dx));
+      let height = Math.max(12, box.height + (north ? -dy : dy));
+      if (picture) {
+        const k = Math.max(width / box.width, height / box.height);
+        width = box.width * k;
+        height = box.height * k;
+      }
+      next = { x: west ? box.x + box.width - width : box.x, y: north ? box.y + box.height - height : box.y, width, height };
+      el.style.transform = `translate(${(next.x - box.x) * scale}px, ${(next.y - box.y) * scale}px)`;
+      el.style.width = `${width}pt`;
+      el.style.height = `${height}pt`;
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      const changed = Math.abs(next.x - box.x) + Math.abs(next.y - box.y) + Math.abs(next.width - box.width) + Math.abs(next.height - box.height) > 0.5;
+      const at = locate(view, el);
+      if (changed && at) setFloatBox(at.paraPos, at.index, next)(view.state, view.dispatch);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return true;
+  }
   return new Plugin({
+    // The page margins are outside the editor: a click there, on a picture behind the text, selects it too.
+    view: (editorView) => {
+      const onPage = (e: MouseEvent) => {
+        const t = e.target as HTMLElement;
+        if (e.button !== 0 || editorView.dom.contains(t) || !t.closest?.(".pw-flow, .pw-sheets, .canvas")) return;
+        if (behindAt(editorView, e.clientX, e.clientY) && !overText(e.clientX, e.clientY)) onMouseDown(editorView, e);
+      };
+      document.addEventListener("mousedown", onPage);
+      return { destroy: () => document.removeEventListener("mousedown", onPage) };
+    },
     props: {
       handleDOMEvents: {
-        mousedown(view, event) {
-          const target = event.target as HTMLElement;
-          const el = target.closest?.(".pw-float") as HTMLElement | null;
-          if (!el) { select(undefined); return false; }
-          event.preventDefault();
-          select(el);
-          // Also select it in the document, so the ribbon shows the picture's options.
-          const where = locate(view, el);
-          const node = where && floatAt(view.state.doc, where.paraPos, where.index);
-          if (node) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, node.pos)));
-          const handle = target.dataset.handle; // "nw" | "ne" | "sw" | "se" when resizing
-          const start = { x: event.clientX, y: event.clientY };
-          const box: FloatBox = { x: Number(el.dataset.x), y: Number(el.dataset.y), width: Number(el.dataset.w), height: Number(el.dataset.h) };
-          // Screen pixels per point, including any zoom.
-          const scale = el.getBoundingClientRect().width / box.width || 96 / 72;
-          const picture = el.dataset.kind === "picture";
-          let next = box;
-          const move = (e: MouseEvent) => {
-            const dx = (e.clientX - start.x) / scale;
-            const dy = (e.clientY - start.y) / scale;
-            if (!handle) {
-              next = { ...box, x: box.x + dx, y: box.y + dy };
-              el.style.transform = `translate(${dx * scale}px, ${dy * scale}px)`;
-              return;
-            }
-            const west = handle.includes("w");
-            const north = handle.includes("n");
-            let width = Math.max(12, box.width + (west ? -dx : dx));
-            let height = Math.max(12, box.height + (north ? -dy : dy));
-            if (picture) {
-              const k = Math.max(width / box.width, height / box.height);
-              width = box.width * k;
-              height = box.height * k;
-            }
-            next = { x: west ? box.x + box.width - width : box.x, y: north ? box.y + box.height - height : box.y, width, height };
-            el.style.transform = `translate(${(next.x - box.x) * scale}px, ${(next.y - box.y) * scale}px)`;
-            el.style.width = `${width}pt`;
-            el.style.height = `${height}pt`;
-          };
-          const up = () => {
-            window.removeEventListener("mousemove", move);
-            window.removeEventListener("mouseup", up);
-            const changed = Math.abs(next.x - box.x) + Math.abs(next.y - box.y) + Math.abs(next.width - box.width) + Math.abs(next.height - box.height) > 0.5;
-            const at = locate(view, el);
-            if (changed && at) setFloatBox(at.paraPos, at.index, next)(view.state, view.dispatch);
-          };
-          window.addEventListener("mousemove", move);
-          window.addEventListener("mouseup", up);
-          return true;
-        },
+        mousedown: (view, event) => onMouseDown(view, event),
       },
       handleKeyDown(view, event) {
         if (!selected || !selected.isConnected) { selected = undefined; return false; }
