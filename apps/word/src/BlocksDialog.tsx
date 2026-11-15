@@ -10,15 +10,29 @@ import type { SavedSignature } from "./SignatureDialog";
 import { pngOf } from "./signature";
 
 /** A saved block: a part (paragraphs and their pictures) and what kind of block it is. */
-export type SavedBlock = LibraryEntry<{ part: Part; kind: Maker | "selection" }>;
+export type SavedBlock = LibraryEntry<{ part: Part; kind: Maker | "selection"; role?: AddressRole }>;
 type Maker = "signature" | "address" | "stamp";
+/** Whose address it is: the sender's own (top of the letter) or the recipient's (above the greeting). */
+type AddressRole = "sender" | "recipient";
+type BlockData = SavedBlock["data"];
 
 const today = () => new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
 const CLOSINGS = ["", "Yours faithfully,", "Yours sincerely,", "Kind regards,", "Best regards,", "Signed,"];
 const KIND_LABEL: Record<SavedBlock["data"]["kind"], string> = { signature: "Signature block", address: "Address", stamp: "Stamp", selection: "Saved text" };
 
-/** Where a block goes when the place is left to Prime Word: a signature block as the last paragraphs of the document, others at the cursor. */
-const bestPlace = (kind: SavedBlock["data"]["kind"]): PartPlace => (kind === "signature" ? "end" : "cursor");
+/**
+ * Where a block goes when the place is left to Prime Word, as in a letter: a signature block after the
+ * last paragraph, the sender's address at the top, the recipient's address above the greeting; anything
+ * else (and an address saved before addresses had a role) at the cursor.
+ */
+const bestPlace = (b: BlockData): PartPlace =>
+  b.kind === "signature" ? "end" : b.kind === "address" && b.role === "sender" ? "start" : b.kind === "address" && b.role === "recipient" ? "recipient" : "cursor";
+/** The alignment a block gets unless one is chosen: the sender's address on the right, as in a letter. */
+const bestAlign = (b: BlockData): PartAlign => (b.kind === "address" && b.role === "sender" ? "right" : "left");
+const PLACE_WORDS: Partial<Record<PartPlace, string>> = {
+  end: "after the last paragraph", bottom: "at the bottom of the last page: it stays there as the text above grows",
+  start: "at the top of the letter", recipient: "above the greeting, where the recipient's address goes",
+};
 
 /** A small page showing a part, as it would look aligned (at the foot of the page when it goes at the bottom). */
 function PartThumb({ part, align, width = 160, bottom }: { part: Part; align?: PartAlign; width?: number; bottom?: boolean }) {
@@ -43,19 +57,21 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
   const [making, setMaking] = useState<Maker | "selection" | undefined>(initial);
   /** "auto": where the block belongs (see bestPlace). */
   const [place, setPlace] = useState<PartPlace | "auto">("auto");
-  const [align, setAlign] = useState<PartAlign>("left");
+  /** Undefined: each block's own (see bestAlign) until one is chosen. */
+  const [align, setAlign] = useState<PartAlign>();
   const selection = useMemo(() => partFromSelection(base)(view.state), [view, base]);
   const load = () => void listEntries<SavedBlock["data"]>("blocks").then(setSaved).catch(() => setSaved([]));
   useEffect(load, []);
 
-  const placeOf = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => (place === "auto" ? bestPlace(b.kind) : place);
-  const insert = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => {
-    insertPart(b.part, base, placeOf(b), align)(view.state, view.dispatch, view);
+  const placeOf = (b: BlockData) => (place === "auto" ? bestPlace(b) : place);
+  const alignOf = (b: BlockData) => align ?? bestAlign(b);
+  const insert = (b: BlockData) => {
+    insertPart(b.part, base, placeOf(b), alignOf(b))(view.state, view.dispatch, view);
     onClose();
     view.focus();
   };
-  const save = async (name: string, kind: SavedBlock["data"]["kind"], part: Part) => {
-    await saveEntry("blocks", { id: newId(name), name, created: Date.now(), data: { part, kind } } satisfies SavedBlock);
+  const save = async (name: string, kind: BlockData["kind"], part: Part, role?: AddressRole) => {
+    await saveEntry("blocks", { id: newId(name), name, created: Date.now(), data: { part, kind, ...(role ? { role } : {}) } } satisfies SavedBlock);
     setMaking(undefined);
     load();
   };
@@ -65,24 +81,27 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
       <div className="hf-dialog blocks" role="dialog" aria-label="Blocks">
         <h3>{making ? `New ${KIND_LABEL[making].toLowerCase()}` : "Blocks"}</h3>
         {making === "signature" && <SignatureBlockMaker onSave={(name, part) => void save(name, "signature", part)} onCancel={() => setMaking(undefined)} />}
-        {making === "address" && <AddressMaker onSave={(name, part) => void save(name, "address", part)} onCancel={() => setMaking(undefined)} />}
+        {making === "address" && <AddressMaker onSave={(name, part, role) => void save(name, "address", part, role)} onCancel={() => setMaking(undefined)} />}
         {making === "stamp" && <StampMaker onSave={(name, part) => void save(name, "stamp", part)} onCancel={() => setMaking(undefined)} />}
         {making === "selection" && selection && <SelectionSaver part={selection} onSave={(name) => void save(name, "selection", selection)} onCancel={() => setMaking(undefined)} />}
         {!making && (
           <>
             <div className="blocks-place">
               <label>Insert <select value={place} onChange={(e) => setPlace(e.target.value as PartPlace | "auto")}
-                title="Where it belongs: a signature block after the last paragraph of the document, anything else at the cursor">
+                title="Where it belongs, as in a letter: a signature block after the last paragraph, your own address at the top (on the right), the recipient's address above the greeting; anything else at the cursor">
                 <option value="auto">where it belongs</option>
                 <option value="end">after the last paragraph</option>
                 <option value="bottom">at the bottom of the last page</option>
+                <option value="start">at the top of the letter</option>
+                <option value="recipient">above the greeting</option>
                 <option value="cursor">at the cursor</option>
                 <option value="header">in the header</option>
                 <option value="footer">in the footer</option>
               </select></label>
               <div className="blocks-align" role="radiogroup" aria-label="Alignment">
                 {(["left", "center", "right"] as const).map((a) => (
-                  <button key={a} role="radio" aria-checked={align === a} className={align === a ? "on" : ""} onClick={() => setAlign(a)}>
+                  <button key={a} role="radio" aria-checked={align === a} className={align === a ? "on" : ""} onClick={() => setAlign(align === a ? undefined : a)}
+                    title={align === a ? "Click again to let each block take its own alignment" : undefined}>
                     {a === "left" ? "Left" : a === "center" ? "Centre" : "Right"}
                   </button>
                 ))}
@@ -93,10 +112,10 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
               {saved?.map((b) => (
                 <div key={b.id} className="template-card mine">
                   <button className="mine-open" onClick={() => insert(b.data)}
-                    title={placeOf(b.data) === "bottom" ? `Insert ${b.name} at the bottom of the last page: it stays there as the text above grows` : `Insert ${b.name}`}>
-                    <PartThumb part={b.data.part} align={align} bottom={placeOf(b.data) === "bottom"} />
+                    title={PLACE_WORDS[placeOf(b.data)] ? `Insert ${b.name} ${PLACE_WORDS[placeOf(b.data)]}` : `Insert ${b.name}`}>
+                    <PartThumb part={b.data.part} align={alignOf(b.data)} bottom={placeOf(b.data) === "bottom"} />
                     <strong>{b.name}</strong>
-                    <span>{KIND_LABEL[b.data.kind]}</span>
+                    <span>{b.data.kind === "address" && b.data.role ? (b.data.role === "sender" ? "Your address" : "Recipient's address") : KIND_LABEL[b.data.kind]}</span>
                   </button>
                   <button className="mine-delete" aria-label={`Delete ${b.name}`}
                     onClick={() => { if (window.confirm(`Delete the block "${b.name}"?`)) void deleteEntry("blocks", b.id).then(load); }}>×</button>
@@ -168,8 +187,9 @@ function SignatureBlockMaker({ onSave, onCancel }: { onSave(name: string, part: 
   );
 }
 
-function AddressMaker({ onSave, onCancel }: { onSave(name: string, part: Part): void; onCancel(): void }) {
+function AddressMaker({ onSave, onCancel }: { onSave(name: string, part: Part, role: AddressRole): void; onCancel(): void }) {
   const [lines, setLines] = useState("");
+  const [role, setRole] = useState<AddressRole>("sender");
   const [bold, setBold] = useState(true);
   const [name, setName] = useState("");
   const list = lines.split("\n");
@@ -180,10 +200,16 @@ function AddressMaker({ onSave, onCancel }: { onSave(name: string, part: Part): 
         <label>Address (one line each)<textarea rows={6} value={lines} onChange={(e) => setLines(e.target.value)} autoFocus
           placeholder={"Accra Community Library\n12 Independence Avenue\nAccra, Ghana"} /></label>
         <label className="choice"><input type="checkbox" checked={bold} onChange={(e) => setBold(e.target.checked)} /> First line in bold</label>
+        <fieldset><legend>Whose address is it?</legend>
+          <label className="choice"><input type="radio" name="address-role" checked={role === "sender"} onChange={() => setRole("sender")} />
+            <span>Your own (the sender's)<small>Goes at the top of the letter, on the right</small></span></label>
+          <label className="choice"><input type="radio" name="address-role" checked={role === "recipient"} onChange={() => setRole("recipient")} />
+            <span>The recipient's<small>Goes above the greeting ("Dear …"), on the left</small></span></label>
+        </fieldset>
       </form>
-      <figure className="letterhead-preview"><PartThumb part={part} width={240} /><figcaption>Preview</figcaption></figure>
+      <figure className="letterhead-preview"><PartThumb part={part} align={role === "sender" ? "right" : "left"} width={240} /><figcaption>Preview</figcaption></figure>
       <Actions ready={!!lines.trim()} name={name || list[0]?.trim() || ""} setName={setName}
-        onSave={() => onSave((name || list[0]).trim(), part)} onCancel={onCancel} />
+        onSave={() => onSave((name || list[0]).trim(), part, role)} onCancel={onCancel} />
     </div>
   );
 }

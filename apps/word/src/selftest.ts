@@ -652,13 +652,13 @@ export function blocksSelfTest(view: { state: { doc: { attrs: Record<string, unk
     const listed = cards().map((b) => b.title);
     click("Centre", dialog());
     await wait(200);
-    cards().find((b) => b.title === "Insert Selftest address")?.click();
+    cards().find((b) => b.title.startsWith("Insert Selftest address"))?.click();
     await wait(400);
     await open();
     choose(dialog().querySelector("select"), "header");
     click("Right", dialog());
     await wait(200);
-    cards().find((b) => b.title === "Insert Selftest stamp")?.click();
+    cards().find((b) => b.title.startsWith("Insert Selftest stamp"))?.click();
     await wait(600);
     const centred: string[] = [];
     view.state.doc.forEach((n) => { if (centred.length < 4 && (n.attrs.props as { align?: string })?.align === "center") centred.push(n.textContent); });

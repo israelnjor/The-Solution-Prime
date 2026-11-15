@@ -5,7 +5,7 @@
  * centred or right.
  */
 import type { Block, ImageResource, Inline, ParagraphProps, PrimeDocument, RunProps } from "@prime/pdm";
-import { Slice } from "prosemirror-model";
+import { type Node, Slice } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { storyFromProseMirror, storyToProseMirror } from "./convert.js";
 import { setStory, storyAt } from "./docsetup.js";
@@ -19,9 +19,10 @@ export interface Part {
 
 /**
  * Where a part goes: as the last paragraphs of the document, at the bottom of the last page (kept there
- * as the text grows), at the cursor, or in the header or footer.
+ * as the text grows), at the top of the letter (the sender's address), where the recipient's address goes
+ * in a letter (above the greeting), at the cursor, or in the header or footer.
  */
-export type PartPlace = "end" | "bottom" | "cursor" | "header" | "footer";
+export type PartPlace = "end" | "bottom" | "start" | "recipient" | "cursor" | "header" | "footer";
 export type PartAlign = "left" | "center" | "right";
 
 /** Every `imageId` in a value (pictures in paragraphs, links, tables, text boxes, floats). */
@@ -76,6 +77,55 @@ function prepared(part: Part, doc: PrimeDocument, align?: PartAlign): Block[] {
   return blocks;
 }
 
+/** A greeting that opens a letter: "Dear Sir,", "Dear Ms Mensah", "Sir,", "To whom it may concern". */
+const GREETING = /^\s*(dear\b|sirs?\b|madam\b|sir\s*\/\s*madam|to whom\b|hello\b|good (morning|afternoon|day)\b)/i;
+const MONTH = "jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?";
+/** A date on a line of its own: "15 November 2026", "November 15, 2026", "15th Nov., 2026", "15/11/2026". */
+const DATE = new RegExp(String.raw`^\s*(date\s*:?\s*)?((\w+day,?\s+)?\d{1,2}(st|nd|rd|th)?\s+(of\s+)?(${MONTH})\.?,?\s+\d{4}|(${MONTH})\.?\s+\d{1,2}(st|nd|rd|th)?,?\s+\d{4}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{2}-\d{2})\.?\s*$`, "i");
+
+/** The top-level blocks of the first section, with their positions (the opening of a letter). */
+function opening(doc: Node, max = 40): { node: Node; pos: number }[] {
+  const out: { node: Node; pos: number }[] = [];
+  let pos = 0;
+  for (let i = 0; i < doc.childCount && out.length < max; i++) {
+    const node = doc.child(i);
+    if (node.type.name === "section_break") break;
+    out.push({ node, pos });
+    pos += node.nodeSize;
+  }
+  return out;
+}
+const isEmptyPara = (n: Node | undefined) => !!n && n.type.name === "paragraph" && n.content.size === 0;
+const alignOf = (n: Node) => (n.attrs.props as ParagraphProps | null)?.align;
+
+/**
+ * Where the recipient's address goes in a letter: above the greeting; with no greeting, after a date
+ * near the top, or after the sender's address (short lines aligned right at the very top); otherwise at
+ * the top. `gapBefore`: a blank line is needed between what is above and the address.
+ */
+export function recipientPlace(doc: Node): { pos: number; gapBefore: boolean } {
+  const top = opening(doc);
+  const greeting = top.findIndex(({ node }) => node.type.name === "paragraph" && node.textContent.length < 80 && GREETING.test(node.textContent));
+  if (greeting >= 0) {
+    // Above the greeting, and above the blank line(s) before it, so the address keeps them below.
+    let i = greeting;
+    while (i > 0 && isEmptyPara(top[i - 1].node)) i--;
+    return { pos: top[i].pos, gapBefore: i > 0 };
+  }
+  const after = (i: number) => {
+    // After block i and a blank line following it.
+    const next = top[i + 1];
+    return isEmptyPara(next?.node) ? { pos: next.pos + next.node.nodeSize, gapBefore: false } : { pos: top[i].pos + top[i].node.nodeSize, gapBefore: true };
+  };
+  const date = top.slice(0, 12).findIndex(({ node }) => node.type.name === "paragraph" && DATE.test(node.textContent));
+  if (date >= 0) return after(date);
+  let sender = 0;
+  while (sender < top.length && top[sender].node.type.name === "paragraph" && top[sender].node.content.size > 0
+    && top[sender].node.textContent.length < 60 && alignOf(top[sender].node) === "right") sender++;
+  if (sender > 0 && sender < 8) return after(sender - 1);
+  return { pos: 0, gapBefore: false };
+}
+
 /** Whether a part can be kept at the bottom of the last page (paragraphs only: a table cannot be framed). */
 export function canPinToBottom(part: Part): boolean {
   return part.blocks.length > 0 && part.blocks.every((b) => b.type === "paragraph");
@@ -110,6 +160,25 @@ export function insertPart(part: Part, doc: () => PrimeDocument, place: PartPlac
       // After everything (after another block kept there: two signatures stack).
       const tr = state.tr.insert(state.doc.content.size, pm.content);
       dispatch(tr);
+      return true;
+    }
+    if (place === "start" || place === "recipient") {
+      const pm = storyToProseMirror(blocks, state.schema);
+      const empty = state.doc.childCount === 1 && isEmptyPara(state.doc.firstChild ?? undefined);
+      if (empty) {
+        // An empty document: the part replaces its one empty paragraph.
+        dispatch(state.tr.replaceWith(0, state.doc.content.size, pm.content).scrollIntoView());
+        return true;
+      }
+      const at = place === "start" ? { pos: 0, gapBefore: false } : recipientPlace(state.doc);
+      let content = pm.content;
+      if (at.gapBefore) content = content.addToStart(state.schema.nodes.paragraph.create());
+      // A blank line already following the place: the part's own trailing blank line is not needed too.
+      const next = state.doc.resolve(at.pos).nodeAfter ?? undefined;
+      if (isEmptyPara(next) && content.lastChild && isEmptyPara(content.lastChild) && content.childCount > 1) {
+        content = content.cut(0, content.size - content.lastChild.nodeSize);
+      }
+      dispatch(state.tr.insert(at.pos, content).scrollIntoView());
       return true;
     }
     if (place === "cursor") {
