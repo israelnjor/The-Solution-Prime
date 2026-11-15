@@ -4,7 +4,7 @@
  * are sized from the real screen positions, so every page's content starts exactly at the top of
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
-import { isLineShape, type LayoutResult, layoutDocument, type Measurer, type PlacedFloat, Resolver, sectionColumns, shapePath } from "@prime/layout";
+import { isLineShape, type LayoutResult, layoutDocument, type Measurer, pinnedToBottom, type PlacedFloat, Resolver, sectionColumns, shapePath } from "@prime/layout";
 import type { PrimeDocument, SectionProps, ShapeStyle } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
@@ -137,6 +137,33 @@ function gap(page: number, inline: boolean): () => HTMLElement {
     el.contentEditable = "false";
     return el;
   };
+}
+
+/** The space above a block kept at the bottom of the last page: sized on screen (see `pinFit`). */
+function pinGap(): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "pw-pin-gap";
+  el.contentEditable = "false";
+  return el;
+}
+
+/**
+ * Where the block kept at the bottom of the last page starts (a signature block: paragraphs framed at
+ * the foot of the margin at the end of the document, only empty paragraphs after them), as the layout
+ * engine finds it; undefined if there is none (or the last section has text columns).
+ */
+export function pinnedStart(doc: Node): number | undefined {
+  const last = doc.lastChild;
+  if (!last) return undefined;
+  if ((doc.attrs.section?.props as SectionProps | undefined) && sectionColumns(doc.attrs.section.props, 500)) return undefined;
+  const kids: { node: Node; pos: number }[] = [];
+  doc.forEach((node, pos) => kids.push({ node, pos }));
+  let j = kids.length - 1;
+  const pinned = (n: Node) => n.type.name === "paragraph" && pinnedToBottom(n.attrs.props);
+  while (j >= 0 && kids[j].node.type.name === "paragraph" && !pinned(kids[j].node) && kids[j].node.content.size === 0) j--;
+  let k = j;
+  while (k >= 0 && pinned(kids[k].node)) k--;
+  return k < j ? kids[k + 1].pos : undefined;
 }
 
 /**
@@ -332,6 +359,7 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
   for (const w of wraps) {
     out.push(Decoration.widget(w.pos, wrapSpace(w), { side: -1, key: `wrap-${w.page}-${w.skip}-${w.left?.width}-${w.left?.height}-${w.right?.width}-${w.right?.height}` }));
   }
+  const pin = pinnedStart(doc);
   for (const s of starts) {
     if (s.kind === "row") {
       const row = doc.nodeAt(s.pos);
@@ -340,6 +368,8 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
       out.push(Decoration.widget(s.pos, gap(s.page, s.kind === "inline"), { side: -1, key: `gap-${s.page}-${s.kind}`, page: s.page }));
     }
   }
+  // After a page's gap at the same place: the block then sits at the foot of that page.
+  if (pin !== undefined) out.push(Decoration.widget(pin, pinGap, { side: -1, key: "pin" }));
   return DecorationSet.create(doc, out);
 }
 
@@ -521,7 +551,7 @@ export function pagination(opts: PagedOptions): Plugin {
     const top = (el: Element) => (rect(el).top - box.top) / zoom;
     const bottom = (el: Element) => (rect(el).bottom - box.top) / zoom;
     let blocks: Element[] | undefined;
-    const topLevel = () => (blocks ??= Array.from(view.dom.children).filter((el) => !el.classList.contains("pw-page-gap")));
+    const topLevel = () => (blocks ??= Array.from(view.dom.children).filter((el) => !el.classList.contains("pw-page-gap") && !el.classList.contains("pw-pin-gap")));
     const bodyTopAt = (page: number) => bodyTopOf(page);
     const overflow = new Set<number>();
     const items = Array.from(view.dom.querySelectorAll<HTMLElement>(".pw-page-gap, .pw-page-row"));
@@ -640,6 +670,38 @@ export function pagination(opts: PagedOptions): Plugin {
     return true;
   };
 
+  /** The pinned block's spacer size now (CSS px), and the stylesheet that holds it. */
+  let pinSize = 0;
+  let pinSheet: HTMLStyleElement | undefined;
+  /**
+   * Sizes the space above the block kept at the bottom of the last page, so the block (and any empty
+   * paragraphs after it) ends at the foot of its page's body area. The layout decided the page (it moves
+   * the block, with the text's last lines, to a new page when it does not fit); the screen sets the space.
+   */
+  const pinFit = (view: EditorView) => {
+    const el = view.dom.querySelector<HTMLElement>(":scope > .pw-pin-gap");
+    const set = (size: number) => {
+      if (Math.abs(size - pinSize) <= 0.5) return;
+      pinSize = size;
+      if (!pinSheet) { pinSheet = document.createElement("style"); pinSheet.dataset.primePin = ""; document.head.appendChild(pinSheet); }
+      pinSheet.textContent = size > 0 ? `.pw-editor .pw-pin-gap { height: ${size}px; }` : "";
+    };
+    if (!el || !layout?.pages.length) return set(0);
+    const box = view.dom.getBoundingClientRect();
+    const cssWidth = parseFloat(getComputedStyle(view.dom).width);
+    const zoom = cssWidth ? box.width / cssWidth : 1;
+    const children = Array.from(view.dom.children).filter((c) => !c.classList.contains("pw-page-gap") && !c.classList.contains("pw-pin-gap"));
+    const lastBlock = children[children.length - 1];
+    if (!lastBlock) return set(0);
+    const naturalTop = (el.getBoundingClientRect().top - box.top) / zoom;
+    const naturalBottom = (lastBlock.getBoundingClientRect().bottom - box.top) / zoom - pinSize;
+    const pages = layout.pages;
+    let page = 1;
+    while (page < pages.length && bodyTopOf(page + 1) <= naturalTop + 1) page++;
+    const bodyBottom = (tops[page - 1] + pages[page - 1].bodyBottom - pages[0].bodyTop) * PX;
+    set(Math.max(0, Math.floor(bodyBottom - naturalBottom - 1)));
+  };
+
   const write = (sheet: HTMLStyleElement, sizes: Map<string, number>) => {
     const rules: string[] = [];
     for (const [key, size] of sizes) {
@@ -735,6 +797,7 @@ export function pagination(opts: PagedOptions): Plugin {
           const w = want;
           want = undefined;
           timed("fit", () => { if (w === "full" || w === undefined || !fastFit(view, sheet, w)) fit(view, sheet); });
+          pinFit(view);
           busyUntil = performance.now();
         }, 0);
       };
@@ -796,6 +859,9 @@ export function pagination(opts: PagedOptions): Plugin {
           clearTimeout(timer);
           clearTimeout(fitTimer);
           sheet.remove();
+          pinSheet?.remove();
+          pinSheet = undefined;
+          pinSize = 0;
           window.removeEventListener("resize", onResize);
           document.fonts?.removeEventListener?.("loadingdone", onResize);
         },

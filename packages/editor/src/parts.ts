@@ -16,7 +16,8 @@ export interface Part {
   images: Record<string, ImageResource>;
 }
 
-export type PartPlace = "cursor" | "header" | "footer";
+/** Where a part goes: at the bottom of the last page (kept there as the text grows), at the cursor, or in the header or footer. */
+export type PartPlace = "bottom" | "cursor" | "header" | "footer";
 export type PartAlign = "left" | "center" | "right";
 
 /** Every `imageId` in a value (pictures in paragraphs, links, tables, text boxes, floats). */
@@ -71,11 +72,41 @@ function prepared(part: Part, doc: PrimeDocument, align?: PartAlign): Block[] {
   return blocks;
 }
 
-/** Inserts a part at the cursor (as whole paragraphs), or at the end of the header or footer. */
+/** Whether a part can be kept at the bottom of the last page (paragraphs only: a table cannot be framed). */
+export function canPinToBottom(part: Part): boolean {
+  return part.blocks.length > 0 && part.blocks.every((b) => b.type === "paragraph");
+}
+
+/** The frame that keeps a paragraph at the foot of the margin (Word shows it there too). */
+const bottomFrame = (align: PartAlign = "left") =>
+  ({ name: "w:framePr", xml: `<w:framePr w:wrap="notBeside" w:vAnchor="margin" w:hAnchor="margin" w:xAlign="${align}" w:yAlign="bottom"/>` });
+
+/**
+ * Inserts a part at the bottom of the last page (after everything, kept at the page's foot as the text
+ * above grows), at the cursor (as whole paragraphs), or at the end of the header or footer.
+ */
 export function insertPart(part: Part, doc: () => PrimeDocument, place: PartPlace = "cursor", align?: PartAlign): Command {
   return (state, dispatch, view) => {
     if (!dispatch) return true;
     const blocks = prepared(part, doc(), align);
+    if (place === "bottom" && canPinToBottom(part)) {
+      // Trailing empty paragraphs would only take room at the foot of the page.
+      while (blocks.length > 1) {
+        const last = blocks[blocks.length - 1];
+        if (last.type === "paragraph" && !last.content.length) blocks.pop();
+        else break;
+      }
+      for (const b of blocks) {
+        if (b.type !== "paragraph") continue;
+        const extra = (b.props.extra ?? []).filter((x) => x.name !== "w:framePr");
+        b.props = { ...b.props, align: align ?? b.props.align, keepLines: true, extra: [...extra, bottomFrame(align)] };
+      }
+      const pm = storyToProseMirror(blocks, state.schema);
+      // After everything (after another block kept there: two signatures stack).
+      const tr = state.tr.insert(state.doc.content.size, pm.content);
+      dispatch(tr);
+      return true;
+    }
     if (place === "cursor") {
       const pm = storyToProseMirror(blocks, state.schema);
       const { $from } = state.selection;
@@ -85,6 +116,11 @@ export function insertPart(part: Part, doc: () => PrimeDocument, place: PartPlac
         ? state.tr.replaceWith($from.before(), $from.after(), pm.content)
         : state.tr.replaceSelection(new Slice(pm.content, 0, 0));
       dispatch(tr.scrollIntoView());
+      return true;
+    }
+    if (place === "bottom") {
+      // A part that cannot be framed (a table): at the end of the document.
+      dispatch(state.tr.insert(state.doc.content.size, storyToProseMirror(blocks, state.schema).content));
       return true;
     }
     const story = storyAt(state, place);

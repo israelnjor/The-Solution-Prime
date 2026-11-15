@@ -176,6 +176,9 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 }
 /* flow-root: margins never collapse through a gap, so growing it by d moves what follows by exactly d (see fit in paged.ts). */
 .pw-page-gap { display: flow-root; height: 0; pointer-events: none; user-select: none; }
+/* The space above a signature block kept at the bottom of the last page (sized by the pagination). */
+.pw-pin-gap { display: flow-root; height: 0; pointer-events: none; user-select: none; }
+.pw-editor .pw-pin-gap + p { margin-top: 0 !important; }
 
 .pw-editor.paged .pw-section-break { display: none; }
 /* Invisible but placed (zero width, on the line): a hidden break has no position, and the caret beside it

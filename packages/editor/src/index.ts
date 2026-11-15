@@ -29,7 +29,7 @@ export {
 } from "./review.js";
 export { blockHandle, moveBlock } from "./blocks.js";
 export { letterheadDocument, letterheadStories, type LetterheadSpec } from "./letterhead.js";
-export { addressBlock, insertPart, type Part, type PartAlign, type PartPlace, partFromSelection, picturePart, signatureBlock, type SignatureBlockSpec } from "./parts.js";
+export { addressBlock, canPinToBottom, insertPart, type Part, type PartAlign, type PartPlace, partFromSelection, picturePart, signatureBlock, type SignatureBlockSpec } from "./parts.js";
 export { AUTOFORMAT_DEFAULTS, autoFormat, autoFormatAfter, type AutoFormatOptions, CORRECTIONS } from "./autoformat.js";
 export { changeCase, type CaseMode, clearCharFormatting, clearFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, FONT_SIZES, growFont, pasteFormat, toggleVertAlign } from "./formatting.js";
 export { pasteAs, type PasteMode, pasteOptions, pasteOptionsKey, type PasteState } from "./pasteoptions.js";

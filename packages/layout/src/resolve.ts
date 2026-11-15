@@ -46,6 +46,8 @@ export interface ResolvedParagraph {
   contextualSpacing: boolean;
   /** A drop cap (Word's w:framePr w:dropCap): its letter beside the next paragraph's first `lines` lines, `space` pt from them. */
   dropCap?: { kind: "drop" | "margin"; lines: number; space: number };
+  /** Kept at the bottom of the page (a frame at the foot of the margin, as a signature block at the end of a letter). */
+  pinBottom?: boolean;
   /** Not hyphenated automatically (w:suppressAutoHyphens). */
   suppressAutoHyphens: boolean;
   /** Left out of line numbering (w:suppressLineNumbers). */
@@ -171,6 +173,15 @@ function mergePara(a: ParagraphProps, b: ParagraphProps | undefined): ParagraphP
     markRun: markRun ? mergeRun(a.markRun ?? {}, markRun) : a.markRun,
     extra: [...(a.extra ?? []), ...(extra ?? [])],
   };
+}
+
+/**
+ * A paragraph kept at the bottom of the page: framed (w:framePr) at the foot of the margin or page, as a
+ * signature block at the end of a letter is. Word shows it at the bottom of the page its text reaches.
+ */
+export function pinnedToBottom(p: ParagraphProps | null | undefined): boolean {
+  const xml = p?.extra?.find((x) => x.name === "w:framePr")?.xml;
+  return !!xml && /w:yAlign="bottom"/.test(xml) && /w:vAnchor="(margin|page)"/.test(xml) && !/w:dropCap="(drop|margin)"/.test(xml);
 }
 
 /** A drop cap frame (w:framePr with w:dropCap "drop" or "margin"), if any. */
@@ -364,6 +375,7 @@ export class Resolver {
       suppressLineNumbers: hasExtra(props, "w:suppressLineNumbers"),
       suppressAutoHyphens: hasExtra(props, "w:suppressAutoHyphens"),
       ...dropCapOf(props),
+      ...(pinnedToBottom(props) ? { pinBottom: true } : {}),
       borderBottom: bottom ? bottom.width + bottom.space : 0,
       ...(bottom ? { borderLine: bottom } : {}),
       borderTop: borders.top ? borders.top.width + borders.top.space : 0,

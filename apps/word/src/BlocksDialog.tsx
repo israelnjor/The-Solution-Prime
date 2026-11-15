@@ -1,5 +1,5 @@
 import {
-  addressBlock, blankDocument, insertPart, type Part, type PartAlign, partFromSelection, type PartPlace, picturePart, signatureBlock,
+  addressBlock, blankDocument, canPinToBottom, insertPart, type Part, type PartAlign, partFromSelection, type PartPlace, picturePart, signatureBlock,
 } from "@prime/editor";
 import type { PrimeDocument } from "@prime/pdm";
 import type { EditorView } from "prosemirror-view";
@@ -17,14 +17,20 @@ const today = () => new Date().toLocaleDateString(undefined, { day: "numeric", m
 const CLOSINGS = ["", "Yours faithfully,", "Yours sincerely,", "Kind regards,", "Best regards,", "Signed,"];
 const KIND_LABEL: Record<SavedBlock["data"]["kind"], string> = { signature: "Signature block", address: "Address", stamp: "Stamp", selection: "Saved text" };
 
-/** A small page showing a part, as it would look aligned. */
-function PartThumb({ part, align, width = 160 }: { part: Part; align?: PartAlign; width?: number }) {
+/** Where a block goes when the place is left to Prime Word: a signature block at the bottom of the last page, others at the cursor. */
+const bestPlace = (kind: SavedBlock["data"]["kind"], part: Part): PartPlace => (kind === "signature" && canPinToBottom(part) ? "bottom" : "cursor");
+
+/** A small page showing a part, as it would look aligned (at the foot of the page when it goes at the bottom). */
+function PartThumb({ part, align, width = 160, bottom }: { part: Part; align?: PartAlign; width?: number; bottom?: boolean }) {
   const doc = useMemo<PrimeDocument>(() => {
     const d = blankDocument();
     d.images = { ...part.images };
-    d.sections[0].blocks = structuredClone(part.blocks).map((b) => (b.type === "paragraph" && align ? { ...b, props: { ...b.props, align } } : b));
+    const frame = { name: "w:framePr", xml: `<w:framePr w:wrap="notBeside" w:vAnchor="margin" w:hAnchor="margin" w:xAlign="${align ?? "left"}" w:yAlign="bottom"/>` };
+    d.sections[0].blocks = structuredClone(part.blocks).map((b) => (b.type === "paragraph"
+      ? { ...b, props: { ...b.props, ...(align ? { align } : {}), ...(bottom ? { extra: [...(b.props.extra ?? []), frame] } : {}) } }
+      : b));
     return d;
-  }, [part, align]);
+  }, [part, align, bottom]);
   return <PageThumb doc={doc} width={width} />;
 }
 
@@ -35,14 +41,16 @@ function PartThumb({ part, align, width = 160 }: { part: Part; align?: PartAlign
 export function BlocksDialog({ view, base, onClose, initial }: { view: EditorView; base: () => PrimeDocument; onClose(): void; initial?: "selection" }) {
   const [saved, setSaved] = useState<SavedBlock[]>();
   const [making, setMaking] = useState<Maker | "selection" | undefined>(initial);
-  const [place, setPlace] = useState<PartPlace>("cursor");
+  /** "auto": where the block belongs (see bestPlace). */
+  const [place, setPlace] = useState<PartPlace | "auto">("auto");
   const [align, setAlign] = useState<PartAlign>("left");
   const selection = useMemo(() => partFromSelection(base)(view.state), [view, base]);
   const load = () => void listEntries<SavedBlock["data"]>("blocks").then(setSaved).catch(() => setSaved([]));
   useEffect(load, []);
 
-  const insert = (part: Part) => {
-    insertPart(part, base, place, align)(view.state, view.dispatch, view);
+  const placeOf = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => (place === "auto" ? bestPlace(b.kind, b.part) : place);
+  const insert = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => {
+    insertPart(b.part, base, placeOf(b), align)(view.state, view.dispatch, view);
     onClose();
     view.focus();
   };
@@ -63,7 +71,10 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
         {!making && (
           <>
             <div className="blocks-place">
-              <label>Insert <select value={place} onChange={(e) => setPlace(e.target.value as PartPlace)}>
+              <label>Insert <select value={place} onChange={(e) => setPlace(e.target.value as PartPlace | "auto")}
+                title="Where it belongs: a signature block at the bottom of the last page (it stays there as the text grows), anything else at the cursor">
+                <option value="auto">where it belongs</option>
+                <option value="bottom">at the bottom of the last page</option>
                 <option value="cursor">at the cursor</option>
                 <option value="header">in the header</option>
                 <option value="footer">in the footer</option>
@@ -80,8 +91,9 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
             <div className="blocks-list">
               {saved?.map((b) => (
                 <div key={b.id} className="template-card mine">
-                  <button className="mine-open" onClick={() => insert(b.data.part)} title={`Insert ${b.name}`}>
-                    <PartThumb part={b.data.part} align={align} />
+                  <button className="mine-open" onClick={() => insert(b.data)}
+                    title={placeOf(b.data) === "bottom" ? `Insert ${b.name} at the bottom of the last page: it stays there as the text above grows` : `Insert ${b.name}`}>
+                    <PartThumb part={b.data.part} align={align} bottom={placeOf(b.data) === "bottom"} />
                     <strong>{b.name}</strong>
                     <span>{KIND_LABEL[b.data.kind]}</span>
                   </button>

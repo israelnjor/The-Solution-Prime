@@ -1586,6 +1586,29 @@ export class LayoutEngine {
         return b.rp.spaceBefore + b.lines.slice(0, n).reduce((s, l) => s + l.height, 0);
       };
 
+      // A block kept at the bottom of the last page (a signature block): the paragraphs pinned there at
+      // the end of the document (only empty ones after them). It sits at the foot of the page the text
+      // reaches; when it does not fit there, it moves to the next page whole, taking the last lines of
+      // the text before it along (a page never holds the block alone).
+      let pinStart = -1;
+      let carryIdx = -1;
+      let capLines: number | undefined;
+      if (si === this.doc.sections.length - 1 && !cols) {
+        const empty = (b: Box | undefined) => b?.kind === "para" && !b.rp.pinBottom && b.para.content.length === 0;
+        let j = boxes.length - 1;
+        while (j >= 0 && empty(boxes[j])) j--;
+        let k = j;
+        while (k >= 0 && boxes[k].kind === "para" && (boxes[k] as ParaBox).rp.pinBottom) k--;
+        if (k < j) {
+          pinStart = k + 1;
+          let c = k;
+          while (c >= 0 && empty(boxes[c])) c--;
+          if (c >= 0 && boxes[c].kind === "para") carryIdx = c;
+        }
+      }
+      /** Height of everything from box `from` to the end of the section. */
+      const tailHeight = (from: number) => boxes.slice(from).reduce((s, b) => s + (b.kind === "para" ? this.paraHeight(b) : 0), 0);
+
       boxes.forEach((box, bi) => {
         if (box.kind === "table") {
           const headers = box.rows.filter((r) => r.header);
@@ -1625,6 +1648,19 @@ export class LayoutEngine {
           before = 0;
         }
         const full = before + this.paraHeight(box) - rp.spaceBefore;
+        if (!atTop() && (bi === carryIdx || bi === pinStart)) {
+          const after = tailHeight(bi + 1);
+          const pageHeight = bottom - top;
+          if (bi === pinStart && full + after > room() && full + after <= pageHeight) {
+            advance(section, si);
+            before = 0;
+          } else if (bi === carryIdx && full <= room() && full + after > room() && after < pageHeight) {
+            // The block will not fit after this paragraph: the paragraph's last two lines go over with it
+            // (a short paragraph goes over whole).
+            if (box.lines.length >= 4 && !rp.keepLines) capLines = box.lines.length - 2;
+            else if (full + after <= pageHeight) { advance(section, si); before = 0; }
+          }
+        }
         if (!atTop()) {
           // Keep with next: this paragraph (and any keep-with-next chain) plus the start of what follows.
           let need = full;
@@ -1640,6 +1676,11 @@ export class LayoutEngine {
           }
         }
         y += before;
+        // The pinned block: down to the foot of the page.
+        if (bi === pinStart) {
+          const slack = room() - (full - before) - tailHeight(bi + 1);
+          if (slack > 0) y += slack;
+        }
         // Paragraph borders: the top border above the first line; side borders drawn per page.
         const bd = rp.borders;
         const contentLeft = left + rp.left;
@@ -1746,6 +1787,7 @@ export class LayoutEngine {
             if (fit === 1 && first) fit = 0;                                  // orphan: lone first line
             else if (segment - fit === 1 && fit >= 2) fit -= 1;               // widow: lone last line
           }
+          if (bi === carryIdx && first && capLines !== undefined) fit = Math.min(fit, capLines);
           if (fit === 0 && atTop()) fit = 1;                                  // taller than a page: place anyway
           if (fit === 0) { drawSides(y); advance(section, si); sideTop = y; continue; }
           for (let k = 0; k < fit; k++) {
