@@ -79,6 +79,8 @@ export interface RibbonProps {
   onEditPicture(): void;
   onLetterhead(): void;
   onSaveTemplate(): void;
+  /** Apply a saved template or letterhead (or one from a file) to this document. */
+  onApplyTemplate(): void;
   onSignature(): void;
   onBlocks(): void;
   onAutoCorrect(): void;
@@ -140,7 +142,7 @@ const CASES: [CaseMode, string][] = [["sentence", "Sentence case."], ["lower", "
 /** Small line icons for the ribbon (drawn in the text colour). */
 type IconName = "left" | "center" | "right" | "both" | "bullets" | "numbers" | "find" | "replace"
   | "pageBreak" | "deletePage" | "textBox" | "chart" | "shapes" | "dropCap" | "table" | "textToTable" | "picture"
-  | "headerFooter" | "letterhead" | "signature" | "blocks" | "equation" | "symbol" | "dateTime" | "link";
+  | "headerFooter" | "letterhead" | "applyTemplate" | "signature" | "blocks" | "equation" | "symbol" | "dateTime" | "link";
 
 function Icon({ name }: { name: IconName }) {
   const lines = (rows: [number, number][]) => rows.map(([x1, x2], i) => <line key={i} x1={x1} x2={x2} y1={3 + i * 3.5} y2={3 + i * 3.5} />);
@@ -164,6 +166,7 @@ function Icon({ name }: { name: IconName }) {
     textToTable: <><path d="M1.5 3.5h5M1.5 6.5h5M1.5 9.5h5" /><rect x={8.5} y={5.5} width={6} height={8} /><path d="M8.5 9.5h6M11.5 5.5v8" /></>,
     picture: <><rect x={1.5} y={2.5} width={13} height={11} rx={1} /><circle cx={5.5} cy={6} r={1.3} /><path d="M1.5 12l4-4 3 3 2-2 4 4" /></>,
     headerFooter: <><path d="M3 1.5h10v13H3z" /><path d="M5 4h6M5 12h6" strokeWidth={2} /><path d="M5 7.2h6M5 9h4.5" strokeWidth={0.9} /></>,
+    applyTemplate: <><path d="M2.5 2.5h7v11h-7z" /><path d="M4 4.5h4" strokeWidth={1.6} /><path d="M10 8h4M12 6l2 2-2 2" /></>,
     letterhead: <><path d="M3 1.5h10v13H3z" /><circle cx={5.6} cy={4.6} r={1.4} /><path d="M8 4h3.3M8 5.6h2.4M5 8.5h6M5 10.5h6M5 12.5h4" strokeWidth={1} /></>,
     signature: <><path d="M1.5 10.5c1.5-4 3-6.5 3.8-5.5.9 1.2-2.4 6.3-.9 6.3 1.3 0 2.3-3.3 3.3-3.3.8 0 .3 2.3 1.2 2.3.7 0 1.4-1.1 2.3-1.1.6 0 .8.6 1.3.6" /><line x1={1.5} x2={14.5} y1={14} y2={14} strokeWidth={1} /></>,
     blocks: <><rect x={1.5} y={2} width={8.5} height={5} rx={0.8} /><rect x={6} y={9} width={8.5} height={5} rx={0.8} /><path d="M3.5 4.5h4.5M8 11.5h4.5" strokeWidth={1} /></>,
@@ -195,7 +198,7 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onApplyTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -316,6 +319,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>
               <button onClick={() => onSave(true)} title="Save as a new file">Save As</button>
               <button onClick={onSaveTemplate} title="Save this document as a template, to start new documents from">Save as Template</button>
+              <button onClick={onApplyTemplate} title="Put a saved template or letterhead on this document: first page only or every page">Apply Template…</button>
             </div>
             <div className="group" aria-label="Share">
               <ShareMenu onShare={onShare} label="Share ▾" />
@@ -453,6 +457,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
             <div className="group">
               <button onClick={onHeaderFooter} title="Edit the header and footer, add page numbers"><Icon name="headerFooter" /><span className="label keep">Header &amp; Footer</span></button>
               <button onClick={onLetterhead} title="Design a letterhead: logo, name, address, contacts"><Icon name="letterhead" /><span className="label keep">Letterhead…</span></button>
+              <button onClick={onApplyTemplate} title="Put a saved letterhead or template on this document: first page only or every page"><Icon name="applyTemplate" /><span className="label keep">Apply Template…</span></button>
               <button onClick={onSignature} title="Insert your signature, or make one from a photo, by drawing or typing"><Icon name="signature" /><span className="label keep">Signature…</span></button>
               <button onClick={onBlocks} title="Signature blocks, addresses, stamps and saved text: insert left, centre or right"><Icon name="blocks" /><span className="label keep">Blocks…</span></button>
             </div>

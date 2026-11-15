@@ -342,9 +342,15 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   // Backgrounds: a large picture with the page's text on it (a letterhead drawn as one picture: logo,
   // bars, the footer's contacts). It goes behind the text, where it was on the page — not into the text,
   // where it pushed the letter onto the next page. On most pages alike: the header's (every page has it).
-  const isBackground = (pic: Picture, i: number) => !pages[i].recognized
+  // A picture filling the page (a book cover, a full-page photo) is one too, text or not.
+  const fullPage = (pic: Picture, i: number) => pic.w >= pages[i].width * 0.85 && pic.h >= pages[i].height * 0.85;
+  const isBackground = (pic: Picture, i: number) => fullPage(pic, i) || (!pages[i].recognized
     && pic.w * pic.h >= pages[i].width * pages[i].height * 0.4
-    && pageLines[i].some((l) => { const cx = (l.x0 + l.x1) / 2; return cx > pic.x && cx < pic.x + pic.w && l.y > pic.y && l.y < pic.y + pic.h; });
+    && pageLines[i].some((l) => { const cx = (l.x0 + l.x1) / 2; return cx > pic.x && cx < pic.x + pic.w && l.y > pic.y && l.y < pic.y + pic.h; }));
+  // Artwork filling a page whose words were read by text recognition (a cover: a scan of plain paper
+  // loses its picture in extract.ts): its words are part of the picture, kept as it, not as text over it.
+  const covers = new Map<number, Picture>();
+  pages.forEach((pg, i) => { const art = pg.recognized ? pg.pictures.find((p) => fullPage(p, i)) : undefined; if (art) covers.set(pg.number, art); });
   const backdrops = new Map<number, Picture[]>();
   pages.forEach((pg, i) => {
     for (const pic of pg.pictures) if (!chromePictures.has(picKey(pic)) && isBackground(pic, i)) backdrops.set(pg.number, [...(backdrops.get(pg.number) ?? []), pic]);
@@ -402,10 +408,13 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
   const items: Item[] = [];
   /** Pages read by text recognition, and pages without text that could not be read. */
   const recognized: number[] = [];
+  /** Pages that are one picture (a cover) whose words were read but kept as the picture. */
+  const covered: number[] = [];
   const textless: number[] = [];
   pages.forEach((page, i) => {
     const grids = findGrids(page.rules, page.fills);
-    const lines = bodyLines[i];
+    const cover = covers.get(page.number);
+    const lines = cover ? bodyLines[i].filter((l) => !(l.y > cover.y && l.y < cover.y + cover.h && l.x0 >= cover.x - 2 && l.x1 <= cover.x + cover.w + 2)) : bodyLines[i];
     const used = new Set<Line>();
     for (const g of grids) {
       const inside = lines.filter((l) => inGrid(g, (l.x0 + l.x1) / 2, l.y - l.size * 0.3));
@@ -414,7 +423,9 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       items.push({ kind: "table", grid: g, lines: inside, pictures: pics, y: g.ys[0], page: page.number });
     }
     for (const pic of page.pictures) {
-      if (chromePictures.has(picKey(pic)) || backdrops.get(page.number)?.includes(pic) || grids.some((g) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2))) continue;
+      // A background on a page with nothing else (a cover): the page is the picture, in a paragraph of its own.
+      const alone = backdrops.get(page.number)?.includes(pic) && !lines.length && !grids.length;
+      if (!alone && (chromePictures.has(picKey(pic)) || backdrops.get(page.number)?.includes(pic) || grids.some((g) => inGrid(g, pic.x + pic.w / 2, pic.y + pic.h / 2)))) continue;
       items.push({ kind: "picture", picture: pic, y: pic.y, page: page.number });
     }
     let run: Line[] = [];
@@ -430,11 +441,13 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
     // A scanned page: no text, one picture covering most of the page (a full-page screenshot in a typed
     // document has a caption or margins around it).
     const scan = page.pictures.some((pic) => pic.w > page.width * 0.85 && pic.h > page.height * 0.85);
-    if (page.recognized) recognized.push(page.number);
+    if (cover) covered.push(page.number);
+    else if (page.recognized) recognized.push(page.number);
     else if (!page.texts.some((t) => t.text.trim()) && (scan || page.textless)) textless.push(page.number);
   });
   items.sort((a, b) => pageOf(a) - pageOf(b) || a.y - b.y);
   const pageList = (ns: number[]) => (ns.length === 1 ? `Page ${ns[0]}` : `Pages ${ns.slice(0, -1).join(", ")} and ${ns[ns.length - 1]}`);
+  if (covered.length) warnings.push(`${pageList(covered)} ${covered.length === 1 ? "is" : "are"} one picture (a cover, a full-page image): kept as the picture, behind the text; its words are part of it, not editable text.`);
   if (recognized.length) warnings.push(`${pageList(recognized)} had no text (printed as outlines, or scanned): the text was read by text recognition. Check names and numbers against the original.`);
   if (textless.length) warnings.push(`${pageList(textless)} had no text (printed as outlines, or scanned), and text recognition is not available here: the text cannot be edited.`);
   function pageOf(x: Item) { return x.kind === "lines" ? x.lines[0].page : x.page; }
@@ -743,8 +756,16 @@ export function reconstruct(pages: PageContent[]): ConversionResult {
       block = table;
     } else {
       const pic = item.picture;
-      block = pictureParagraph(pic, left, right);
-      endY = pic.y + pic.h;
+      if (backdrops.get(page)?.includes(pic)) {
+        // The page is this picture: behind the text at its place, in an empty paragraph; what follows starts
+        // the next page (its bottom counts as the top, so the next page breaks).
+        block = { type: "paragraph", props: {}, content: pendingBackground.length ? pendingBackground : [backgroundImage(pic)] };
+        pendingBackground = [];
+        endY = pic.y;
+      } else {
+        block = pictureParagraph(pic, left, right);
+        endY = pic.y + pic.h;
+      }
       y = pic.y;
     }
     if (block.type === "paragraph") {

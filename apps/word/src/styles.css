@@ -436,6 +436,27 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .letterhead-form legend { font-size: 13px; margin-right: 8px; float: left; }
 .letterhead-form .choice { display: inline-flex; align-items: center; gap: 6px; }
 .letterhead-preview { margin: 0; display: grid; justify-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+/* Apply a template or letterhead. */
+.hf-dialog.apply-template { width: min(900px, 96vw); }
+.apply-grid { display: grid; grid-template-columns: 240px 1fr auto; gap: 16px; align-items: start; min-height: 340px; }
+.apply-sources { display: grid; gap: 8px; align-content: start; }
+.apply-list { display: grid; gap: 4px; max-height: 400px; overflow-y: auto; padding: 2px; }
+.apply-source { display: flex; gap: 10px; align-items: center; padding: 6px; border: 1px solid transparent; border-radius: 6px; background: none; cursor: pointer; font: inherit; text-align: left; }
+.apply-source:hover { background: var(--hover, #f1f3f6); }
+.apply-source.on { border-color: var(--accent); background: rgb(43 87 154 / 0.08); }
+.apply-source span { display: grid; gap: 2px; min-width: 0; }
+.apply-source strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apply-source small, .apply-options small { color: var(--muted); font-size: 12px; display: block; }
+.apply-options { display: grid; gap: 12px; align-content: start; font-size: 13px; }
+.apply-options fieldset { border: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.apply-options legend { font-weight: 600; margin-bottom: 4px; }
+.apply-options .choice { display: flex; gap: 8px; align-items: flex-start; }
+.apply-options .choice input { margin-top: 2px; }
+.apply-describe { margin: 0; padding: 8px 10px; background: rgb(43 87 154 / 0.07); border-radius: 6px; }
+.apply-preview { display: flex; gap: 10px; align-items: flex-start; }
+.hint.error { color: #b3261e; }
+.hf-actions .apply-saved { margin-right: auto; }
+@media (max-width: 760px) { .apply-grid { grid-template-columns: 1fr; } }
 /* Signatures. */
 .hf-dialog.signatures { width: min(720px, 96vw); }
 .sig-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 10px 0; }

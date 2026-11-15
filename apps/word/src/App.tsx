@@ -64,6 +64,7 @@ import type { ConversionResult } from "@prime/pdf-import";
 import { PdfConverter } from "./PdfConverter";
 import { PictureEditor } from "./PictureEditor";
 import { LetterheadDesigner } from "./LetterheadDesigner";
+import { ApplyTemplate } from "./ApplyTemplate";
 import { type SavedSignature, SignatureDialog } from "./SignatureDialog";
 import { BlocksDialog } from "./BlocksDialog";
 import { AutoCorrectDialog, loadAutoCorrect } from "./AutoCorrectDialog";
@@ -175,6 +176,7 @@ export function App() {
   const [pickingTemplate, setPickingTemplate] = useState(false);
   const [editingPicture, setEditingPicture] = useState(false);
   const [designingLetterhead, setDesigningLetterhead] = useState(false);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [signing, setSigning] = useState(false);
   const [choosingBlock, setChoosingBlock] = useState(false);
   const [autoCorrecting, setAutoCorrecting] = useState(false);
@@ -1235,6 +1237,7 @@ ${String(e)}`));
         onMode={(m) => { setMode(m); if (m !== "print") setLayout(undefined); }}
         markup={markup} onMarkup={setMarkup} onHome={() => setHome(true)} onConvertPdf={() => setConverter({})} onEditPicture={() => setEditingPicture(true)}
         onLetterhead={() => setDesigningLetterhead(true)}
+        onApplyTemplate={() => setApplyingTemplate(true)}
         onSignature={() => setSigning(true)}
         onBlocks={() => setChoosingBlock(true)}
         onAutoCorrect={() => setAutoCorrecting(true)}
@@ -1456,7 +1459,8 @@ ${String(e)}`));
         <LetterheadDesigner view={hasDocument && !home ? v ?? undefined : undefined} base={baseOf}
           onNewDocument={(doc, name) => { setDesigningLetterhead(false); void newDocument({ id: "letterhead", name: name.replace(/\.docx$/, ""), description: "", create: () => doc }); }}
           onSaved={() => { setDesigningLetterhead(false); setTemplatesVersion((n) => n + 1); flash("Letterhead saved to My templates"); }}
-          onClose={() => setDesigningLetterhead(false)} />
+          onClose={() => setDesigningLetterhead(false)}
+          onUseSaved={hasDocument && !home ? () => { setDesigningLetterhead(false); setApplyingTemplate(true); } : undefined} />
       )}
       {converter && (
         <PdfConverter measurer={() => measurerRef.current ?? new CanvasMeasurer()} initial={converter.initial}
@@ -1469,6 +1473,10 @@ ${String(e)}`));
           {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})}
           onLetterhead={() => setDesigningLetterhead(true)} templatesVersion={templatesVersion}
           view={homeView} onView={setHomeView} projects={projects} onProjectsChanged={refreshProjects} projectActions={projectActions} />
+      )}
+      {applyingTemplate && v && hasDocument && !home && (
+        <ApplyTemplate view={v} base={baseOf} onClose={() => setApplyingTemplate(false)}
+          onApplied={(name) => { setApplyingTemplate(false); flash(`"${name}" applied to this document`); }} />
       )}
       {pickingTemplate && (
         <TemplatePicker templatesVersion={templatesVersion} onClose={() => setPickingTemplate(false)} onOpenRecent={(p) => { setPickingTemplate(false); void openRecent(p); }} onPick={(t) => { setPickingTemplate(false); void newDocument(t); }} />

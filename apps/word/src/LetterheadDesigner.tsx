@@ -45,8 +45,10 @@ function readLogo(): Promise<LetterheadSpec["logo"]> {
  * Design a letterhead (name, tagline, address, contacts, logo, layout, colour, font), with a live
  * preview. Save it as a template, start a letter with it, or put it on the open document.
  */
-export function LetterheadDesigner({ view, base, onNewDocument, onSaved, onClose }: {
+export function LetterheadDesigner({ view, base, onNewDocument, onSaved, onClose, onUseSaved }: {
   view?: EditorView; base: () => PrimeDocument; onNewDocument(doc: PrimeDocument, name: string): void; onSaved(): void; onClose(): void;
+  /** Apply a saved letterhead instead (with a document open). */
+  onUseSaved?(): void;
 }) {
   const [spec, setSpec] = useState<LetterheadSpec>(remembered);
   const set = <K extends keyof LetterheadSpec>(k: K, v: LetterheadSpec[K]) => setSpec((s) => ({ ...s, [k]: v }));
@@ -100,6 +102,7 @@ export function LetterheadDesigner({ view, base, onNewDocument, onSaved, onClose
           <figure className="letterhead-preview"><PageThumb doc={preview} width={300} /><figcaption>Preview</figcaption></figure>
         </div>
         <div className="hf-actions">
+          {view && onUseSaved && <button className="apply-saved" onClick={onUseSaved} title="Put a letterhead or template you saved before on this document">Use a saved one…</button>}
           <button onClick={onClose}>Cancel</button>
           {view && <button disabled={!ready} onClick={apply} title="Put this letterhead on the open document">Apply to this document</button>}
           <button disabled={!ready} onClick={() => { keep(); void saveTemplate(letterheadDocument(spec), `${spec.name} letterhead`, "letterhead").then(onSaved); }}>Save as template</button>

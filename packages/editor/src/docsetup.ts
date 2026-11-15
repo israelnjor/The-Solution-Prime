@@ -22,7 +22,7 @@ export const PAPER: Record<string, { width: number; height: number }> = {
 const EMPTY: SectionAttrs = { props: {}, headers: {}, footers: {} };
 
 /** Every section: where its attributes live (-1 = the document's own) and the attributes. */
-function sections(state: EditorState): { pos: number; attrs: SectionAttrs }[] {
+export function sections(state: EditorState): { pos: number; attrs: SectionAttrs }[] {
   const out: { pos: number; attrs: SectionAttrs }[] = [];
   state.doc.forEach((node, offset) => {
     if (node.type.name === "section_break") out.push({ pos: offset, attrs: node.attrs.section as SectionAttrs });
@@ -50,7 +50,7 @@ function touched(state: EditorState): { pos: number; attrs: SectionAttrs }[] {
   });
 }
 
-function setSection(tr: Transaction, pos: number, attrs: SectionAttrs): Transaction {
+export function setSection(tr: Transaction, pos: number, attrs: SectionAttrs): Transaction {
   if (pos === -1) return tr.setDocAttribute("section", attrs);
   return tr.setNodeMarkup(pos, undefined, { section: attrs });
 }

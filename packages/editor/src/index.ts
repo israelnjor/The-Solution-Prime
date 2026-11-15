@@ -54,3 +54,4 @@ export { compareDocuments } from "./compare.js";
 export { extensionOf, type FileFormat, FORMAT_NAMES, formatOf, readAnyFormat, WRITABLE, writeFormat } from "./formats/index.js";
 export { insertShape, type ShapeChoice, SHAPES, setShapeFill, setShapeLine, shapeAt } from "./shapes.js";
 export { chartAt, chartFromGrid, insertChart, insertChartAfter, parseChartNumber, SAMPLE_CHART, setChartData, tableAtCursor } from "./charts.js";
+export { type ApplyOptions, type ApplyPages, applicationOf, commitApplication, defaultOptions, type FollowingPages, type LetterheadPattern, storyShows, templateLook, type TemplateLook, withAdditions } from "./applytemplate.js";

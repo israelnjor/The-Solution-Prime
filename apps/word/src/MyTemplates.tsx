@@ -20,23 +20,32 @@ export async function saveTemplate(doc: PrimeDocument, name: string, kind: "lett
   await saveEntry("templates", { id: newId(name), name, created: Date.now(), data: { docx: toBase64(writeDocx(doc)), kind } } satisfies SavedTemplate);
 }
 
+/** The saved templates and letterheads, newest first, read (those that cannot be read are left out). */
+export async function loadTemplates(): Promise<{ entry: SavedTemplate; doc: PrimeDocument }[]> {
+  const list = await listEntries<SavedTemplate["data"]>("templates");
+  return list.flatMap((entry) => {
+    try { return [{ entry, doc: readDocx(fromBase64(entry.data.docx)).doc }]; } catch { return []; }
+  });
+}
+
 /** A saved template as a template to start a document from. */
 export function asTemplate(t: SavedTemplate): Template {
   return { id: t.id, name: t.name, description: t.data.kind === "letterhead" ? "Letterhead" : "My template", create: () => readDocx(fromBase64(t.data.docx)).doc };
 }
 
 /** The first page of a document, small, as the layout draws it. */
-export function PageThumb({ doc, width = 120 }: { doc: PrimeDocument; width?: number }) {
+export function PageThumb({ doc, width = 120, page: index = 0, onMissing }: { doc: PrimeDocument; width?: number; page?: number; onMissing?(): void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const page = layoutOf(doc, new CanvasMeasurer()).pages[0];
+    const page = layoutOf(doc, new CanvasMeasurer()).pages[index];
+    if (!page) onMissing?.();
     if (!page || !canvas.current) return;
     const scale = width / page.width;
     drawLayoutPage(doc, page, canvas.current, scale * 2);
     // Pictures decode in the background: draw once more when they are ready.
     const again = setTimeout(() => canvas.current && drawLayoutPage(doc, page, canvas.current, scale * 2), 400);
     return () => clearTimeout(again);
-  }, [doc, width]);
+  }, [doc, width, index]);
   return <canvas ref={canvas} className="page-thumb" style={{ width }} />;
 }
 
