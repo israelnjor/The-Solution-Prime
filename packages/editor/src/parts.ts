@@ -9,6 +9,7 @@ import { Slice } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { storyFromProseMirror, storyToProseMirror } from "./convert.js";
 import { setStory, storyAt } from "./docsetup.js";
+import { pinnedStart } from "./paged.js";
 
 export interface Part {
   blocks: Block[];
@@ -16,8 +17,11 @@ export interface Part {
   images: Record<string, ImageResource>;
 }
 
-/** Where a part goes: at the bottom of the last page (kept there as the text grows), at the cursor, or in the header or footer. */
-export type PartPlace = "bottom" | "cursor" | "header" | "footer";
+/**
+ * Where a part goes: as the last paragraphs of the document, at the bottom of the last page (kept there
+ * as the text grows), at the cursor, or in the header or footer.
+ */
+export type PartPlace = "end" | "bottom" | "cursor" | "header" | "footer";
 export type PartAlign = "left" | "center" | "right";
 
 /** Every `imageId` in a value (pictures in paragraphs, links, tables, text boxes, floats). */
@@ -82,8 +86,9 @@ const bottomFrame = (align: PartAlign = "left") =>
   ({ name: "w:framePr", xml: `<w:framePr w:wrap="notBeside" w:vAnchor="margin" w:hAnchor="margin" w:xAlign="${align}" w:yAlign="bottom"/>` });
 
 /**
- * Inserts a part at the bottom of the last page (after everything, kept at the page's foot as the text
- * above grows), at the cursor (as whole paragraphs), or at the end of the header or footer.
+ * Inserts a part as the last paragraphs of the document, at the bottom of the last page (after
+ * everything, kept at the page's foot as the text above grows), at the cursor (as whole paragraphs), or
+ * at the end of the header or footer.
  */
 export function insertPart(part: Part, doc: () => PrimeDocument, place: PartPlace = "cursor", align?: PartAlign): Command {
   return (state, dispatch, view) => {
@@ -118,9 +123,22 @@ export function insertPart(part: Part, doc: () => PrimeDocument, place: PartPlac
       dispatch(tr.scrollIntoView());
       return true;
     }
-    if (place === "bottom") {
-      // A part that cannot be framed (a table): at the end of the document.
-      dispatch(state.tr.insert(state.doc.content.size, storyToProseMirror(blocks, state.schema).content));
+    if (place === "end" || place === "bottom") {
+      // The last paragraphs of the document (also a part that cannot be framed, such as a table, put at
+      // the bottom). An empty last paragraph is taken over, so no blank line is left above the part.
+      const pm = storyToProseMirror(blocks, state.schema);
+      // Above a block kept at the bottom of the page, which must stay last.
+      const pin = place === "end" ? pinnedStart(state.doc) : undefined;
+      if (pin !== undefined) {
+        dispatch(state.tr.insert(pin, pm.content).scrollIntoView());
+        return true;
+      }
+      const last = state.doc.lastChild;
+      const end = state.doc.content.size;
+      const tr = last && last.type.name === "paragraph" && last.content.size === 0 && state.doc.childCount > 1
+        ? state.tr.replaceWith(end - last.nodeSize, end, pm.content)
+        : state.tr.insert(end, pm.content);
+      dispatch(tr.scrollIntoView());
       return true;
     }
     const story = storyAt(state, place);

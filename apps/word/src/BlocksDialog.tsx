@@ -1,5 +1,5 @@
 import {
-  addressBlock, blankDocument, canPinToBottom, insertPart, type Part, type PartAlign, partFromSelection, type PartPlace, picturePart, signatureBlock,
+  addressBlock, blankDocument, insertPart, type Part, type PartAlign, partFromSelection, type PartPlace, picturePart, signatureBlock,
 } from "@prime/editor";
 import type { PrimeDocument } from "@prime/pdm";
 import type { EditorView } from "prosemirror-view";
@@ -17,8 +17,8 @@ const today = () => new Date().toLocaleDateString(undefined, { day: "numeric", m
 const CLOSINGS = ["", "Yours faithfully,", "Yours sincerely,", "Kind regards,", "Best regards,", "Signed,"];
 const KIND_LABEL: Record<SavedBlock["data"]["kind"], string> = { signature: "Signature block", address: "Address", stamp: "Stamp", selection: "Saved text" };
 
-/** Where a block goes when the place is left to Prime Word: a signature block at the bottom of the last page, others at the cursor. */
-const bestPlace = (kind: SavedBlock["data"]["kind"], part: Part): PartPlace => (kind === "signature" && canPinToBottom(part) ? "bottom" : "cursor");
+/** Where a block goes when the place is left to Prime Word: a signature block as the last paragraphs of the document, others at the cursor. */
+const bestPlace = (kind: SavedBlock["data"]["kind"]): PartPlace => (kind === "signature" ? "end" : "cursor");
 
 /** A small page showing a part, as it would look aligned (at the foot of the page when it goes at the bottom). */
 function PartThumb({ part, align, width = 160, bottom }: { part: Part; align?: PartAlign; width?: number; bottom?: boolean }) {
@@ -48,7 +48,7 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
   const load = () => void listEntries<SavedBlock["data"]>("blocks").then(setSaved).catch(() => setSaved([]));
   useEffect(load, []);
 
-  const placeOf = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => (place === "auto" ? bestPlace(b.kind, b.part) : place);
+  const placeOf = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => (place === "auto" ? bestPlace(b.kind) : place);
   const insert = (b: { kind: SavedBlock["data"]["kind"]; part: Part }) => {
     insertPart(b.part, base, placeOf(b), align)(view.state, view.dispatch, view);
     onClose();
@@ -72,8 +72,9 @@ export function BlocksDialog({ view, base, onClose, initial }: { view: EditorVie
           <>
             <div className="blocks-place">
               <label>Insert <select value={place} onChange={(e) => setPlace(e.target.value as PartPlace | "auto")}
-                title="Where it belongs: a signature block at the bottom of the last page (it stays there as the text grows), anything else at the cursor">
+                title="Where it belongs: a signature block after the last paragraph of the document, anything else at the cursor">
                 <option value="auto">where it belongs</option>
+                <option value="end">after the last paragraph</option>
                 <option value="bottom">at the bottom of the last page</option>
                 <option value="cursor">at the cursor</option>
                 <option value="header">in the header</option>
