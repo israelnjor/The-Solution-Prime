@@ -153,17 +153,27 @@ function pinGap(): HTMLElement {
  * engine finds it; undefined if there is none (or the last section has text columns).
  */
 export function pinnedStart(doc: Node): number | undefined {
-  const last = doc.lastChild;
-  if (!last) return undefined;
-  if ((doc.attrs.section?.props as SectionProps | undefined) && sectionColumns(doc.attrs.section.props, 500)) return undefined;
-  const kids: { node: Node; pos: number }[] = [];
-  doc.forEach((node, pos) => kids.push({ node, pos }));
-  let j = kids.length - 1;
+  const props = doc.attrs.section?.props as SectionProps | undefined;
+  if (props && sectionColumns(props, 500)) return undefined;
+  // From the end (only the last few blocks are looked at: this runs on every redraw).
   const pinned = (n: Node) => n.type.name === "paragraph" && pinnedToBottom(n.attrs.props);
-  while (j >= 0 && kids[j].node.type.name === "paragraph" && !pinned(kids[j].node) && kids[j].node.content.size === 0) j--;
-  let k = j;
-  while (k >= 0 && pinned(kids[k].node)) k--;
-  return k < j ? kids[k + 1].pos : undefined;
+  let i = doc.childCount - 1;
+  let pos = doc.content.size;
+  while (i >= 0 && doc.child(i).type.name === "paragraph" && !pinned(doc.child(i)) && doc.child(i).content.size === 0) pos -= doc.child(i--).nodeSize;
+  let start: number | undefined;
+  while (i >= 0 && pinned(doc.child(i))) { pos -= doc.child(i--).nodeSize; start = pos; }
+  return start;
+}
+
+const withPin = new WeakMap<DecorationSet, { doc: Node; set: DecorationSet }>();
+/** The page decorations plus the spacer above the pinned block (worked out once per document version). */
+function pinDecorations(doc: Node, set: DecorationSet): DecorationSet {
+  const known = withPin.get(set);
+  if (known?.doc === doc) return known.set;
+  const pin = pinnedStart(doc);
+  const out = pin === undefined ? set : set.add(doc, [Decoration.widget(pin, pinGap, { side: -1, key: "pin" })]);
+  withPin.set(set, { doc, set: out });
+  return out;
 }
 
 /**
@@ -359,7 +369,6 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
   for (const w of wraps) {
     out.push(Decoration.widget(w.pos, wrapSpace(w), { side: -1, key: `wrap-${w.page}-${w.skip}-${w.left?.width}-${w.left?.height}-${w.right?.width}-${w.right?.height}` }));
   }
-  const pin = pinnedStart(doc);
   for (const s of starts) {
     if (s.kind === "row") {
       const row = doc.nodeAt(s.pos);
@@ -368,8 +377,6 @@ function decorations(doc: Node, starts: ResolvedStart[], wraps: ReturnType<typeo
       out.push(Decoration.widget(s.pos, gap(s.page, s.kind === "inline"), { side: -1, key: `gap-${s.page}-${s.kind}`, page: s.page }));
     }
   }
-  // After a page's gap at the same place: the block then sits at the foot of that page.
-  if (pin !== undefined) out.push(Decoration.widget(pin, pinGap, { side: -1, key: "pin" }));
   return DecorationSet.create(doc, out);
 }
 
@@ -760,7 +767,9 @@ export function pagination(opts: PagedOptions): Plugin {
       },
     },
     props: {
-      decorations: (state) => paginationKey.getState(state)?.decorations,
+      // The pinned block's spacer comes after a page's gap at the same place (the block then sits at
+      // the foot of that page); it is drawn even before the first layout redraws anything.
+      decorations: (state) => pinDecorations(state.doc, paginationKey.getState(state)?.decorations ?? DecorationSet.empty),
       // Text columns: the editor is a multi-column container (see screenColumns).
       attributes: (state): Record<string, string> => {
         const c = paginationKey.getState(state)?.columns;

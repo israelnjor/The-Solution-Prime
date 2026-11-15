@@ -1654,7 +1654,8 @@ export class LayoutEngine {
           if (bi === pinStart && full + after > room() && full + after <= pageHeight) {
             advance(section, si);
             before = 0;
-          } else if (bi === carryIdx && full <= room() && full + after > room() && after < pageHeight) {
+          } else if (bi === carryIdx && full - rp.spaceAfter - rp.borderBottom <= room() + 0.01 && full + after > room() && after < pageHeight) {
+            // (Its lines fit here; its space after does not have to: a page's foot takes it.)
             // The block will not fit after this paragraph: the paragraph's last two lines go over with it
             // (a short paragraph goes over whole).
             if (box.lines.length >= 4 && !rp.keepLines) capLines = box.lines.length - 2;
