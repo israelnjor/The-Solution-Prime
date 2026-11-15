@@ -171,7 +171,8 @@ function pinDecorations(doc: Node, set: DecorationSet): DecorationSet {
   const known = withPin.get(set);
   if (known?.doc === doc) return known.set;
   const pin = pinnedStart(doc);
-  const out = pin === undefined ? set : set.add(doc, [Decoration.widget(pin, pinGap, { side: -1, key: "pin" })]);
+  // side -0.5: after a page's gap at the same place (side -1), so the block sits at the foot of that page.
+  const out = pin === undefined ? set : set.add(doc, [Decoration.widget(pin, pinGap, { side: -0.5, key: "pin" })]);
   withPin.set(set, { doc, set: out });
   return out;
 }
@@ -685,14 +686,15 @@ export function pagination(opts: PagedOptions): Plugin {
    * paragraphs after it) ends at the foot of its page's body area. The layout decided the page (it moves
    * the block, with the text's last lines, to a new page when it does not fit); the screen sets the space.
    */
+  const setPin = (size: number) => {
+    if (Math.abs(size - pinSize) <= 0.5) return;
+    pinSize = size;
+    if (!pinSheet) { pinSheet = document.createElement("style"); pinSheet.dataset.primePin = ""; document.head.appendChild(pinSheet); }
+    pinSheet.textContent = size > 0 ? `.pw-editor .pw-pin-gap { height: ${size}px; }` : "";
+  };
   const pinFit = (view: EditorView) => {
     const el = view.dom.querySelector<HTMLElement>(":scope > .pw-pin-gap");
-    const set = (size: number) => {
-      if (Math.abs(size - pinSize) <= 0.5) return;
-      pinSize = size;
-      if (!pinSheet) { pinSheet = document.createElement("style"); pinSheet.dataset.primePin = ""; document.head.appendChild(pinSheet); }
-      pinSheet.textContent = size > 0 ? `.pw-editor .pw-pin-gap { height: ${size}px; }` : "";
-    };
+    const set = setPin;
     if (!el || !layout?.pages.length) return set(0);
     const box = view.dom.getBoundingClientRect();
     const cssWidth = parseFloat(getComputedStyle(view.dom).width);
@@ -805,6 +807,10 @@ export function pagination(opts: PagedOptions): Plugin {
         fitTimer = setTimeout(() => {
           const w = want;
           want = undefined;
+          // The pinned block's space is left out while the pages are fitted: an old size (from before an
+          // edit) made a page overflow on screen, and the correction moved the page break into the block
+          // (its closing left behind on one page, the rest on the next). It is sized again after.
+          setPin(0);
           timed("fit", () => { if (w === "full" || w === undefined || !fastFit(view, sheet, w)) fit(view, sheet); });
           pinFit(view);
           busyUntil = performance.now();
