@@ -71,7 +71,13 @@ export function readShapeStyle(wsp: Element, theme: Record<string, string>): Sha
   }
   // Fill.
   if (spPr && child(spPr, "a:noFill")) { /* none */ }
-  else if (spPr && child(spPr, "a:solidFill")) out.fill = colorOf(child(spPr, "a:solidFill"), theme);
+  else if (spPr && child(spPr, "a:solidFill")) {
+    out.fill = colorOf(child(spPr, "a:solidFill"), theme);
+    // Its transparency (a:alpha on the colour, in 100000ths of opaque).
+    const alpha = child(spPr, "a:solidFill")!.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "alpha")[0];
+    const a = alpha ? Number(alpha.getAttribute("val")) / 100000 : 1;
+    if (a < 1 && a >= 0) out.fillOpacity = Math.round(a * 1000) / 1000;
+  }
   else if (spPr && (child(spPr, "a:gradFill") || child(spPr, "a:pattFill"))) {
     // A gradient or pattern: its first colour.
     const g = child(spPr, "a:gradFill") ?? child(spPr, "a:pattFill")!;
@@ -133,6 +139,8 @@ export interface NewShape {
   x: number;
   y: number;
   fill?: string;
+  /** How opaque the fill is (0–1). */
+  fillOpacity?: number;
   line?: ShapeLine;
   /** Text box: its paragraphs' XML (w:p…). */
   textXml?: string;
@@ -185,7 +193,7 @@ const URI = {
 
 /** A floating shape or text box as Word writes it (in front of text, square wrapping off: no wrap). */
 export function newShapeXml(s: NewShape): string {
-  const fill = s.fill ? `<a:solidFill><a:srgbClr val="${s.fill}"/></a:solidFill>` : "<a:noFill/>";
+  const fill = fillXml(s.fill, s.fillOpacity);
   const isLine = s.geometry === "line" || s.geometry === "straightConnector1";
   const text = s.kind === "textbox"
     ? `${textBodyXml(s.textXml ?? "<w:p/>")}<wps:bodyPr rot="0" vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="t" anchorCtr="0"><a:noAutofit/></wps:bodyPr>`
@@ -243,9 +251,16 @@ export function withShapeAdjust(xml: string, adj: Record<string, number> | undef
 const inSpPr = (xml: string, edit: (body: string) => string) =>
   xml.replace(/(<wps:spPr\b[^>]*>)([\s\S]*?)(<\/wps:spPr>)/, (_, open: string, body: string, close: string) => open + edit(body) + close);
 
+/** A fill as DrawingML: a colour, see-through by `opacity` (a:alpha) when less than 1; or none. */
+export function fillXml(fill: string | undefined, opacity?: number): string {
+  if (!fill) return "<a:noFill/>";
+  const alpha = opacity !== undefined && opacity < 1 ? `<a:alpha val="${Math.round(Math.max(0, opacity) * 100000)}"/>` : "";
+  return alpha ? `<a:solidFill><a:srgbClr val="${fill}">${alpha}</a:srgbClr></a:solidFill>` : `<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill>`;
+}
+
 /** The shape's XML with a new fill (undefined: no fill). */
-export function withShapeFill(xml: string, fill: string | undefined): string {
-  const value = fill ? `<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill>` : "<a:noFill/>";
+export function withShapeFill(xml: string, fill: string | undefined, opacity?: number): string {
+  const value = fillXml(fill, opacity);
   return inSpPr(xml, (body) => {
     // The fill comes after the geometry and before the line (CT_ShapeProperties order).
     const cleaned = body.replace(/<a:(noFill|solidFill|gradFill|blipFill|pattFill|grpFill)\b[^>]*?(\/>|>[\s\S]*?<\/a:\1>)/, "");

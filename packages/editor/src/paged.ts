@@ -343,6 +343,7 @@ export function shapeSvg(style: ShapeStyle, w: number, h: number, flip: { flipH?
     const path = document.createElementNS(NS, "path");
     path.setAttribute("d", part.d);
     path.setAttribute("fill", fill ? `#${fill}` : "none");
+    if (fill && part.fill !== "line" && style.fillOpacity !== undefined && style.fillOpacity < 1) path.setAttribute("fill-opacity", String(style.fillOpacity));
     if (part.stroke && style.line) {
       path.setAttribute("stroke", `#${style.line.color}`);
       path.setAttribute("stroke-width", String(style.line.width));

@@ -165,9 +165,18 @@ function updateShape(change: (xml: string, float: FloatInfo & { shape: ShapeStyl
 const updateStyle = (change: (xml: string, style: ShapeStyle) => { xml: string; style: ShapeStyle }) =>
   updateShape((xml, f) => { const c = change(xml, f.shape); return { xml: c.xml, float: { ...f, shape: c.style } }; });
 
-/** Shape Fill: a colour (RRGGBB), or none. */
+/** Shape Fill: a colour (RRGGBB), or none; its transparency kept. */
 export function setShapeFill(fill: string | undefined): Command {
-  return updateStyle((xml, style) => ({ xml: withShapeFill(xml, fill), style: { ...style, fill } }));
+  return updateStyle((xml, style) => ({ xml: withShapeFill(xml, fill, style.fillOpacity), style: { ...style, fill } }));
+}
+
+/** Fill transparency: how see-through the fill is, 0 (solid) to 1 (clear). */
+export function setFillTransparency(transparency: number): Command {
+  const opacity = Math.round((1 - Math.min(1, Math.max(0, transparency))) * 1000) / 1000;
+  return updateStyle((xml, style) => {
+    const { fillOpacity: _o, ...rest } = style;
+    return { xml: withShapeFill(xml, style.fill, opacity), style: opacity < 1 ? { ...rest, fillOpacity: opacity } : rest };
+  });
 }
 
 /**
@@ -190,7 +199,7 @@ export function setShapeLook(look: { fill?: string; line?: { color: string; widt
   return updateStyle((xml, style) => {
     const line = look.line ? { ...style.line, ...look.line } : undefined;
     const fill = isLine(style.geometry) ? undefined : look.fill;
-    return { xml: withShapeLine(withShapeFill(xml, fill), line), style: { ...style, fill, line } };
+    return { xml: withShapeLine(withShapeFill(xml, fill, style.fillOpacity), line), style: { ...style, fill, line } };
   });
 }
 

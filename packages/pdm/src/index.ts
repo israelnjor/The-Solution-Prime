@@ -215,6 +215,8 @@ export interface ShapeStyle {
   geometry: string;
   /** No fill: undefined. */
   fill?: string;
+  /** How opaque the fill is, 0–1 (Word's Transparency is 1 minus this; a:alpha); fully opaque when absent. */
+  fillOpacity?: number;
   /** No line: undefined. */
   line?: ShapeLine;
   /**

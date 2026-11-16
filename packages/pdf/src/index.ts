@@ -187,7 +187,9 @@ class Renderer {
         ? { borderColor: color(st.line.color), borderWidth: st.line.width, ...(dash && !part.head ? { borderDashArray: dash } : {}) }
         : {};
       if (!fillColor && !("borderColor" in stroke)) continue;
-      out.drawSvgPath(part.d, { x: line.x, y: p.height - line.y, ...(fillColor ? { color: color(fillColor) } : {}), ...stroke });
+      // The shape's fill see-through as set (its faces too; not a line's arrow heads).
+      const see = part.fill !== "line" && st.fillOpacity !== undefined && st.fillOpacity < 1 ? { opacity: st.fillOpacity } : {};
+      out.drawSvgPath(part.d, { x: line.x, y: p.height - line.y, ...(fillColor ? { color: color(fillColor), ...see } : {}), ...stroke });
     }
     if (flip) out.pushOperators(popGraphicsState());
   }

@@ -7,7 +7,7 @@ import {
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
   insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
-  toggleSuppressLineNumbers, drawShape, flipShape, isLine, rotateShape, setShapeFill, setShapeLine, setShapeLook, setShapeSize, setTextAnchor, shapeAt, stackShape, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  toggleSuppressLineNumbers, drawShape, flipShape, isLine, rotateShape, setFillTransparency, setShapeFill, setShapeLine, setShapeLook, setShapeSize, setTextAnchor, shapeAt, stackShape, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
@@ -259,6 +259,11 @@ function ShapeFormat({ shape, run, view: v, onShapeText, onDrawn }: {
               <input type="color" aria-label="Shape fill" value={`#${style.fill ?? "FFFFFF"}`}
                 onChange={(e) => run(setShapeFill(e.target.value.slice(1).toUpperCase()))()} />
             </label>
+            <select aria-label="Transparency" title="Transparency: how much shows through the fill" disabled={!style.fill}
+              value={String(Math.round((1 - (style.fillOpacity ?? 1)) * 100))} onChange={(e) => run(setFillTransparency(Number(e.target.value) / 100))()}>
+              {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, ...[Math.round((1 - (style.fillOpacity ?? 1)) * 100)].filter((t) => t % 10)].sort((a, b) => a - b)
+                .map((t) => <option key={t} value={t}>{t ? `${t}% see-through` : "Solid"}</option>)}
+            </select>
             <button onClick={run(setShapeFill(undefined))} disabled={!style.fill} title="No fill (see-through)">No Fill</button>
           </>
         )}
