@@ -3,7 +3,7 @@
  * floating drawing kept as its XML, with its description for layout and display), and changes to the
  * fill and outline of the selected one — made in its XML (what is saved) and its description alike.
  */
-import { newShapeXml, withShapeFill, withShapeLine, withShapeText, withShapeTransform, withStacking, withTextAnchor } from "@prime/docx";
+import { newShapeXml, withShapeAdjust, withShapeFill, withShapeLine, withShapeText, withShapeTransform, withStacking, withTextAnchor } from "@prime/docx";
 import type { Block, FloatInfo, LineEnd, ShapeLine, ShapeStyle } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type Command, type EditorState, NodeSelection } from "prosemirror-state";
@@ -192,6 +192,11 @@ export function setShapeLook(look: { fill?: string; line?: { color: string; widt
     const fill = isLine(style.geometry) ? undefined : look.fill;
     return { xml: withShapeLine(withShapeFill(xml, fill), line), style: { ...style, fill, line } };
   });
+}
+
+/** The shape's adjustments (its yellow handles: corner roundness, an arrow's head, a callout's pointer). */
+export function setShapeAdjust(adj: Record<string, number>): Command {
+  return updateStyle((xml, style) => ({ xml: withShapeAdjust(xml, adj), style: { ...style, adj } }));
 }
 
 /** Rotate: turned to `rotation` degrees, and/or mirrored (Flip Horizontal / Vertical); the rest kept. */

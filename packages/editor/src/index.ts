@@ -54,6 +54,6 @@ export { moveSection, outline, outlineIndexAt, type OutlineItem } from "./naviga
 export { BODY, changeOutlineLevel, outlineKey, outlineLevelAt, outlinePlugin, outlineShown, setOutlineLevel } from "./outline.js";
 export { compareDocuments } from "./compare.js";
 export { extensionOf, type FileFormat, FORMAT_NAMES, formatOf, readAnyFormat, WRITABLE, writeFormat } from "./formats/index.js";
-export { addShapeText, flipShape, insertShape, isLine, rotateShape, setShapeFill, setShapeLine, setShapeLook, setShapeSize, setShapeTurn, setTextAnchor, type ShapeChoice, type ShapePlace, SHAPE_GROUPS, SHAPES, shapeAt, stackShape } from "./shapes.js";
+export { addShapeText, flipShape, insertShape, isLine, rotateShape, setShapeAdjust, setShapeFill, setShapeLine, setShapeLook, setShapeSize, setShapeTurn, setTextAnchor, type ShapeChoice, type ShapePlace, SHAPE_GROUPS, SHAPES, shapeAt, stackShape } from "./shapes.js";
 export { chartAt, chartFromGrid, insertChart, insertChartAfter, parseChartNumber, SAMPLE_CHART, setChartData, tableAtCursor } from "./charts.js";
 export { type ApplyOptions, type ApplyPages, applicationOf, commitApplication, defaultOptions, type FollowingPages, type LetterheadPattern, storyShows, templateLook, type TemplateLook, withAdditions } from "./applytemplate.js";

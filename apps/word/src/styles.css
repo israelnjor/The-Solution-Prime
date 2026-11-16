@@ -1058,3 +1058,6 @@ body.pw-drawing::after { content: "Drag on the page to draw · Shift keeps it ev
 .looks-popup button:hover { outline: 2px solid var(--accent); }
 .looks-popup .look-line { display: block; width: 24px; height: 3px; }
 .size-input { width: 46px; }
+
+/* A shape's adjustment handle (Word's yellow diamond): drag it to reshape the shape. */
+.pw-float-handle.pw-adj { width: 8px; height: 8px; margin: -5px 0 0 -5px; background: #ffd23f; border: 1px solid #7a5b00; transform: rotate(45deg); cursor: pointer; z-index: 3; }

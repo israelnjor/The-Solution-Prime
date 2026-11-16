@@ -164,6 +164,25 @@ const transformAttrs = (t: { rotation?: number; flipH?: boolean; flipV?: boolean
 /** Text in a shape (a text box's paragraphs). */
 const textBodyXml = (textXml: string) => `<wps:txbx><w:txbxContent>${textXml}</w:txbxContent></wps:txbx>`;
 
+/** A floating drawing's wrapper (wp:anchor) as Word writes it, around its graphic (`uri`, `body`). */
+export function anchorXml(a: {
+  id: number; name: string; x: number; y: number; width: number; height: number; z?: number;
+  uri: string; body: string;
+  /** Its wrapping element (wp:wrapNone, wp:wrapSquare…) and whether it is behind the text. */
+  wrap?: string; behind?: boolean;
+}): string {
+  return `<w:drawing><wp:anchor distT="45720" distB="45720" distL="114300" distR="114300" simplePos="0" relativeHeight="${Math.round(a.z ?? 251659264 + a.id)}" behindDoc="${a.behind ? 1 : 0}" locked="0" layoutInCell="1" allowOverlap="1">`
+    + `<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>${emu(a.x)}</wp:posOffset></wp:positionH>`
+    + `<wp:positionV relativeFrom="paragraph"><wp:posOffset>${emu(a.y)}</wp:posOffset></wp:positionV>`
+    + `<wp:extent cx="${emu(a.width)}" cy="${emu(a.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${a.wrap ?? "<wp:wrapNone/>"}`
+    + `<wp:docPr id="${a.id}" name="${esc(a.name)}"/><wp:cNvGraphicFramePr/>`
+    + `<a:graphic><a:graphicData uri="${a.uri}">${a.body}</a:graphicData></a:graphic></wp:anchor></w:drawing>`;
+}
+
+const URI = {
+  shape: "http://schemas.microsoft.com/office/word/2010/wordprocessingShape",
+};
+
 /** A floating shape or text box as Word writes it (in front of text, square wrapping off: no wrap). */
 export function newShapeXml(s: NewShape): string {
   const fill = s.fill ? `<a:solidFill><a:srgbClr val="${s.fill}"/></a:solidFill>` : "<a:noFill/>";
@@ -171,27 +190,53 @@ export function newShapeXml(s: NewShape): string {
   const text = s.kind === "textbox"
     ? `${textBodyXml(s.textXml ?? "<w:p/>")}<wps:bodyPr rot="0" vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="t" anchorCtr="0"><a:noAutofit/></wps:bodyPr>`
     : `<wps:bodyPr rot="0" vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="ctr" anchorCtr="0"><a:noAutofit/></wps:bodyPr>`;
-  return `<w:drawing><wp:anchor distT="45720" distB="45720" distL="114300" distR="114300" simplePos="0" relativeHeight="${251659264 + s.id}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">`
-    + `<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>${emu(s.x)}</wp:posOffset></wp:positionH>`
-    + `<wp:positionV relativeFrom="paragraph"><wp:posOffset>${emu(s.y)}</wp:posOffset></wp:positionV>`
-    + `<wp:extent cx="${emu(s.width)}" cy="${emu(s.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>`
-    + `<wp:docPr id="${s.id}" name="${esc(s.name)}"/><wp:cNvGraphicFramePr/>`
-    + `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp>`
+  const body = `<wps:wsp>`
     + (isLine ? "<wps:cNvCnPr/>" : `<wps:cNvSpPr${s.kind === "textbox" ? ' txBox="1"' : ""}/>`)
-    + `<wps:spPr><a:xfrm${transformAttrs(s)}><a:off x="0" y="0"/><a:ext cx="${emu(s.width)}" cy="${emu(s.height)}"/></a:xfrm><a:prstGeom prst="${s.geometry}">${avLstXml(s.adj)}</a:prstGeom>${isLine ? "" : fill}${lineXml(s.line)}</wps:spPr>`
-    + `${text}</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>`;
+    + `<wps:spPr><a:xfrm${transformAttrs(s)}><a:off x="0" y="0"/><a:ext cx="${emu(s.width)}" cy="${emu(s.height)}"/></a:xfrm><a:prstGeom prst="${s.geometry}">${avLstXml(s.adj, s.geometry)}</a:prstGeom>${isLine ? "" : fill}${lineXml(s.line)}</wps:spPr>`
+    + `${text}</wps:wsp>`;
+  return anchorXml({ id: s.id, name: s.name, x: s.x, y: s.y, width: s.width, height: s.height, uri: URI.shape, body });
 }
 
-/** A geometry's adjustments as DrawingML (a:avLst). */
-export function avLstXml(adj: Record<string, number> | undefined): string {
-  const gds = Object.entries(adj ?? {}).map(([name, v]) => `<a:gd name="${esc(name)}" fmla="val ${Math.round(v)}"/>`);
-  return gds.length ? `<a:avLst>${gds.join("")}</a:avLst>` : "<a:avLst/>";
+/**
+ * Word's adjustments for each geometry, in its order, with their defaults (presetShapeDefinitions). Word
+ * will not open a shape whose a:avLst gives only some of them: all are written when any is changed.
+ */
+const ADJ_DEFAULTS: Record<string, [string, number][]> = (() => {
+  const arrow: [string, number][] = [["adj1", 50000], ["adj2", 50000]];
+  const callout: [string, number][] = [["adj1", -20833], ["adj2", 62500]];
+  return {
+    roundRect: [["adj", 16667]], snip1Rect: [["adj", 16667]], round1Rect: [["adj", 16667]],
+    snip2SameRect: [["adj1", 16667], ["adj2", 0]], round2SameRect: [["adj1", 16667], ["adj2", 0]], snipRoundRect: [["adj1", 16667], ["adj2", 16667]],
+    triangle: [["adj", 50000]], parallelogram: [["adj", 25000]], trapezoid: [["adj", 25000]], hexagon: [["adj", 25000], ["vf", 115470]],
+    octagon: [["adj", 29289]], plus: [["adj", 25000]], frame: [["adj1", 12500]], bevel: [["adj", 12500]], donut: [["adj", 25000]],
+    noSmoking: [["adj", 18750]], can: [["adj", 25000]], cube: [["adj", 25000]], foldedCorner: [["adj", 16667]],
+    homePlate: [["adj", 50000]], chevron: [["adj", 50000]], moon: [["adj", 50000]], smileyFace: [["adj", 4653]],
+    wave: [["adj1", 12500], ["adj2", 0]], doubleWave: [["adj1", 6250], ["adj2", 0]],
+    leftBracket: [["adj", 8333]], rightBracket: [["adj", 8333]], bracketPair: [["adj", 16667]],
+    leftBrace: [["adj1", 8333], ["adj2", 50000]], rightBrace: [["adj1", 8333], ["adj2", 50000]],
+    rightArrow: arrow, leftArrow: arrow, upArrow: arrow, downArrow: arrow, leftRightArrow: arrow, upDownArrow: arrow,
+    notchedRightArrow: arrow, stripedRightArrow: arrow,
+    star4: [["adj", 12500]], star5: [["adj", 19098], ["hf", 105146], ["vf", 110557]], star6: [["adj", 28868], ["hf", 115470]],
+    star7: [["adj", 34601], ["hf", 102572], ["vf", 105210]], star8: [["adj", 37500]], star10: [["adj", 42533], ["hf", 105146]],
+    star12: [["adj", 37500]], star16: [["adj", 37500]], star24: [["adj", 37500]], star32: [["adj", 37500]],
+    wedgeRectCallout: callout, wedgeEllipseCallout: callout, cloudCallout: callout,
+    wedgeRoundRectCallout: [...callout, ["adj3", 16667]],
+  };
+})();
+
+/** A geometry's adjustments as DrawingML (a:avLst): all of the geometry's, in Word's order, when any is set. */
+export function avLstXml(adj: Record<string, number> | undefined, geometry = ""): string {
+  if (!adj || !Object.keys(adj).length) return "<a:avLst/>";
+  const known = ADJ_DEFAULTS[geometry] ?? [];
+  const names = [...known.map(([n]) => n), ...Object.keys(adj).filter((n) => !known.some(([k]) => k === n))];
+  const value = (n: string) => adj[n] ?? known.find(([k]) => k === n)?.[1] ?? 0;
+  return `<a:avLst>${names.map((n) => `<a:gd name="${esc(n)}" fmla="val ${Math.round(value(n))}"/>`).join("")}</a:avLst>`;
 }
 
 /** The shape's XML with new adjustments (its prstGeom's a:avLst). */
 export function withShapeAdjust(xml: string, adj: Record<string, number> | undefined): string {
   return inSpPr(xml, (body) => body.replace(/<a:prstGeom\b([^>]*?)\s*\/>/, "<a:prstGeom$1></a:prstGeom>").replace(/(<a:prstGeom\b[^>]*>)([\s\S]*?)(<\/a:prstGeom>)/, (_, open: string, inner: string, close: string) =>
-    open + inner.replace(/<a:avLst\s*\/>|<a:avLst\b[^>]*>[\s\S]*?<\/a:avLst>/, "") .replace(/^/, avLstXml(adj)) + close));
+    open + inner.replace(/<a:avLst\s*\/>|<a:avLst\b[^>]*>[\s\S]*?<\/a:avLst>/, "").replace(/^/, avLstXml(adj, /prst="([^"]+)"/.exec(open)?.[1])) + close));
 }
 
 /** Edits the shape's spPr body. */

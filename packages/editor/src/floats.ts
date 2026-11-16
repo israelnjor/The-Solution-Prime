@@ -6,7 +6,9 @@ import type { FloatInfo, PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type Command, type EditorState, NodeSelection, Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
-import { setShapeTurn } from "./shapes.js";
+import { adjustShape, shapeHandles } from "@prime/layout";
+import { shapeSvg } from "./paged.js";
+import { setShapeAdjust, setShapeTurn } from "./shapes.js";
 
 const EMU = 12700;
 const emu = (pt: number) => String(Math.round(pt * EMU));
@@ -207,6 +209,42 @@ export function floatEditing(): Plugin {
         if (Math.abs(angle - turned) > 0.05) setShapeTurn({ rotation: Math.round(angle * 10) / 10 })(view.state, view.dispatch);
       };
       window.addEventListener("mousemove", turn);
+      window.addEventListener("mouseup", done);
+      return true;
+    }
+    if (handle?.startsWith("adj:")) {
+      // Reshaping: the handle follows the mouse (in the shape's own, unturned and unmirrored box); the
+      // outline is drawn again as it goes, and the adjustments are kept on release.
+      const f = node?.node.attrs.float as FloatInfo | undefined;
+      const style = f?.shape;
+      if (!f || !style) return true;
+      const index = Number(handle.slice(4));
+      const r = el.getBoundingClientRect();
+      const [cx, cy] = [r.left + r.width / 2, r.top + r.height / 2];
+      const t = (turned * Math.PI) / 180;
+      let adj = style.adj ?? {};
+      const point = (e: MouseEvent) => {
+        const [dx, dy] = [(e.clientX - cx) / scale, (e.clientY - cy) / scale];
+        let x = dx * Math.cos(t) + dy * Math.sin(t) + box.width / 2;
+        let y = -dx * Math.sin(t) + dy * Math.cos(t) + box.height / 2;
+        if (f.flipH) x = box.width - x;
+        if (f.flipV) y = box.height - y;
+        return [x, y];
+      };
+      const reshape = (e: MouseEvent) => {
+        const [x, y] = point(e);
+        adj = adjustShape({ ...style, adj }, index, x, y, box.width, box.height);
+        const next = { ...style, adj };
+        el.querySelector("svg.pw-shape")?.replaceWith(shapeSvg(next, box.width, box.height, f));
+        const at = shapeHandles(next, box.width, box.height)[index];
+        if (at) Object.assign(target.style, { left: `${f.flipH ? box.width - at.x : at.x}pt`, top: `${f.flipV ? box.height - at.y : at.y}pt` });
+      };
+      const done = () => {
+        window.removeEventListener("mousemove", reshape);
+        window.removeEventListener("mouseup", done);
+        if (JSON.stringify(adj) !== JSON.stringify(style.adj ?? {})) setShapeAdjust(adj)(view.state, view.dispatch);
+      };
+      window.addEventListener("mousemove", reshape);
       window.addEventListener("mouseup", done);
       return true;
     }

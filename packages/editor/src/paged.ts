@@ -4,7 +4,7 @@
  * are sized from the real screen positions, so every page's content starts exactly at the top of
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
-import { dashArray, isLineShape, type LayoutResult, layoutDocument, type Measurer, pinnedToBottom, type PlacedFloat, Resolver, sectionColumns, shadeFill, shapeDrawing } from "@prime/layout";
+import { dashArray, isLineShape, shapeHandles, type LayoutResult, layoutDocument, type Measurer, pinnedToBottom, type PlacedFloat, Resolver, sectionColumns, shadeFill, shapeDrawing } from "@prime/layout";
 import type { PrimeDocument, SectionProps, ShapeStyle } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
@@ -276,6 +276,18 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
       h.dataset.handle = corner;
       if (corner === "rot") h.title = "Drag to turn (Shift: in steps of 15°)";
       el.appendChild(h);
+    }
+    // The yellow handles that reshape it (where its geometry has adjustments), mirrored with it.
+    if (f.shape) {
+      shapeHandles(f.shape, f.width, f.height).forEach((at, i) => {
+        const h = document.createElement("span");
+        h.className = "pw-float-handle pw-adj";
+        h.dataset.handle = `adj:${i}`;
+        h.title = "Drag to reshape";
+        h.style.left = `${f.flipH ? f.width - at.x : at.x}pt`;
+        h.style.top = `${f.flipV ? f.height - at.y : at.y}pt`;
+        el.appendChild(h);
+      });
     }
     // A shape, or a text box's fill and border (beneath its text).
     if (f.shape) el.appendChild(shapeSvg(f.shape, f.width, f.height, f));
