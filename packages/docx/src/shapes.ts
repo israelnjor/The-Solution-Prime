@@ -59,8 +59,16 @@ function colorOf(el: Element | undefined, theme: Record<string, string>): string
 export function readShapeStyle(wsp: Element, theme: Record<string, string>): ShapeStyle {
   const spPr = child(wsp, "wps:spPr");
   const style = child(wsp, "wps:style");
-  const geometry = (spPr && child(spPr, "a:prstGeom")?.getAttribute("prst")) || "rect";
+  const prstGeom = spPr && child(spPr, "a:prstGeom");
+  const geometry = prstGeom?.getAttribute("prst") || "rect";
   const out: ShapeStyle = { geometry };
+  // Its adjustments (a:avLst a:gd name="adj" fmla="val 25000"), where set.
+  const avLst = prstGeom && child(prstGeom, "a:avLst");
+  for (const gd of avLst ? elements(avLst) : []) {
+    const m = /^val\s+(-?\d+)$/.exec(gd.getAttribute("fmla") ?? "");
+    const name = gd.getAttribute("name");
+    if (m && name) (out.adj ??= {})[name] = Number(m[1]);
+  }
   // Fill.
   if (spPr && child(spPr, "a:noFill")) { /* none */ }
   else if (spPr && child(spPr, "a:solidFill")) out.fill = colorOf(child(spPr, "a:solidFill"), theme);
@@ -128,6 +136,8 @@ export interface NewShape {
   line?: ShapeLine;
   /** Text box: its paragraphs' XML (w:p…). */
   textXml?: string;
+  /** Its geometry's adjustments (a:avLst), where not Word's defaults. */
+  adj?: Record<string, number>;
   /** Turned (degrees clockwise) and mirrored. */
   rotation?: number;
   flipH?: boolean;
@@ -168,8 +178,20 @@ export function newShapeXml(s: NewShape): string {
     + `<wp:docPr id="${s.id}" name="${esc(s.name)}"/><wp:cNvGraphicFramePr/>`
     + `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp>`
     + (isLine ? "<wps:cNvCnPr/>" : `<wps:cNvSpPr${s.kind === "textbox" ? ' txBox="1"' : ""}/>`)
-    + `<wps:spPr><a:xfrm${transformAttrs(s)}><a:off x="0" y="0"/><a:ext cx="${emu(s.width)}" cy="${emu(s.height)}"/></a:xfrm><a:prstGeom prst="${s.geometry}"><a:avLst/></a:prstGeom>${isLine ? "" : fill}${lineXml(s.line)}</wps:spPr>`
+    + `<wps:spPr><a:xfrm${transformAttrs(s)}><a:off x="0" y="0"/><a:ext cx="${emu(s.width)}" cy="${emu(s.height)}"/></a:xfrm><a:prstGeom prst="${s.geometry}">${avLstXml(s.adj)}</a:prstGeom>${isLine ? "" : fill}${lineXml(s.line)}</wps:spPr>`
     + `${text}</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>`;
+}
+
+/** A geometry's adjustments as DrawingML (a:avLst). */
+export function avLstXml(adj: Record<string, number> | undefined): string {
+  const gds = Object.entries(adj ?? {}).map(([name, v]) => `<a:gd name="${esc(name)}" fmla="val ${Math.round(v)}"/>`);
+  return gds.length ? `<a:avLst>${gds.join("")}</a:avLst>` : "<a:avLst/>";
+}
+
+/** The shape's XML with new adjustments (its prstGeom's a:avLst). */
+export function withShapeAdjust(xml: string, adj: Record<string, number> | undefined): string {
+  return inSpPr(xml, (body) => body.replace(/<a:prstGeom\b([^>]*?)\s*\/>/, "<a:prstGeom$1></a:prstGeom>").replace(/(<a:prstGeom\b[^>]*>)([\s\S]*?)(<\/a:prstGeom>)/, (_, open: string, inner: string, close: string) =>
+    open + inner.replace(/<a:avLst\s*\/>|<a:avLst\b[^>]*>[\s\S]*?<\/a:avLst>/, "") .replace(/^/, avLstXml(adj)) + close));
 }
 
 /** Edits the shape's spPr body. */

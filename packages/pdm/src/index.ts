@@ -217,6 +217,11 @@ export interface ShapeStyle {
   fill?: string;
   /** No line: undefined. */
   line?: ShapeLine;
+  /**
+   * The geometry's adjustments where they are not Word's defaults (a:avLst a:gd: "adj", "adj1"…, in
+   * 100000ths): a rounded rectangle's corners, an arrow's shaft and head, a callout's pointer.
+   */
+  adj?: Record<string, number>;
 }
 
 /** A line end's look (a:headEnd / a:tailEnd type). */

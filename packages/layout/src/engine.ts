@@ -1502,7 +1502,7 @@ export class LayoutEngine {
         : [paraTop, paraTop]; // paragraph, line
       // Text sits inside the shape's own text area (inside an oval, below a triangle's point), then its
       // inner margins.
-      const area = f.kind === "textbox" && f.shape ? textArea(f.shape.geometry, f.width, f.height) : { left: 0, top: 0, right: 0, bottom: 0 };
+      const area = f.kind === "textbox" && f.shape ? textArea(f.shape.geometry, f.width, f.height, f.shape.adj) : { left: 0, top: 0, right: 0, bottom: 0 };
       const inner = f.insets ?? { left: 0, right: 0, top: 0, bottom: 0 };
       const insets = {
         left: inner.left + area.left * f.width, right: inner.right + area.right * f.width,

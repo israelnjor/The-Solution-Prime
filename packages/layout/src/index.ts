@@ -8,5 +8,5 @@ export { MATH_FONT, type MathBox, MathTypesetter } from "./math.js";
 export { extractFont } from "./fontfile.js";
 export { type Border, type CellLook, cellLooks, parseBorders, type Sides } from "./tables.js";
 export { type PageBorderLine, type PageDecor, pageColor, type Watermark, watermarkShape } from "./decor.js";
-export { dashArray, isLineShape, shadeFill, type ShapePart, shapeDrawing, shapePath, textArea } from "./shapes.js";
+export { adjustShape, dashArray, isLineShape, shapeHandles, shadeFill, type ShapePart, shapeDrawing, shapePath, textArea } from "./shapes.js";
 export { CHART_COLORS, CHART_PALETTES, type ChartKind, type LegendPos, chartTheme, type ChartSeries, type ChartShape, chartShapes, type ChartSpec, chartSvg, parseChart } from "./chart.js";
