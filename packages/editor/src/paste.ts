@@ -61,6 +61,31 @@ function declarations(css: string): Record<string, string> {
 }
 
 const GENERIC = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "inherit", "initial"]);
+/**
+ * Names in a web page's font list that are not fonts a document can use: the browser's aliases for
+ * the system font (-apple-system, BlinkMacSystemFont, ui-sans-serif…), VS Code's "Segoe WPC", emoji
+ * fonts and CSS variables. The next name in the list is taken instead.
+ */
+const NOT_A_FONT = /^(-|ui-|var\(|blinkmacsystemfont$|segoe wpc$|.*\bemoji$|apple color emoji$|noto color emoji$)/i;
+
+/**
+ * Whether text in the colour is lost on a white page the way a dark theme's text is: white or a pale
+ * grey (#ccc, #d4d4d4). A chosen colour that is merely light (Word's amber or yellow) is kept.
+ */
+function pale(hex: string): boolean {
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const greyish = Math.max(r, g, b) - Math.min(r, g, b) < 48;
+  return greyish && contrastWithWhite(hex) < 2;
+}
+
+/** How much darker white is than the colour (WCAG contrast ratio, 1–21). */
+function contrastWithWhite(hex: string): number {
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05);
+}
 
 /** Run formatting from inline CSS. */
 export function cssToRunProps(css: string): RunProps {
@@ -75,7 +100,8 @@ export function cssToRunProps(css: string): RunProps {
   if (color) p.color = color;
   const size = toPt(d["font-size"]);
   if (size && size >= 4 && size <= 400) p.size = Math.round(size * 2) / 2;
-  const family = (d["font-family"] ?? "").split(",").map((f) => f.trim().replace(/^["']|["']$/g, "")).find((f) => f && !GENERIC.has(f.toLowerCase()) && !f.startsWith("mso-"));
+  const family = (d["font-family"] ?? "").split(",").map((f) => f.trim().replace(/^["']|["']$/g, ""))
+    .find((f) => f && !GENERIC.has(f.toLowerCase()) && !f.startsWith("mso-") && !NOT_A_FONT.test(f));
   if (family) p.font = { ascii: family, hAnsi: family, cs: family };
   const background = toHex(d["background-color"] ?? d.background ?? d["mso-highlight"]);
   if (background && HIGHLIGHTS[background]) p.highlight = HIGHLIGHTS[background];
@@ -143,6 +169,107 @@ export function tableFromHtml(el: HTMLElement): Record<string, unknown> {
   const style = el.getAttribute("style") ?? "";
   const bordered = Number(el.getAttribute("border") ?? 0) > 0 || /border[^:]*:\s*[^;]*solid/i.test(style) || !!el.querySelector("td[style*='solid'], th[style*='solid']");
   return { props: bordered ? { extra: [{ name: "w:tblBorders", xml: BORDERS }] } : {}, grid: [] };
+}
+
+// --- before the paste --------------------------------------------------------------------------
+
+const BLOCKS = new Set(["P", "DIV", "LI", "TD", "TH", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "PRE", "BODY", "SECTION", "ARTICLE", "MAIN"]);
+/** Blocks whose lines become paragraphs inside them (splitting a cell would make new cells). */
+const CONTAINERS = new Set(["TD", "TH", "LI", "BODY", "BLOCKQUOTE", "SECTION", "ARTICLE", "MAIN"]);
+
+/** Whether line breaks in the element's text are real ("white-space: pre…", or <pre>). */
+const keepsLines = (el: Element) => el.tagName === "PRE" || /^(pre|pre-wrap|pre-line|break-spaces)$/.test((el as HTMLElement).style?.whiteSpace ?? "");
+
+/** The node's content split at line breaks, each line a list of (cloned) nodes. */
+function linesOf(node: ChildNode, pre: boolean): ChildNode[][] {
+  if (node.nodeType === 3) {
+    const text = node.textContent ?? "";
+    if (!pre || !text.includes("\n")) return [[node.cloneNode() as ChildNode]];
+    // Spaces kept as typed (two or more in a row, and at the start of a line, would collapse).
+    return text.split("\n").map((t) => [node.ownerDocument!.createTextNode(t.replace(/ {2,}|^ /g, (m) => " ".repeat(m.length)))]);
+  }
+  if (node.nodeType !== 1) return [[node.cloneNode(true) as ChildNode]];
+  const el = node as Element;
+  const lines = childLines(el, pre || keepsLines(el));
+  return lines.map((line) => {
+    const c = el.cloneNode(false) as Element;
+    c.append(...line);
+    return [c];
+  });
+}
+function childLines(el: Element, pre: boolean): ChildNode[][] {
+  const out: ChildNode[][] = [[]];
+  for (const child of Array.from(el.childNodes)) {
+    const lines = linesOf(child, pre);
+    out[out.length - 1].push(...lines[0]);
+    for (const line of lines.slice(1)) out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Pasted HTML made ready for the editor:
+ * - Text whose page kept its line breaks ("white-space: pre-wrap": a chat, a code view, Markdown shown
+ *   as text) is split into a paragraph per line, as when plain text is pasted; HTML ignores those
+ *   breaks, so it would otherwise run together in one paragraph.
+ * - Text copied from a dark page (a dark theme) is white or pale grey and could not be read on a white
+ *   page: it takes the document's text colour, unless a shaded cell or highlight it keeps is behind it.
+ */
+export function preparePastedHTML(html: string): string {
+  if (typeof DOMParser === "undefined") return html;
+  const dom = new DOMParser().parseFromString(html, "text/html");
+  let changed = false;
+
+  // Pale text with nothing kept behind it (not in a copy from Prime Word itself: a document with a dark
+  // page colour has white text on purpose).
+  const internal = html.includes("data-pm-slice");
+  const readableBehind = (el: Element | null): boolean => {
+    for (let a = el; a; a = a.parentElement) {
+      const d = declarations(a.getAttribute("style") ?? "");
+      const own = toHex(d["background-color"] ?? d.background ?? a.getAttribute("bgcolor") ?? undefined);
+      if (own && (a.tagName === "TD" || a.tagName === "TH" || HIGHLIGHTS[own]) && contrastWithWhite(own) >= 2) return true;
+    }
+    return false;
+  };
+  for (const el of Array.from(dom.body.querySelectorAll<HTMLElement>("[style*='color'], font[color]"))) {
+    const css = declarations(el.getAttribute("style") ?? "");
+    const colour = toHex(css.color ?? el.getAttribute("color") ?? undefined);
+    if (internal || !colour || !pale(colour) || readableBehind(el)) continue;
+    el.style.removeProperty("color");
+    el.removeAttribute("color");
+    changed = true;
+  }
+
+  // Line breaks the page kept.
+  const blocks = new Set<Element>();
+  const walker = dom.createTreeWalker(dom.body, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (!t.textContent?.includes("\n")) continue;
+    let pre = false;
+    let block: Element | null = null;
+    for (let a = t.parentElement; a; a = a.parentElement) {
+      if (!pre && keepsLines(a)) pre = true;
+      if (!block && BLOCKS.has(a.tagName)) block = a;
+      if (pre && block) break;
+    }
+    // Only a break inside the block counts (a <pre> outside the block's own <div> still applies).
+    if (pre && block) blocks.add(block);
+  }
+  // Innermost first, so a block is split before the block around it is looked at.
+  for (const block of [...blocks].reverse()) {
+    let pre = false;
+    for (let a: Element | null = block; a; a = a.parentElement) if (keepsLines(a)) { pre = true; break; }
+    const lines = childLines(block, pre);
+    if (lines.length > 1 && !lines[lines.length - 1].some((n) => n.textContent)) lines.pop(); // a final line break
+    if (lines.length < 2) continue;
+    changed = true;
+    if (CONTAINERS.has(block.tagName)) {
+      block.replaceChildren(...lines.map((line) => { const p = dom.createElement("p"); p.append(...line); return p; }));
+    } else {
+      block.replaceWith(...lines.map((line) => { const c = block.cloneNode(false) as Element; c.append(...line); return c; }));
+    }
+  }
+  return changed ? dom.body.innerHTML : html;
 }
 
 // --- after the paste ---------------------------------------------------------------------------
@@ -227,6 +354,7 @@ function convert(node: Node, schema: Schema, doc: PrimeDocument): Node | undefin
 export function pastePlugin(doc: () => PrimeDocument): Plugin {
   return new Plugin({
     props: {
+      transformPastedHTML: preparePastedHTML,
       transformPasted(slice, view) {
         const nodes: Node[] = [];
         slice.content.forEach((n) => {
