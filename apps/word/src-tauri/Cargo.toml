@@ -21,6 +21,8 @@ tauri = { version = "2.12.3", features = [] }
 tauri-plugin-dialog = "2.8"
 tauri-plugin-fs = "2.7"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [target.'cfg(windows)'.dependencies]
 # Already part of the app (through Tauri); these features add Windows' own offline text recognition
