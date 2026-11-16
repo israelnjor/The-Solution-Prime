@@ -7,7 +7,7 @@ import {
   autofitWindow, type BorderChoice, distributeColumns, isHeaderRow, mergeCells, setCellAlign, setCellBorders, setCellShading, setTableStyle,
   splitCell, TABLE_STYLES, tableLookAt, type TableLook, tableToText, textToTable, toggleHeaderRows,
   insertColumnBreak, insertSectionBreak, type SectionStart, type LineNumbering, lineNumbersOf, lineNumbersSuppressed, setLineNumbers,
-  toggleSuppressLineNumbers, insertShape, setShapeFill, setShapeLine, shapeAt, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
+  toggleSuppressLineNumbers, drawShape, flipShape, isLine, rotateShape, setShapeFill, setShapeLine, setShapeLook, setShapeSize, setTextAnchor, shapeAt, stackShape, BODY, changeOutlineLevel, moveBlock, outlineLevelAt, outlineShown, setOutlineLevel, setTracking, trackingOn, hyphenationOn, setHyphenation, columnPreset, columnsOf, setColumns,
   applyColors, applyFontPair, applyStyleSet, COLOR_SETS, FONT_PAIRS, STYLE_SETS, type DropCapKind, dropCapOf,
   pageBordersOf, pageColorOf, setPageBorders, setPageColor, setWatermark, watermarkOf, type WatermarkSpec,
 } from "@prime/editor";
@@ -101,6 +101,8 @@ export interface RibbonProps {
   onInfo(): void;
   onThesaurus(): void;
   onChart(): void;
+  /** Type in the selected shape (Add Text / Edit Text). */
+  onShapeText(): void;
   /** Chart Design → Edit Data: the chart at `pos` in the chart dialog. */
   onEditChart(pos: number): void;
   /** Chart Design: the chart at `pos` shown with `data` (its kind, style). */
@@ -198,7 +200,116 @@ function readImage(): Promise<{ data: string; contentType: string; width: number
   });
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onApplyTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap }: RibbonProps) {
+/** Word's outline dashes (a:prstDash), as offered in Shape Outline → Dashes. */
+const DASHES: [string, string][] = [["", "Solid"], ["sysDot", "Round Dot"], ["sysDash", "Square Dot"], ["dash", "Dash"], ["dashDot", "Dash Dot"], ["lgDash", "Long Dash"], ["lgDashDot", "Long Dash Dot"], ["lgDashDotDot", "Long Dash Dot Dot"]];
+/** The theme's colours for Shape Styles: dark, then the six accents. */
+const STYLE_COLORS = ["000000", "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47"];
+const darker = (hex: string, k = 0.73) => [0, 2, 4].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * k).toString(16).padStart(2, "0")).join("").toUpperCase();
+const lighter = (hex: string, k = 0.8) => [0, 2, 4].map((i) => { const c = parseInt(hex.slice(i, i + 2), 16); return Math.round(c + (255 - c) * k).toString(16).padStart(2, "0"); }).join("").toUpperCase();
+/** Shape Styles: for each colour, a coloured fill, an outline only, and a light fill. */
+const LOOKS = [
+  ...STYLE_COLORS.map((c) => ({ name: "Colored Fill", fill: c, line: { color: darker(c), width: 1 } })),
+  ...STYLE_COLORS.map((c) => ({ name: "Colored Outline", fill: "FFFFFF", line: { color: c, width: 1 } })),
+  ...STYLE_COLORS.map((c) => ({ name: "Light Fill", fill: lighter(c), line: { color: c, width: 1 } })),
+];
+const cm = (pt: number) => (pt / 72 * 2.54).toFixed(2).replace(/\.?0+$/, "");
+
+/**
+ * Shape Format: Shape Styles (preset looks), Fill, Outline (colour, weight, dashes, arrows for lines),
+ * text in the shape (add or edit it, and where it sits), and its size.
+ */
+function ShapeFormat({ shape, run, view: v, onShapeText, onDrawn }: {
+  shape: NonNullable<ReturnType<typeof shapeAt>>; run(cmd: Command): () => void; view: EditorView | null; onShapeText(): void; onDrawn(): void;
+}) {
+  const style = shape.float.shape;
+  const line = isLine(style.geometry);
+  const [looks, setLooks] = useState(false);
+  const ends = `${style.line?.head ? "s" : ""}${style.line?.tail ? "e" : ""}`;
+  const size = (w: number, h: number) => { if (w > 0 && h >= (line ? 0 : 1)) run(setShapeSize(w, h))(); };
+  const field = (value: number, set: (pt: number) => void, label: string) => (
+    <label className="field" title={`${label} (cm)`}>{label}{" "}
+      <input key={`${shape.pos}-${label}-${value}`} className="size-input" defaultValue={cm(value)} aria-label={`${label} in cm`} inputMode="decimal"
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        onBlur={(e) => { const n = Number(e.target.value.replace(",", ".")); if (Number.isFinite(n) && Math.abs(n / 2.54 * 72 - value) > 0.1) set(n / 2.54 * 72); }} /> cm
+    </label>
+  );
+  return (
+    <>
+      <div className="group" aria-label="Insert shapes">
+        <ShapePicker icon={<Icon name="shapes" />} label="Shapes" onPick={(choice) => { if (v) drawShape(v, "shape", choice, (drawn) => { if (drawn) onDrawn(); }); }} />
+      </div>
+      <div className="group" aria-label="Shape styles">
+        <span className="looks">
+          <button onClick={() => setLooks((o) => !o)} aria-expanded={looks} title="Shape Styles: a fill and outline that go together">Styles ▾</button>
+          {looks && (
+            <div className="looks-popup" role="menu" aria-label="Shape styles" onMouseLeave={() => setLooks(false)}>
+              {LOOKS.map((l, i) => (
+                <button key={i} role="menuitem" title={`${l.name}`} aria-label={`${l.name} ${i % 7 + 1}`}
+                  style={{ background: line ? "#fff" : `#${l.fill}`, borderColor: `#${l.line.color}` }}
+                  onClick={() => { setLooks(false); run(line ? setShapeLine({ color: l.line.color }) : setShapeLook(l))(); }}>
+                  {line ? <span className="look-line" style={{ background: `#${l.line.color}` }} /> : "Abc"}
+                </button>
+              ))}
+            </div>
+          )}
+        </span>
+        {!line && (
+          <>
+            <label className="field">Fill{" "}
+              <input type="color" aria-label="Shape fill" value={`#${style.fill ?? "FFFFFF"}`}
+                onChange={(e) => run(setShapeFill(e.target.value.slice(1).toUpperCase()))()} />
+            </label>
+            <button onClick={run(setShapeFill(undefined))} disabled={!style.fill} title="No fill (see-through)">No Fill</button>
+          </>
+        )}
+        <label className="field">{line ? "Line" : "Outline"}{" "}
+          <input type="color" aria-label="Shape outline" value={`#${style.line?.color ?? "000000"}`}
+            onChange={(e) => run(setShapeLine({ color: e.target.value.slice(1).toUpperCase() }))()} />
+        </label>
+        <select aria-label="Outline weight" title="Weight" value={String(style.line?.width ?? "")}
+          onChange={(e) => run(setShapeLine({ width: Number(e.target.value) }))()}>
+          {!style.line && <option value="">—</option>}
+          {[0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6].map((w) => <option key={w} value={w}>{w} pt</option>)}
+        </select>
+        <select aria-label="Dashes" title="Dashes" value={style.line?.dash ?? ""} onChange={(e) => run(setShapeLine({ dash: e.target.value || undefined }))()}>
+          {DASHES.map(([v2, label]) => <option key={v2} value={v2}>{label}</option>)}
+        </select>
+        {line && (
+          <select aria-label="Arrows" title="Arrows" value={ends} onChange={(e) => {
+            const k = e.target.value;
+            run(setShapeLine({ head: k.includes("s") ? style.line?.head ?? "triangle" : undefined, tail: k.includes("e") ? style.line?.tail ?? "triangle" : undefined }))();
+          }}>
+            <option value="">No arrows</option>
+            <option value="e">Arrow at the end</option>
+            <option value="s">Arrow at the start</option>
+            <option value="se">Arrows at both ends</option>
+          </select>
+        )}
+        {!line && <button onClick={run(setShapeLine(undefined))} disabled={!style.line} title="No outline">No Outline</button>}
+      </div>
+      {!line && (
+        <div className="group" aria-label="Text">
+          <button onClick={onShapeText} title={shape.float.kind === "textbox" ? "Type in the shape (or double-click it)" : "Add text to the shape (or double-click it, or just start typing)"}>
+            {shape.float.kind === "textbox" ? "Edit Text" : "Add Text"}
+          </button>
+          {shape.float.kind === "textbox" && (
+            <select aria-label="Align Text" title="Where the text sits in the shape" value={shape.float.anchor ?? "t"} onChange={(e) => run(setTextAnchor(e.target.value as "t" | "ctr" | "b"))()}>
+              <option value="t">Text at the top</option>
+              <option value="ctr">Text in the middle</option>
+              <option value="b">Text at the bottom</option>
+            </select>
+          )}
+        </div>
+      )}
+      <div className="group" aria-label="Size">
+        {!line && field(shape.float.height, (h) => size(shape.float.width, h), "Height")}
+        {field(shape.float.width, (w) => size(w, shape.float.height), line ? "Length" : "Width")}
+      </div>
+    </>
+  );
+}
+
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onApplyTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap, onShapeText }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -421,9 +532,10 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onDeletePage} title="Delete the page the cursor is on (or every page the selection covers); Ctrl+Z brings it back"><Icon name="deletePage" /><span className="label keep">Delete Page</span></button>
             </div>
             <div className="group" aria-label="Text box and shapes">
-              <button onClick={() => { run(insertShape("textbox"))(); setTab("picture"); }} title="A box of text you can place anywhere on the page"><Icon name="textBox" /><span className="label keep">Text Box</span></button>
+              <button onClick={() => { if (v) drawShape(v, "textbox", { geometry: "rect", label: "Text Box", group: "" }, (drawn) => { if (drawn) setTab("picture"); }); }}
+                title="A box of text you can place anywhere on the page: drag on the page to draw it"><Icon name="textBox" /><span className="label keep">Text Box</span></button>
               <button onClick={onChart} title="A column, bar, line or pie chart from a small table of numbers (double-click a chart to change it)"><Icon name="chart" /><span className="label keep">Chart…</span></button>
-              <ShapePicker icon={<Icon name="shapes" />} onPick={(geometry) => { run(insertShape("shape", geometry))(); setTab("picture"); }} />
+              <ShapePicker icon={<Icon name="shapes" />} onPick={(choice) => { if (v) drawShape(v, "shape", choice, (drawn) => { if (drawn) setTab("picture"); }); }} />
             </div>
             <div className="group" aria-label="Drop Cap">
               <span className="select-icon"><Icon name="dropCap" /></span>
@@ -870,25 +982,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
 
         {activeTab === "picture" && picture && (
           <>
-            {shape && (
-              <div className="group" aria-label="Shape styles">
-                <label className="field">Fill{" "}
-                  <input type="color" aria-label="Shape fill" value={`#${shape.float.shape.fill ?? "FFFFFF"}`}
-                    onChange={(e) => run(setShapeFill(e.target.value.slice(1).toUpperCase()))()} disabled={shape.float.shape.geometry === "line"} />
-                </label>
-                <button onClick={run(setShapeFill(undefined))} disabled={!shape.float.shape.fill} title="No fill (see-through)">No Fill</button>
-                <label className="field">Outline{" "}
-                  <input type="color" aria-label="Shape outline" value={`#${shape.float.shape.line?.color ?? "000000"}`}
-                    onChange={(e) => run(setShapeLine({ color: e.target.value.slice(1).toUpperCase(), width: shape.float.shape.line?.width ?? 0.75 }))()} />
-                </label>
-                <select aria-label="Outline weight" title="Outline weight" value={String(shape.float.shape.line?.width ?? "")}
-                  onChange={(e) => run(setShapeLine({ color: shape.float.shape.line?.color ?? "000000", width: Number(e.target.value) }))()}>
-                  {!shape.float.shape.line && <option value="">—</option>}
-                  {[0.25, 0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6].map((w) => <option key={w} value={w}>{w} pt</option>)}
-                </select>
-                <button onClick={run(setShapeLine(undefined))} disabled={!shape.float.shape.line} title="No outline">No Outline</button>
-              </div>
-            )}
+            {shape && <ShapeFormat shape={shape} run={run} view={v} onShapeText={onShapeText} onDrawn={() => setTab("picture")} />}
             <div className="group">
               <label className="field">Wrap text{" "}
                 <select value={pictureWrap(picture.node)} onChange={(e) => run(setPictureWrap(e.target.value as PictureWrap))()}
@@ -912,7 +1006,24 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={() => v && (v.dispatch(v.state.tr.deleteSelection()), v.focus())}>Delete</button>
             </div>}
             {shape && (
-              <div className="group">
+              <div className="group" aria-label="Arrange">
+                <button onClick={run(stackShape("front"))} title="Bring to Front: over every other shape and picture">Bring to Front</button>
+                <button onClick={run(stackShape("back"))} title="Send to Back: under every other shape and picture">Send to Back</button>
+                <select value="" aria-label="Rotate" title="Rotate or flip the shape (or drag its round handle)" onChange={(e) => {
+                  const how = e.target.value;
+                  if (how === "right") run(rotateShape(90))();
+                  if (how === "left") run(rotateShape(-90))();
+                  if (how === "v") run(flipShape("v"))();
+                  if (how === "h") run(flipShape("h"))();
+                  if (how === "none") run((st, d) => rotateShape(-(shapeAt(st)?.float.rotation ?? 0))(st, d))();
+                }}>
+                  <option value="">Rotate</option>
+                  <option value="right">Rotate Right 90°</option>
+                  <option value="left">Rotate Left 90°</option>
+                  <option value="v">Flip Vertical</option>
+                  <option value="h">Flip Horizontal</option>
+                  {!!shape.float.rotation && <option value="none">Straighten (0°)</option>}
+                </select>
                 <button onClick={() => v && (v.dispatch(v.state.tr.deleteSelection()), v.focus())}>Delete</button>
               </div>
             )}

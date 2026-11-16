@@ -3,7 +3,7 @@
  * geometry, fill, line — from wps:spPr, or from the theme style Word gives new shapes), new ones as
  * Word writes them, and changes to their fill and line, made in their XML (which is what is saved).
  */
-import type { ShapeStyle } from "@prime/pdm";
+import type { LineEnd, ShapeLine, ShapeStyle } from "@prime/pdm";
 import { EMU_PER_PT } from "./ooxml.js";
 import { child, elements, qname } from "./xml.js";
 
@@ -77,16 +77,37 @@ export function readShapeStyle(wsp: Element, theme: Record<string, string>): Sha
   const ln = spPr && child(spPr, "a:ln");
   const width = ln?.getAttribute("w") ? Number(ln.getAttribute("w")) / EMU_PER_PT : 0.75;
   const dash = ln && child(ln, "a:prstDash")?.getAttribute("val");
+  // Line ends (arrow heads): none, or one of the kinds drawn.
+  const end = (name: string): LineEnd | undefined => {
+    const type = ln && child(ln, name)?.getAttribute("type");
+    return type && LINE_ENDS.has(type as LineEnd) ? (type as LineEnd) : undefined;
+  };
+  const [head, tail] = [end("a:headEnd"), end("a:tailEnd")];
+  const extra = { ...(dash && dash !== "solid" ? { dash } : {}), ...(head ? { head } : {}), ...(tail ? { tail } : {}) };
   if (ln && child(ln, "a:noFill")) { /* none */ }
   else if (ln && child(ln, "a:solidFill")) {
     const color = colorOf(child(ln, "a:solidFill"), theme);
-    if (color) out.line = { color, width, ...(dash && dash !== "solid" ? { dash } : {}) };
+    if (color) out.line = { color, width, ...extra };
   } else if (style) {
     const ref = child(style, "a:lnRef");
     const color = ref && ref.getAttribute("idx") !== "0" ? colorOf(ref, theme) : undefined;
-    if (color) out.line = { color, width: ln?.getAttribute("w") ? width : 1, ...(dash && dash !== "solid" ? { dash } : {}) };
+    if (color) out.line = { color, width: ln?.getAttribute("w") ? width : 1, ...extra };
   }
   return out;
+}
+
+const LINE_ENDS = new Set<LineEnd>(["triangle", "arrow", "stealth", "diamond", "oval"]);
+
+/** A shape's turn (degrees clockwise) and mirroring, from its spPr's a:xfrm. */
+export function readShapeTransform(wsp: Element): { rotation?: number; flipH?: boolean; flipV?: boolean } {
+  const xfrm = child(child(wsp, "wps:spPr") ?? wsp, "a:xfrm");
+  if (!xfrm) return {};
+  const rot = Number(xfrm.getAttribute("rot") ?? 0) / 60000;
+  return {
+    ...(rot ? { rotation: ((rot % 360) + 360) % 360 } : {}),
+    ...(xfrm.getAttribute("flipH") === "1" ? { flipH: true } : {}),
+    ...(xfrm.getAttribute("flipV") === "1" ? { flipV: true } : {}),
+  };
 }
 
 // --- new shapes and text boxes ------------------------------------------------------------------------
@@ -104,21 +125,41 @@ export interface NewShape {
   x: number;
   y: number;
   fill?: string;
-  line?: { color: string; width: number };
+  line?: ShapeLine;
   /** Text box: its paragraphs' XML (w:p…). */
   textXml?: string;
+  /** Turned (degrees clockwise) and mirrored. */
+  rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
   /** Unique among the document's drawings (wp:docPr id). */
   id: number;
   name: string;
 }
 
+/** A shape's line as DrawingML (a:ln): colour, width, dash, line ends; undefined: no line. */
+export function lineXml(line: ShapeLine | undefined): string {
+  if (!line) return "<a:ln><a:noFill/></a:ln>";
+  return `<a:ln w="${emu(line.width)}"><a:solidFill><a:srgbClr val="${line.color}"/></a:solidFill>`
+    + (line.dash ? `<a:prstDash val="${line.dash}"/>` : "")
+    + (line.head ? `<a:headEnd type="${line.head}"/>` : "")
+    + (line.tail ? `<a:tailEnd type="${line.tail}"/>` : "")
+    + "</a:ln>";
+}
+
+/** The a:xfrm attributes for a turn and mirroring. */
+const transformAttrs = (t: { rotation?: number; flipH?: boolean; flipV?: boolean }) =>
+  (t.rotation ? ` rot="${Math.round((((t.rotation % 360) + 360) % 360) * 60000)}"` : "") + (t.flipH ? ' flipH="1"' : "") + (t.flipV ? ' flipV="1"' : "");
+
+/** Text in a shape (a text box's paragraphs). */
+const textBodyXml = (textXml: string) => `<wps:txbx><w:txbxContent>${textXml}</w:txbxContent></wps:txbx>`;
+
 /** A floating shape or text box as Word writes it (in front of text, square wrapping off: no wrap). */
 export function newShapeXml(s: NewShape): string {
   const fill = s.fill ? `<a:solidFill><a:srgbClr val="${s.fill}"/></a:solidFill>` : "<a:noFill/>";
-  const line = s.line ? `<a:ln w="${emu(s.line.width)}"><a:solidFill><a:srgbClr val="${s.line.color}"/></a:solidFill></a:ln>` : "<a:ln><a:noFill/></a:ln>";
   const isLine = s.geometry === "line" || s.geometry === "straightConnector1";
   const text = s.kind === "textbox"
-    ? `<wps:txbx><w:txbxContent>${s.textXml ?? "<w:p/>"}</w:txbxContent></wps:txbx><wps:bodyPr rot="0" vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="t" anchorCtr="0"><a:noAutofit/></wps:bodyPr>`
+    ? `${textBodyXml(s.textXml ?? "<w:p/>")}<wps:bodyPr rot="0" vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="t" anchorCtr="0"><a:noAutofit/></wps:bodyPr>`
     : `<wps:bodyPr rot="0" vert="horz" wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="ctr" anchorCtr="0"><a:noAutofit/></wps:bodyPr>`;
   return `<w:drawing><wp:anchor distT="45720" distB="45720" distL="114300" distR="114300" simplePos="0" relativeHeight="${251659264 + s.id}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">`
     + `<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>${emu(s.x)}</wp:posOffset></wp:positionH>`
@@ -126,28 +167,61 @@ export function newShapeXml(s: NewShape): string {
     + `<wp:extent cx="${emu(s.width)}" cy="${emu(s.height)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>`
     + `<wp:docPr id="${s.id}" name="${esc(s.name)}"/><wp:cNvGraphicFramePr/>`
     + `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp>`
-    + `<wps:cNvSpPr${s.kind === "textbox" ? ' txBox="1"' : ""}/>`
-    + `<wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(s.width)}" cy="${emu(s.height)}"/></a:xfrm><a:prstGeom prst="${s.geometry}"><a:avLst/></a:prstGeom>${isLine ? "" : fill}${line}</wps:spPr>`
+    + (isLine ? "<wps:cNvCnPr/>" : `<wps:cNvSpPr${s.kind === "textbox" ? ' txBox="1"' : ""}/>`)
+    + `<wps:spPr><a:xfrm${transformAttrs(s)}><a:off x="0" y="0"/><a:ext cx="${emu(s.width)}" cy="${emu(s.height)}"/></a:xfrm><a:prstGeom prst="${s.geometry}"><a:avLst/></a:prstGeom>${isLine ? "" : fill}${lineXml(s.line)}</wps:spPr>`
     + `${text}</wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>`;
 }
+
+/** Edits the shape's spPr body. */
+const inSpPr = (xml: string, edit: (body: string) => string) =>
+  xml.replace(/(<wps:spPr\b[^>]*>)([\s\S]*?)(<\/wps:spPr>)/, (_, open: string, body: string, close: string) => open + edit(body) + close);
 
 /** The shape's XML with a new fill (undefined: no fill). */
 export function withShapeFill(xml: string, fill: string | undefined): string {
   const value = fill ? `<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill>` : "<a:noFill/>";
-  return xml.replace(/(<wps:spPr\b[^>]*>)([\s\S]*?)(<\/wps:spPr>)/, (_, open: string, body: string, close: string) => {
+  return inSpPr(xml, (body) => {
     // The fill comes after the geometry and before the line (CT_ShapeProperties order).
     const cleaned = body.replace(/<a:(noFill|solidFill|gradFill|blipFill|pattFill|grpFill)\b[^>]*?(\/>|>[\s\S]*?<\/a:\1>)/, "");
     const at = cleaned.search(/<a:ln\b|<a:effectLst|<a:effectDag|<a:scene3d|<a:sp3d|<a:extLst/);
-    return open + (at < 0 ? cleaned + value : cleaned.slice(0, at) + value + cleaned.slice(at)) + close;
+    return at < 0 ? cleaned + value : cleaned.slice(0, at) + value + cleaned.slice(at);
   });
 }
 
-/** The shape's XML with a new line (undefined: no line). */
-export function withShapeLine(xml: string, line: { color: string; width: number } | undefined): string {
-  const value = line ? `<a:ln w="${emu(line.width)}"><a:solidFill><a:srgbClr val="${line.color}"/></a:solidFill></a:ln>` : "<a:ln><a:noFill/></a:ln>";
-  return xml.replace(/(<wps:spPr\b[^>]*>)([\s\S]*?)(<\/wps:spPr>)/, (_, open: string, body: string, close: string) => {
+/** The shape's XML with a new line (colour, width, dash, line ends; undefined: no line). */
+export function withShapeLine(xml: string, line: ShapeLine | undefined): string {
+  const value = lineXml(line);
+  return inSpPr(xml, (body) => {
     const cleaned = body.replace(/<a:ln\b[^>]*?(\/>|>[\s\S]*?<\/a:ln>)/, "");
     const at = cleaned.search(/<a:effectLst|<a:effectDag|<a:scene3d|<a:sp3d|<a:extLst/);
-    return open + (at < 0 ? cleaned + value : cleaned.slice(0, at) + value + cleaned.slice(at)) + close;
+    return at < 0 ? cleaned + value : cleaned.slice(0, at) + value + cleaned.slice(at);
   });
+}
+
+/** The shape's XML turned and mirrored (its a:xfrm; made from its size if it had none). */
+export function withShapeTransform(xml: string, t: { rotation?: number; flipH?: boolean; flipV?: boolean }): string {
+  return inSpPr(xml, (body) => {
+    if (/<a:xfrm\b/.test(body)) return body.replace(/<a:xfrm\b[^>]*?(\/?)>/, (_, close: string) => `<a:xfrm${transformAttrs(t)}${close}>`);
+    const ext = /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(xml);
+    return `<a:xfrm${transformAttrs(t)}><a:off x="0" y="0"/><a:ext cx="${ext?.[1] ?? 0}" cy="${ext?.[2] ?? 0}"/></a:xfrm>${body}`;
+  });
+}
+
+/** The XML with the text's place between the shape's top and bottom (wps:bodyPr anchor). */
+export function withTextAnchor(xml: string, anchor: "t" | "ctr" | "b"): string {
+  return xml.replace(/<wps:bodyPr\b[^>]*?(\/?)>/, (tag: string, close: string) =>
+    / anchor="/.test(tag) ? tag.replace(/ anchor="[^"]*"/, ` anchor="${anchor}"`) : `${tag.slice(0, tag.length - (close ? 2 : 1))} anchor="${anchor}"${close}>`);
+}
+
+/** The XML with a new stacking order (wp:anchor relativeHeight). */
+export function withStacking(xml: string, z: number): string {
+  return xml.replace(/(<wp:anchor\b[^>]*?)relativeHeight="\d+"/, `$1relativeHeight="${Math.max(0, Math.round(z))}"`);
+}
+
+/**
+ * A shape given text (Word's Add Text): its text body before its bodyPr, which keeps the shape's
+ * outline (the text sits inside it). The old VML copy, which has no text, is dropped.
+ */
+export function withShapeText(xml: string, textXml: string): string {
+  if (/<wps:txbx\b/.test(xml)) return xml;
+  return xml.replace(/<mc:Fallback>[\s\S]*?<\/mc:Fallback>/, "").replace(/<wps:bodyPr\b/, `${textBodyXml(textXml)}<wps:bodyPr`);
 }

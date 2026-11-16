@@ -18,6 +18,7 @@ import { type ResolvedParagraph, type ResolvedRun, Resolver, roman } from "./res
 import { cellLooks, type Sides } from "./tables.js";
 import { type PageDecor, pageBorders, pageColor, watermarkOf } from "./decor.js";
 import { hyphenPoints } from "./hyphenate.js";
+import { textArea } from "./shapes.js";
 
 const MARKER = /\[[A-Z]-\d{3}\]/g;
 const DEFAULT_TAB = 36;
@@ -96,9 +97,13 @@ export interface PositionedLine {
   /** Pen strokes (ink): x, y pairs on the page, pen width in pt, colour. */
   strokes?: { points: number[]; width: number; color: string }[];
   /** A shape (or a text box's background and border) in the line's box (x, y, width, height). */
-  shape?: { style: ShapeStyle; width: number; behind?: boolean };
+  shape?: { style: ShapeStyle; width: number; behind?: boolean; flipH?: boolean; flipV?: boolean };
   /** Part of an object in front of the text (Wrap Text → In Front of Text): drawn over the text. */
   front?: boolean;
+  /** Part of a turned object (a shape or text box): turned `angle` degrees clockwise about (cx, cy). */
+  turn?: { angle: number; cx: number; cy: number };
+  /** Part of a floating object: its stacking order (higher is drawn on top). */
+  z?: number;
 }
 
 export interface Page {
@@ -164,6 +169,14 @@ export interface PlacedFloat {
   textbox?: boolean;
   /** Behind the text (a letterhead, a watermark picture): clicks on the text go to the text. */
   behind?: boolean;
+  /** Turned (degrees clockwise about its centre) and mirrored (the shape, not its text). */
+  rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
+  /** Stacking order among floating objects (higher on top). */
+  z?: number;
+  /** A text box: where its text sits between its top and bottom. */
+  anchor?: "t" | "ctr" | "b";
 }
 
 /**
@@ -1487,9 +1500,19 @@ export class LayoutEngine {
       const vArea = v === "page" ? [0, page.height] : v === "margin" ? [page.bodyTop, page.bodyBottom]
         : v === "topMargin" ? [0, page.bodyTop] : v === "bottomMargin" ? [page.bodyBottom, page.height]
         : [paraTop, paraTop]; // paragraph, line
-      const insets = f.insets ?? { left: 0, right: 0, top: 0, bottom: 0 };
-      const content = f.kind === "textbox" && f.blocks ? this.measureCell(f.blocks, f.width - insets.left - insets.right) : undefined;
+      // Text sits inside the shape's own text area (inside an oval, below a triangle's point), then its
+      // inner margins.
+      const area = f.kind === "textbox" && f.shape ? textArea(f.shape.geometry, f.width, f.height) : { left: 0, top: 0, right: 0, bottom: 0 };
+      const inner = f.insets ?? { left: 0, right: 0, top: 0, bottom: 0 };
+      const insets = {
+        left: inner.left + area.left * f.width, right: inner.right + area.right * f.width,
+        top: inner.top + area.top * f.height, bottom: inner.bottom + area.bottom * f.height,
+      };
+      const content = f.kind === "textbox" && f.blocks ? this.measureCell(f.blocks, Math.max(1, f.width - insets.left - insets.right)) : undefined;
       const height = content && (f.autoHeight || f.height < 1) ? content.height + insets.top + insets.bottom : f.height;
+      // Middle or bottom: the text moved down by the room it leaves.
+      const room = content ? height - insets.top - insets.bottom - content.height : 0;
+      const textTop = f.anchor === "ctr" ? room / 2 : f.anchor === "b" ? room : 0;
       const at = (pos: FloatInfo["x"], area: number[], size: number) =>
         pos.offset !== undefined ? area[0] + pos.offset
           : pos.align === "center" ? (area[0] + area[1] - size) / 2
@@ -1501,18 +1524,23 @@ export class LayoutEngine {
       // A shape, or a text box's fill and border: beneath its text.
       if (f.shape && (f.kind === "shape" || f.kind === "textbox")) {
         page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
-          shape: { style: f.shape, width: f.width, ...(f.behind ? { behind: true } : {}) } });
+          shape: { style: f.shape, width: f.width, ...(f.behind ? { behind: true } : {}), ...(f.flipH ? { flipH: true } : {}), ...(f.flipV ? { flipV: true } : {}) } });
       }
       if (f.kind === "picture" && source) {
         page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [],
           images: [{ ...source, x, y: fy, width: f.width, height }] });
       }
-      if (content) for (const l of content.lines) put(l.line, x + insets.left + (l.dx ?? 0), fy + insets.top + l.dy, { story: story ?? "float" });
+      if (content) for (const l of content.lines) put(l.line, x + insets.left + (l.dx ?? 0), fy + insets.top + textTop + l.dy, { story: story ?? "float" });
       if (f.kind === "ink" && f.ink) {
         page.lines.push({ story: story ?? "float", x, y: fy, height, baseline: fy + height, segments: [], rules: [], images: [],
           strokes: f.ink.strokes.map((s) => ({ points: s.map((v, i) => (i % 2 ? fy + v * height : x + v * f.width)), width: f.ink!.width, color: f.ink!.color })) });
       }
       if (f.wrap === "none" && !f.behind) for (let i = from; i < page.lines.length; i++) page.lines[i] = { ...page.lines[i], front: true };
+      // Turned, and stacked: all of the object's parts (its shape and its text).
+      const turn = f.rotation && (f.kind === "shape" || f.kind === "textbox") ? { angle: f.rotation, cx: x + f.width / 2, cy: fy + height / 2 } : undefined;
+      if (turn || f.z !== undefined) {
+        for (let i = from; i < page.lines.length; i++) page.lines[i] = { ...page.lines[i], ...(turn ? { turn } : {}), ...(f.z !== undefined ? { z: f.z } : {}) };
+      }
       // The same, relative to the anchor paragraph and the object's box, for the editor.
       const shift = (l: PositionedLine): PositionedLine => ({
         ...l, x: l.x - x, y: l.y - fy, baseline: l.baseline - fy,
@@ -1530,6 +1558,10 @@ export class LayoutEngine {
         ...(f.shape ? { shape: f.shape } : {}),
         ...(f.kind === "textbox" ? { textbox: true } : {}),
         ...(f.behind && f.wrap === "none" ? { behind: true } : {}),
+        ...(f.rotation && (f.kind === "shape" || f.kind === "textbox") ? { rotation: f.rotation } : {}),
+        ...(f.flipH ? { flipH: true } : {}), ...(f.flipV ? { flipV: true } : {}),
+        ...(f.z !== undefined ? { z: f.z } : {}),
+        ...(f.anchor ? { anchor: f.anchor } : {}),
         lines: f.kind === "textbox" ? page.lines.slice(from).filter((l) => !l.shape).map(shift) : [],
       });
       if (f.wrap === "none") return undefined;

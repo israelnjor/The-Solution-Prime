@@ -6,6 +6,7 @@ import type { FloatInfo, PrimeDocument } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type Command, type EditorState, NodeSelection, Plugin } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
+import { setShapeTurn } from "./shapes.js";
 
 const EMU = 12700;
 const emu = (pt: number) => String(Math.round(pt * EMU));
@@ -57,23 +58,28 @@ export function setFloatBox(paraPos: number, index: number, box: FloatBox): Comm
       const float = target.node.attrs.float as FloatInfo;
       if (target.node.type.name === "image") {
         // A picture of our own: its position and size are attributes.
-        dispatch(state.tr.setNodeMarkup(target.pos, undefined, {
+        const tr = state.tr.setNodeMarkup(target.pos, undefined, {
           ...target.node.attrs, width: box.width, height: box.height,
           float: { ...float, x: { from: "column", offset: box.x }, y: { from: "paragraph", offset: box.y } },
-        }));
+        });
+        if (state.selection instanceof NodeSelection && state.selection.from === target.pos) tr.setSelection(NodeSelection.create(tr.doc, target.pos));
+        dispatch(tr);
         return true;
       }
       // A text box that grows with its text keeps doing so: only its width is set.
       const keepHeight = float.kind === "textbox" && (float.autoHeight || float.height < 1);
       const preserved = target.node.attrs.preserved as { name: string; xml: string };
-      dispatch(state.tr.setNodeMarkup(target.pos, undefined, {
+      const tr = state.tr.setNodeMarkup(target.pos, undefined, {
         ...target.node.attrs,
         preserved: { ...preserved, xml: withBox(preserved.xml, box, keepHeight) },
         float: {
           ...float, x: { from: "column", offset: box.x }, y: { from: "paragraph", offset: box.y },
           width: box.width, ...(keepHeight ? {} : { height: box.height }),
         },
-      }));
+      });
+      // Still selected after a move or resize (the next nudge, or its format, applies to it).
+      if (state.selection instanceof NodeSelection && state.selection.from === target.pos) tr.setSelection(NodeSelection.create(tr.doc, target.pos));
+      dispatch(tr);
     }
     return true;
   };
@@ -102,6 +108,31 @@ function locate(view: EditorView, el: HTMLElement): { paraPos: number; index: nu
 export function floatNodeOf(view: EditorView, el: HTMLElement): { pos: number; node: Node } | undefined {
   const where = locate(view, el);
   return where ? floatAt(view.state.doc, where.paraPos, where.index) : undefined;
+}
+
+/** A key typed with a shape or text box selected: { pos, text } (the app opens it for typing). */
+export const SHAPE_TYPING = "prime-word:shape-typing";
+
+/** Screen pixels per point for a drawn object: its untransformed width (turning ignored) and the page's zoom. */
+function scaleOf(el: HTMLElement, width: number): number {
+  const page = el.closest<HTMLElement>(".pw-sheets, .page");
+  const zoom = page && page.offsetWidth ? page.getBoundingClientRect().width / page.offsetWidth : 1;
+  return ((el.offsetWidth || width * (96 / 72)) / width) * zoom || 96 / 72;
+}
+
+/** The drawn layer of the floating object at `pos`, if it is on screen. */
+export function floatElementAt(view: EditorView, pos: number): HTMLElement | undefined {
+  const $pos = view.state.doc.resolve(pos);
+  const paraPos = $pos.before($pos.depth);
+  let index = -1;
+  for (let i = 0; ; i++) {
+    const f = floatAt(view.state.doc, paraPos, i);
+    if (!f) break;
+    if (f.pos === pos) { index = i; break; }
+  }
+  const para = view.nodeDOM(paraPos) as HTMLElement | null;
+  if (index < 0 || !para?.querySelectorAll) return undefined;
+  return Array.from(para.querySelectorAll<HTMLElement>(".pw-float")).find((el) => el.dataset.index === String(index) && el.parentElement?.closest("p") === para);
 }
 
 /** The topmost picture behind the text under a point, if any. */
@@ -151,13 +182,37 @@ export function floatEditing(): Plugin {
     const where = locate(view, el);
     const node = where && floatAt(view.state.doc, where.paraPos, where.index);
     if (node) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, node.pos)));
-    const handle = target.dataset.handle; // "nw" | "ne" | "sw" | "se" when resizing
+    const handle = target.dataset.handle; // "nw" | "ne" | "sw" | "se" when resizing, "rot" when turning
     const start = { x: event.clientX, y: event.clientY };
     const box: FloatBox = { x: Number(el.dataset.x), y: Number(el.dataset.y), width: Number(el.dataset.w), height: Number(el.dataset.h) };
-    // Screen pixels per point, including any zoom.
-    const scale = el.getBoundingClientRect().width / box.width || 96 / 72;
+    const turned = Number(el.dataset.rotation ?? 0);
+    // Screen pixels per point, including any zoom (measured unturned: a turned box's bounds are larger).
+    const scale = scaleOf(el, box.width);
     const picture = el.dataset.kind === "picture";
+    const line = el.dataset.line === "1";
+    if (handle === "rot") {
+      // Turning: about the centre, following the mouse (0 degrees straight up); Shift in steps of 15.
+      const r = el.getBoundingClientRect();
+      const [cx, cy] = [r.left + r.width / 2, r.top + r.height / 2];
+      let angle = turned;
+      const turn = (e: MouseEvent) => {
+        angle = (Math.atan2(e.clientX - cx, -(e.clientY - cy)) * 180) / Math.PI;
+        if (e.shiftKey) angle = Math.round(angle / 15) * 15;
+        angle = ((angle % 360) + 360) % 360;
+        el.style.rotate = `${angle}deg`;
+      };
+      const done = () => {
+        window.removeEventListener("mousemove", turn);
+        window.removeEventListener("mouseup", done);
+        if (Math.abs(angle - turned) > 0.05) setShapeTurn({ rotation: Math.round(angle * 10) / 10 })(view.state, view.dispatch);
+      };
+      window.addEventListener("mousemove", turn);
+      window.addEventListener("mouseup", done);
+      return true;
+    }
     let next = box;
+    const a = (turned * Math.PI) / 180;
+    const [cos, sin] = [Math.cos(a), Math.sin(a)];
     const move = (e: MouseEvent) => {
       const dx = (e.clientX - start.x) / scale;
       const dy = (e.clientY - start.y) / scale;
@@ -166,16 +221,24 @@ export function floatEditing(): Plugin {
         el.style.transform = `translate(${dx * scale}px, ${dy * scale}px)`;
         return;
       }
+      // Resizing: the mouse's move along the object's own (turned) sides; the opposite corner stays.
+      const lx = dx * cos + dy * sin;
+      const ly = -dx * sin + dy * cos;
       const west = handle.includes("w");
       const north = handle.includes("n");
-      let width = Math.max(12, box.width + (west ? -dx : dx));
-      let height = Math.max(12, box.height + (north ? -dy : dy));
-      if (picture) {
+      const least = line ? 0.01 : 12;
+      let width = Math.max(least, box.width + (west ? -lx : lx));
+      let height = Math.max(least, box.height + (north ? -ly : ly));
+      // Pictures keep their proportions; shapes too with Shift (a circle stays a circle).
+      if ((picture || e.shiftKey) && !line) {
         const k = Math.max(width / box.width, height / box.height);
         width = box.width * k;
         height = box.height * k;
       }
-      next = { x: west ? box.x + box.width - width : box.x, y: north ? box.y + box.height - height : box.y, width, height };
+      const [dw, dh] = [width - box.width, height - box.height];
+      const [ox, oy] = [(west ? -dw : dw) / 2, (north ? -dh : dh) / 2];
+      const [cx, cy] = [box.x + box.width / 2 + ox * cos - oy * sin, box.y + box.height / 2 + ox * sin + oy * cos];
+      next = { x: cx - width / 2, y: cy - height / 2, width, height };
       el.style.transform = `translate(${(next.x - box.x) * scale}px, ${(next.y - box.y) * scale}px)`;
       el.style.width = `${width}pt`;
       el.style.height = `${height}pt`;
@@ -191,6 +254,12 @@ export function floatEditing(): Plugin {
     window.addEventListener("mouseup", up);
     return true;
   }
+  /** The selected object shown as selected (outline, handles), also after it is drawn again. */
+  const mark = (view: EditorView) => {
+    const sel = view.state.selection;
+    const el = sel instanceof NodeSelection && sel.node.attrs.float ? floatElementAt(view, sel.from) : undefined;
+    if (el !== selected) select(el);
+  };
   return new Plugin({
     // The page margins are outside the editor: a click there, on a picture behind the text, selects it too.
     view: (editorView) => {
@@ -200,19 +269,44 @@ export function floatEditing(): Plugin {
         if (behindAt(editorView, e.clientX, e.clientY) && !overText(e.clientX, e.clientY)) onMouseDown(editorView, e);
       };
       document.addEventListener("mousedown", onPage);
-      return { destroy: () => document.removeEventListener("mousedown", onPage) };
+      return {
+        update: (view) => mark(view),
+        destroy: () => document.removeEventListener("mousedown", onPage),
+      };
     },
     props: {
       handleDOMEvents: {
         mousedown: (view, event) => onMouseDown(view, event),
       },
       handleKeyDown(view, event) {
+        // The selected object as drawn now (it may have been drawn again since it was selected).
+        mark(view);
         if (!selected || !selected.isConnected) { selected = undefined; return false; }
         if (event.key === "Escape") { select(undefined); return true; }
         if (event.key === "Delete" || event.key === "Backspace") {
           const at = locate(view, selected);
           select(undefined);
           return at ? deleteFloat(at.paraPos, at.index)(view.state, view.dispatch) : false;
+        }
+        // Typing with a shape or text box selected types in it (as in Word), rather than replacing it.
+        const kind = selected.dataset.kind;
+        if ((kind === "shape" || kind === "textbox") && selected.dataset.line !== "1" && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          const sel = view.state.selection;
+          if (sel instanceof NodeSelection) window.dispatchEvent(new CustomEvent(SHAPE_TYPING, { detail: { pos: sel.from, text: event.key } }));
+          return true;
+        }
+        // Arrow keys nudge it (Ctrl: a little).
+        const step = event.ctrlKey || event.metaKey ? 1 : 6;
+        const by = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, number[]>)[event.key];
+        if (by && !event.shiftKey && !event.altKey) {
+          const at = locate(view, selected);
+          const d = selected.dataset;
+          // From where it is now (as stored: the screen may not be drawn again yet after the last nudge).
+          const node = at && floatAt(view.state.doc, at.paraPos, at.index)?.node;
+          const f = node?.attrs.float as FloatInfo | undefined;
+          const stored = f && f.x.from === "column" && f.y.from === "paragraph" && f.x.offset !== undefined && f.y.offset !== undefined;
+          const box = stored ? { x: f.x.offset!, y: f.y.offset!, width: f.width, height: f.height } : { x: Number(d.x), y: Number(d.y), width: Number(d.w), height: Number(d.h) };
+          return at ? setFloatBox(at.paraPos, at.index, { ...box, x: box.x + by[0], y: box.y + by[1] })(view.state, view.dispatch) : false;
         }
         return false;
       },

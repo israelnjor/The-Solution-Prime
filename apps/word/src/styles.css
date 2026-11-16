@@ -1030,11 +1030,31 @@ button.link:hover { text-decoration: underline; }
 /* Insert → Shapes (ShapePicker.tsx): the shapes as pictures to pick from. */
 .shape-picker { display: inline-flex; }
 .toolbar .shape-picker > button .caret { font-size: 10px; margin-left: 2px; }
-.shape-popup { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(5, 46px); gap: 4px; padding: 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
-.shape-popup button { height: 38px !important; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: #fff !important; cursor: pointer; }
+.shape-popup { position: fixed; z-index: 60; width: 332px; overflow-y: auto; padding: 4px 8px 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
+.shape-popup h4 { margin: 8px 0 4px; font-size: 11px; font-weight: 600; color: #4a5160; }
+.shape-popup .shape-grid { display: grid; grid-template-columns: repeat(10, 30px); gap: 2px; }
+.shape-popup button { width: 30px; height: 28px !important; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: #fff !important; cursor: pointer; }
 .shape-popup button:hover, .shape-popup button:focus-visible { border-color: var(--accent); background: #eef3fa !important; }
 
 /* A picture behind the text (a letterhead): the mouse reaches the text through it; floats.ts selects it
    where no text is. Its corner handles still take the mouse once it is selected. */
 .pw-float.pw-float-behind { pointer-events: none; }
 .pw-float.pw-float-behind .pw-float-handle { pointer-events: auto; }
+
+/* Drawing a shape: a crosshair over the pages, the box (or line) being drawn, and how to stop. */
+body.pw-drawing .canvas, body.pw-drawing .canvas * { cursor: crosshair !important; }
+.pw-draw-band { position: fixed; z-index: 70; border: 1px dashed #2b579a; background: rgb(43 87 154 / 0.08); pointer-events: none; box-sizing: border-box; }
+.pw-draw-band.pw-draw-line { height: 0; border: none; border-top: 1.5px dashed #2b579a; background: none; transform-origin: 0 0; }
+body.pw-drawing::after { content: "Drag on the page to draw · Shift keeps it even · Esc to cancel"; position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 70; padding: 6px 12px; border-radius: 6px; background: #1f2633; color: #fff; font-size: 12px; pointer-events: none; }
+
+/* The handle that turns a shape: a round one above its top edge. */
+.pw-float-handle.pw-rot { left: calc(50% - 5px); top: -24px; width: 9px; height: 9px; border-radius: 50%; cursor: grab; }
+.pw-float-handle.pw-rot::after { content: ""; position: absolute; left: 4px; top: 9px; width: 1px; height: 14px; background: #2b579a; }
+
+/* Shape Format: the Shape Styles gallery, and the size boxes. */
+.looks { position: relative; display: inline-flex; }
+.looks-popup { position: absolute; top: 100%; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(7, 34px); gap: 4px; padding: 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
+.looks-popup button { width: 34px; height: 26px !important; padding: 0; border: 1.5px solid; border-radius: 3px; font-size: 10px; color: #fff; text-shadow: 0 0 2px rgb(0 0 0 / 0.5); display: grid; place-items: center; }
+.looks-popup button:hover { outline: 2px solid var(--accent); }
+.looks-popup .look-line { display: block; width: 24px; height: 3px; }
+.size-input { width: 46px; }

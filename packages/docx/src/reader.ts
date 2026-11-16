@@ -5,7 +5,7 @@ import {
   type Relationship, SCHEMA_VERSION, type Section, type Story, type Table, type TableRow,
 } from "@prime/pdm";
 import { readInk } from "./inkml.js";
-import { readShapeStyle, themeColors } from "./shapes.js";
+import { readShapeStyle, readShapeTransform, themeColors } from "./shapes.js";
 import { IMAGE_TYPES, MODELED_REL_TYPES, RelType, EMU_PER_PT } from "./ooxml.js";
 import { readCellProps, readParagraphProps, readRowProps, readRunProps, readSectionProps, readTableProps } from "./props.js";
 import { readNumbering, readStyles } from "./styles.js";
@@ -426,6 +426,7 @@ class Reader {
       wrap,
       ...(side ? { side } : {}),
       ...(anchor.getAttribute("behindDoc") === "1" ? { behind: true } : {}),
+      ...(anchor.getAttribute("relativeHeight") ? { z: Number(anchor.getAttribute("relativeHeight")) } : {}),
       dist: {
         top: pt(anchor.getAttribute("distT")), bottom: pt(anchor.getAttribute("distB")),
         left: pt(anchor.getAttribute("distL")), right: pt(anchor.getAttribute("distR")),
@@ -449,14 +450,18 @@ class Reader {
     const content = shape && child(shape, "wps:txbx") && child(child(shape, "wps:txbx")!, "w:txbxContent");
     // Its outline, fill and line (a text box's border and background too).
     const style = shape ? readShapeStyle(shape, this.themeColors()) : undefined;
-    if (shape && !content) return { ...float, shape: style };
+    const turned = shape ? readShapeTransform(shape) : {};
+    if (shape && !content) return { ...float, ...turned, shape: style };
     if (shape && content) {
       const body = child(shape, "wps:bodyPr");
       const inset = (name: string, fallback: number) => (body?.getAttribute(name) != null ? pt(body.getAttribute(name)) : fallback);
+      const place = body?.getAttribute("anchor");
       return {
         ...float,
+        ...turned,
         kind: "textbox",
         ...(style ? { shape: style } : {}),
+        ...(place === "ctr" || place === "b" ? { anchor: place } : {}),
         blocks: this.readBlocks(elements(content), ctx),
         // Word's default inner margins: 0.1" left and right, 0.05" top and bottom.
         insets: { left: inset("lIns", 7.2), right: inset("rIns", 7.2), top: inset("tIns", 3.6), bottom: inset("bIns", 3.6) },

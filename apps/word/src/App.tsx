@@ -1,7 +1,7 @@
 import { Fragment, type Node as PmNode, type Schema, DOMParser as PmDOMParser } from "prosemirror-model";
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
-  blankDocument, chartAt, chartFromGrid, insertChart, insertChartAfter, SAMPLE_CHART, setChartData, tableAtCursor, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, createRender, createSchema, exitEmptyListItem, splitParagraph, tabKey, shiftTabKey, backspaceAtParagraphStart, findPlugin, fromProseMirror,
+  addShapeText, floatElementAt, SHAPE_TYPING, shapeAt, blankDocument, chartAt, chartFromGrid, insertChart, insertChartAfter, SAMPLE_CHART, setChartData, tableAtCursor, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, createRender, createSchema, exitEmptyListItem, splitParagraph, tabKey, shiftTabKey, backspaceAtParagraphStart, findPlugin, fromProseMirror,
   caretBetweenAtoms, pageClicks, insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
@@ -161,7 +161,7 @@ export function App() {
   const [reading, setReading] = useState(false);
   const [thesaurusOpen, setThesaurusOpen] = useState(false);
   /** A text box being typed in (double-clicked): its position and its layer on the page. */
-  const [editingBox, setEditingBox] = useState<{ pos: number; el: HTMLElement } | null>(null);
+  const [editingBox, setEditingBox] = useState<{ pos: number; el: HTMLElement; text?: string } | null>(null);
   /** Insert → Chart, or a chart double-clicked (its position) to edit. */
   const [chartDialog, setChartDialog] = useState<{ pos?: number; afterTable?: number; data: import("@prime/docx").ChartData } | null>(null);
   // The Print dialog or Read Mode, over the PDF of the document's pages.
@@ -970,14 +970,38 @@ ${String(e)}`));
         }
         return;
       }
-      const el = (e.target as HTMLElement).closest?.<HTMLElement>('.pw-float[data-kind="textbox"]');
+      // A text box, or a shape (not a line): type in it (a shape takes text first, as in Word).
+      const el = (e.target as HTMLElement).closest?.<HTMLElement>('.pw-float[data-kind="textbox"], .pw-float[data-kind="shape"]:not([data-line="1"])');
       if (!el || !v2) return;
       const found = floatNodeOf(v2, el);
-      if (found) { e.preventDefault(); setEditingBox({ pos: found.pos, el }); }
+      if (found) { e.preventDefault(); typeInShape(found.pos); }
     };
     window.addEventListener("dblclick", onDouble, true);
-    return () => window.removeEventListener("dblclick", onDouble, true);
+    // A key typed with a shape selected: typing in it, starting with that key.
+    const onTyping = (e: Event) => {
+      const { pos, text } = (e as CustomEvent<{ pos: number; text: string }>).detail;
+      typeInShape(pos, text);
+    };
+    window.addEventListener(SHAPE_TYPING, onTyping);
+    return () => { window.removeEventListener("dblclick", onDouble, true); window.removeEventListener(SHAPE_TYPING, onTyping); };
   }, []);
+
+  /**
+   * Typing in a shape or text box at `pos` (optionally starting with `text`): a shape without text takes
+   * text first (Add Text), then an editor opens over it once it is drawn with its text area.
+   */
+  const typeInShape = (pos: number, text?: string) => {
+    const v2 = view.current;
+    if (!v2) return;
+    const node = v2.state.doc.nodeAt(pos);
+    if (!node?.attrs.float) return;
+    v2.dispatch(v2.state.tr.setSelection(NodeSelection.create(v2.state.doc, pos)));
+    if ((node.attrs.float as { kind: string }).kind === "shape" && !addShapeText()(v2.state, v2.dispatch)) return;
+    requestAnimationFrame(() => {
+      const el = view.current && floatElementAt(view.current, pos);
+      if (el) setEditingBox({ pos, el, ...(text ? { text } : {}) });
+    });
+  };
 
   // Offer unsaved work from a session that did not close cleanly.
   useEffect(() => { void orphanedSnapshots().then(setRecovery); }, []);
@@ -1255,6 +1279,7 @@ ${String(e)}`));
         showMarks={marksOn} onShowMarks={toggleMarks}
         onCompare={() => void compareWith()}
         onProtect={() => setPasswordAsk({ mode: "set" })}
+        onShapeText={() => { const s = v && shapeAt(v.state); if (s) typeInShape(s.pos); }}
         onThesaurus={() => setThesaurusOpen(true)} onChart={() => {
           // The cursor in a table with numbers: a chart of the table, placed after it (as Word's charts from Excel data).
           const t = v ? tableAtCursor(v.state) : undefined;
@@ -1396,7 +1421,7 @@ ${String(e)}`));
           onClose={() => { setChartDialog(null); v.focus(); }} />
       )}
       {editingBox && v && (
-        <TextBoxEditor view={v} pos={editingBox.pos} box={editingBox.el} zoom={zoom}
+        <TextBoxEditor view={v} pos={editingBox.pos} box={editingBox.el} zoom={zoom} initialText={editingBox.text}
           plugins={measurerRef.current ? [paragraphStyles(fileRef.current.base, measurerRef.current)] : []}
           onDone={() => setEditingBox(null)} />
       )}

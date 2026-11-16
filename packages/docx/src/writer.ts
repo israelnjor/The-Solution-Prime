@@ -65,6 +65,26 @@ class Writer {
   private defaults: Record<string, string>;
   private used = new Set<string>();
   private drawingId = 0;
+  /** Drawing ids (wp:docPr id) given out: each must be unique in the document (Word repairs it otherwise). */
+  private docPrIds = new Set<number>();
+  /** A free drawing id. */
+  private newDocPrId(): number {
+    do ++this.drawingId; while (this.docPrIds.has(this.drawingId));
+    this.docPrIds.add(this.drawingId);
+    return this.drawingId;
+  }
+  /**
+   * Kept XML with unique drawing ids: an object copied and pasted, or kept from Word beside new ones,
+   * keeps its id where it is free and gets a new one where it is taken.
+   */
+  private uniqueDocPr(xml: string): string {
+    if (!xml.includes("docPr")) return xml;
+    return xml.replace(/(<wp:docPr\b[^>]*?\bid=")(\d+)(")/g, (_, a: string, id: string, b: string) => {
+      const n = Number(id);
+      if (!this.docPrIds.has(n)) { this.docPrIds.add(n); return a + id + b; }
+      return a + this.newDocPrId() + b;
+    });
+  }
   /** Ids for tracked changes recorded in Prime Word (Word's own keep theirs). */
   private revisionId = 900000;
 
@@ -256,7 +276,7 @@ class Writer {
       if (b.type === "paragraph") return this.paragraph(b, rels);
       if (b.type === "table") return this.table(b, rels);
       if (b.type === "contentControl") return this.contentControl(b.settings, this.blocks(b.blocks, rels));
-      return b.preserved.xml;
+      return this.uniqueDocPr(b.preserved.xml);
     }).join("");
   }
 
@@ -322,11 +342,11 @@ class Writer {
         // fallback copy of it); otherwise the object as it was read.
         if (i.float?.kind === "textbox" && i.float.edited && i.float.blocks) {
           const body = this.blocks(i.float.blocks, rels) || "<w:p/>";
-          return run(i.preserved.xml.replace(/<w:txbxContent\b[^>]*>[\s\S]*?<\/w:txbxContent>/g, `<w:txbxContent>${body}</w:txbxContent>`));
+          return run(this.uniqueDocPr(i.preserved.xml.replace(/<w:txbxContent\b[^>]*>[\s\S]*?<\/w:txbxContent>/g, `<w:txbxContent>${body}</w:txbxContent>`)));
         }
-        return run(i.preserved.xml);
+        return run(this.uniqueDocPr(i.preserved.xml));
       case "preserved":
-        return i.preserved.xml;
+        return this.uniqueDocPr(i.preserved.xml);
       case "field":
         return `<w:fldSimple w:instr="${escAttr(i.instr)}">${this.inlines(i.content, rels, deleted)}</w:fldSimple>`;
       case "contentControl":
@@ -352,7 +372,7 @@ class Writer {
     const rId = rels.add(RelType.image, part);
     const cx = Math.round(img.width * EMU_PER_PT);
     const cy = Math.round(img.height * EMU_PER_PT);
-    const id = ++this.drawingId;
+    const id = this.newDocPrId();
     const name = escAttr(img.name ?? `Picture ${id}`);
     const descr = img.description !== undefined ? ` descr="${escAttr(img.description)}"` : "";
     const body = `<wp:extent cx="${cx}" cy="${cy}"/>`

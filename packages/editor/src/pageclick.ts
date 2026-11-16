@@ -80,16 +80,27 @@ export function caretNear(view: EditorView, x: number, y: number): number | unde
     }
     return pos;
   };
+  /** The line found: asked again at its middle (at its very edge, the point can read as the paragraph's start). */
+  const middle = (pos: number): number => {
+    try {
+      const c = view.coordsAtPos(pos, 1);
+      const again = c.bottom - c.top > 2 ? textAt(cx, (c.top + c.bottom) / 2) : undefined;
+      return again ?? pos;
+    } catch {
+      return pos;
+    }
+  };
   for (let d = 0; d <= bottom - top; d += 3) {
     const pos = hit(at + d) ?? hit(at - d);
-    if (pos !== undefined) return pos;
+    if (pos !== undefined) return middle(pos);
   }
   return view.posAtCoords({ left: cx, top: at })?.pos;
 }
 
 /** Whether a mouse-down is one this plugin places: on the page but not on its text or on a control. */
 function placed(view: EditorView, e: MouseEvent): boolean {
-  if (e.button !== 0 || e.defaultPrevented) return false;
+  // Drawing a shape (drawing.ts) takes the mouse.
+  if (e.button !== 0 || e.defaultPrevented || document.body.classList.contains("pw-drawing")) return false;
   const t = e.target as HTMLElement | null;
   if (!t?.closest || !view.editable) return false;
   if (t.closest(OWN_CLICK)) return false;
@@ -118,8 +129,11 @@ export function pageClicks(): Plugin {
         if (!placed(view, e)) return;
         const pos = caretNear(view, e.clientX, e.clientY);
         if (pos === undefined) return;
-        // Not the browser's: it would take the focus from the editor (and select nothing).
+        // Not the browser's: it would take the focus from the editor (and select nothing). Not the
+        // editor's either, on its own background or a page gap: on mouse-up it would put the cursor at
+        // its own guess for the point (the start of the paragraph after the gap).
         e.preventDefault();
+        if (view.dom.contains(e.target as Node)) e.stopPropagation();
         const { doc, selection } = view.state;
         const anchor = e.shiftKey ? selection.anchor : pos;
         view.dispatch(view.state.tr.setSelection(TextSelection.between(doc.resolve(anchor), doc.resolve(pos))));

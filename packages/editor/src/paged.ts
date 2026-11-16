@@ -4,7 +4,7 @@
  * are sized from the real screen positions, so every page's content starts exactly at the top of
  * its sheet's body area — any small difference between engine and browser corrects itself.
  */
-import { isLineShape, type LayoutResult, layoutDocument, type Measurer, pinnedToBottom, type PlacedFloat, Resolver, sectionColumns, shapePath } from "@prime/layout";
+import { dashArray, isLineShape, type LayoutResult, layoutDocument, type Measurer, pinnedToBottom, type PlacedFloat, Resolver, sectionColumns, shadeFill, shapeDrawing } from "@prime/layout";
 import type { PrimeDocument, SectionProps, ShapeStyle } from "@prime/pdm";
 import type { Node } from "prosemirror-model";
 import { type EditorState, Plugin, PluginKey } from "prosemirror-state";
@@ -236,10 +236,15 @@ function resourceUrl(base: PrimeDocument, id: string): string | undefined {
 }
 
 /** What a float layer shows (redrawn when it changes: its place, size, picture, text, fill or outline). */
+/**
+ * What a float's layer shows, as a key: the screen redraws it when any of it changes, and reuses it
+ * otherwise. Its index is in it too (which of the paragraph's floats it is: moving, resizing and
+ * typing find the float by it), as are its turn, mirroring, stacking, line style and text placement.
+ */
 function floatKey(f: PlacedFloat, left: number): string {
-  const text = f.lines.map((l) => l.segments.map((g) => `${g.text}${g.font.bold ? "b" : ""}${g.font.italic ? "i" : ""}${g.color ?? ""}`).join("")).join("|");
-  const style = f.shape ? `${f.shape.geometry}:${f.shape.fill ?? ""}:${f.shape.line ? `${f.shape.line.color}@${f.shape.line.width}` : ""}` : "";
-  return `float-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.image?.imageId ?? ""}-${left}-${style}-${f.behind ? "behind" : ""}-${text}`;
+  const text = f.lines.map((l) => `${l.y.toFixed(1)}:` + l.segments.map((g) => `${g.x.toFixed(1)}${g.text}${g.size}${g.font.family}${g.font.bold ? "b" : ""}${g.font.italic ? "i" : ""}${g.color ?? ""}${g.underline ? "u" : ""}`).join("")).join("|");
+  return `float-${f.index}-${f.x}-${f.y}-${f.width}-${f.height}-${f.image?.part ?? f.image?.imageId ?? ""}-${left}-${f.shape ? JSON.stringify(f.shape) : ""}`
+    + `-${f.behind ? "behind" : ""}-${f.rotation ?? 0}-${f.flipH ? "h" : ""}${f.flipV ? "v" : ""}-${f.z ?? ""}-${f.ink ? f.ink.strokes.length : ""}-${text}`;
 }
 
 /**
@@ -253,18 +258,27 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
     el.className = f.behind ? "pw-float pw-float-behind" : "pw-float";
     el.contentEditable = "false";
     el.style.cssText = `left:${f.x - left}pt;top:${f.y}pt;width:${f.width}pt;height:${f.height}pt`;
+    // Turned about its centre (its text and handles with it, as in Word); stacked in Word's order.
+    if (f.rotation) el.style.rotate = `${f.rotation}deg`;
+    if (f.z !== undefined && !f.behind) el.style.zIndex = String(Math.min(2_000_000_000, Math.max(1, f.z)));
     // For moving and resizing (floats.ts): which float, and its box in layout terms.
     // Pictures and ink keep their proportions when resized; text boxes do not.
-    Object.assign(el.dataset, { index: String(f.index), x: String(f.x), y: String(f.y), w: String(f.width), h: String(f.height), kind: f.image || f.ink ? "picture" : f.textbox ? "textbox" : "shape" });
-    el.title = "Drag to move; drag a corner to resize; Delete to remove";
-    for (const corner of ["nw", "ne", "sw", "se"]) {
+    Object.assign(el.dataset, {
+      index: String(f.index), x: String(f.x), y: String(f.y), w: String(f.width), h: String(f.height),
+      kind: f.image || f.ink ? "picture" : f.textbox ? "textbox" : "shape", rotation: String(f.rotation ?? 0),
+      ...(f.shape && isLineShape(f.shape.geometry) ? { line: "1" } : {}),
+    });
+    el.title = f.shape && !f.textbox ? "Drag to move; drag a corner to resize; double-click to add text; Delete to remove" : "Drag to move; drag a corner to resize; Delete to remove";
+    // Corner handles; a shape or text box also has a handle above it to turn it.
+    for (const corner of f.shape && !isLineShape(f.shape.geometry) ? ["nw", "ne", "sw", "se", "rot"] : ["nw", "ne", "sw", "se"]) {
       const h = document.createElement("span");
       h.className = `pw-float-handle pw-${corner}`;
       h.dataset.handle = corner;
+      if (corner === "rot") h.title = "Drag to turn (Shift: in steps of 15°)";
       el.appendChild(h);
     }
     // A shape, or a text box's fill and border (beneath its text).
-    if (f.shape) el.appendChild(shapeSvg(f.shape, f.width, f.height));
+    if (f.shape) el.appendChild(shapeSvg(f.shape, f.width, f.height, f));
     const src = f.image?.part ? imageUrl(base, f.image.part) : f.image?.imageId ? resourceUrl(base, f.image.imageId) : undefined;
     if (src) {
       const img = document.createElement("img");
@@ -289,22 +303,43 @@ function floatLayer(f: PlacedFloat, base: PrimeDocument, left: number): () => HT
   };
 }
 
-/** A shape drawn as SVG in its box (the same outline the PDF draws). */
-function shapeSvg(style: ShapeStyle, w: number, h: number): SVGSVGElement {
+/**
+ * A shape drawn as SVG in its box, as the PDF draws it: its outline and details (shaded faces, inner
+ * lines), dashed as its line is, a line's arrow heads, mirrored as the shape is.
+ */
+export function shapeSvg(style: ShapeStyle, w: number, h: number, flip: { flipH?: boolean; flipV?: boolean } = {}): SVGSVGElement {
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "pw-shape");
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  // At least a point each way: a straight line across is drawn in a box with no height, which the
+  // screen would squeeze to nothing (the drawing keeps its own coordinates).
+  const [bw, bh] = [Math.max(w, 1), Math.max(h, 1)];
+  svg.setAttribute("viewBox", `0 0 ${bw} ${bh}`);
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("overflow", "visible");
-  const path = document.createElementNS(NS, "path");
-  path.setAttribute("d", shapePath(style.geometry, w, h));
-  path.setAttribute("fill", style.fill && !isLineShape(style.geometry) ? `#${style.fill}` : "none");
-  if (style.line) {
-    path.setAttribute("stroke", `#${style.line.color}`);
-    path.setAttribute("stroke-width", String(style.line.width));
+  svg.style.width = `${bw}pt`;
+  svg.style.height = `${bh}pt`;
+  const g = document.createElementNS(NS, "g");
+  const turns = [flip.flipH ? `translate(${w},0) scale(-1,1)` : "", flip.flipV ? `translate(0,${h}) scale(1,-1)` : ""].filter(Boolean);
+  if (turns.length) g.setAttribute("transform", turns.join(" "));
+  const lineShape = isLineShape(style.geometry);
+  const dash = style.line ? dashArray(style.line.dash, style.line.width) : undefined;
+  for (const part of shapeDrawing(style, w, h)) {
+    const fill = part.fill === "line" ? style.line?.color
+      : part.fill === "none" || lineShape || !style.fill ? undefined
+      : part.fill === "shape" ? style.fill : shadeFill(style.fill, part.fill);
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", part.d);
+    path.setAttribute("fill", fill ? `#${fill}` : "none");
+    if (part.stroke && style.line) {
+      path.setAttribute("stroke", `#${style.line.color}`);
+      path.setAttribute("stroke-width", String(style.line.width));
+      path.setAttribute("stroke-linejoin", "round");
+      if (dash && !part.head) path.setAttribute("stroke-dasharray", dash.join(" "));
+    }
+    g.appendChild(path);
   }
-  svg.appendChild(path);
+  svg.appendChild(g);
   return svg;
 }
 

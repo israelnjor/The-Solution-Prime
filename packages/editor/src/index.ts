@@ -5,7 +5,7 @@ export { isActive, paragraphProp, setParagraph, toggleRun, wordCount } from "./c
 export { blankDocument } from "./blank.js";
 export { resolvePageStarts, type ResolvedStart } from "./pages.js";
 export {
-  deleteFloat, floatAt, floatEditing, floatNodeOf, inlinePictureResizing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
+  deleteFloat, floatAt, floatEditing, floatElementAt, floatNodeOf, SHAPE_TYPING, inlinePictureResizing, pictureAt, pictureWrap, type PictureWrap, replacePicture, setAltText, setFloatBox,
   setPictureWrap, withBox, type FloatBox,
 } from "./floats.js";
 export { deleteCurrentPage, deletePages, pageStarts, selectedPages } from "./delete-pages.js";
@@ -15,6 +15,7 @@ export { backspaceAtParagraphStart, changeLevel, ensureList, exitEmptyListItem, 
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";
 export { caretBetweenAtoms, insertImage, insertPageBreak, linkAt, setLink } from "./insert.js";
 export { caretNear, pageClicks } from "./pageclick.js";
+export { drawShape, placeOf } from "./drawing.js";
 export { findAll, findNext, findPlugin, findState, type FindQuery, replaceAll, replaceCurrent, setFindQuery } from "./find.js";
 export { cssToRunProps, pastePlugin, toHex, toPt } from "./paste.js";
 export { storyFromProseMirror, storyToProseMirror } from "./convert.js";
@@ -53,6 +54,6 @@ export { moveSection, outline, outlineIndexAt, type OutlineItem } from "./naviga
 export { BODY, changeOutlineLevel, outlineKey, outlineLevelAt, outlinePlugin, outlineShown, setOutlineLevel } from "./outline.js";
 export { compareDocuments } from "./compare.js";
 export { extensionOf, type FileFormat, FORMAT_NAMES, formatOf, readAnyFormat, WRITABLE, writeFormat } from "./formats/index.js";
-export { insertShape, type ShapeChoice, SHAPES, setShapeFill, setShapeLine, shapeAt } from "./shapes.js";
+export { addShapeText, flipShape, insertShape, isLine, rotateShape, setShapeFill, setShapeLine, setShapeLook, setShapeSize, setShapeTurn, setTextAnchor, type ShapeChoice, type ShapePlace, SHAPE_GROUPS, SHAPES, shapeAt, stackShape } from "./shapes.js";
 export { chartAt, chartFromGrid, insertChart, insertChartAfter, parseChartNumber, SAMPLE_CHART, setChartData, tableAtCursor } from "./charts.js";
 export { type ApplyOptions, type ApplyPages, applicationOf, commitApplication, defaultOptions, type FollowingPages, type LetterheadPattern, storyShows, templateLook, type TemplateLook, withAdditions } from "./applytemplate.js";

@@ -199,6 +199,14 @@ export interface FloatInfo {
   shape?: ShapeStyle;
   /** A text box whose text was edited in Prime Word: its text is written from `blocks` when saving. */
   edited?: boolean;
+  /** A shape or text box: turned clockwise about its centre (degrees; a:xfrm rot), and mirrored. */
+  rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
+  /** A text box: where its text sits between its top and bottom (wps:bodyPr anchor; "t" when absent). */
+  anchor?: "t" | "ctr" | "b";
+  /** Stacking order among floating objects (wp:anchor relativeHeight): higher is drawn on top. */
+  z?: number;
 }
 
 /** How a shape is drawn (wps:spPr, or its theme style): fill and line colours RRGGBB, line width in pt. */
@@ -208,7 +216,22 @@ export interface ShapeStyle {
   /** No fill: undefined. */
   fill?: string;
   /** No line: undefined. */
-  line?: { color: string; width: number; dash?: string };
+  line?: ShapeLine;
+}
+
+/** A line end's look (a:headEnd / a:tailEnd type). */
+export type LineEnd = "triangle" | "arrow" | "stealth" | "diamond" | "oval";
+
+/**
+ * A shape's line: colour RRGGBB, width in pt, Word's dash name (a:prstDash: "dash", "sysDot"…), and
+ * for a line, the look of its start (head) and end (tail).
+ */
+export interface ShapeLine {
+  color: string;
+  width: number;
+  dash?: string;
+  head?: LineEnd;
+  tail?: LineEnd;
 }
 
 /** Unsupported paragraph-level content (e.g. bookmarks), kept verbatim. */

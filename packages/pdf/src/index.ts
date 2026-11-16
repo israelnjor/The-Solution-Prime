@@ -3,8 +3,8 @@
  * print and preview — the PDF shows exactly the pages the layout engine computed.
  */
 import fontkit from "@pdf-lib/fontkit";
-import { LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, StandardFonts, degrees, rgb, setCharacterSpacing } from "pdf-lib";
-import { chartShapes, chartTheme, type FontKey, type ImageSource, isLineShape, parseChart, type LayoutResult, type Page, type PageBorderLine, type Segment, shapePath, type Watermark } from "@prime/layout";
+import { concatTransformationMatrix, LineCapStyle, PDFDocument, type PDFFont, type PDFImage, type PDFPage, popGraphicsState, pushGraphicsState, StandardFonts, degrees, rgb, setCharacterSpacing } from "pdf-lib";
+import { chartShapes, chartTheme, dashArray, type FontKey, type ImageSource, isLineShape, parseChart, type LayoutResult, type Page, type PageBorderLine, type Segment, shadeFill, shapeDrawing, type Watermark } from "@prime/layout";
 import type { PrimeDocument } from "@prime/pdm";
 
 /** Supplies font files for embedding, and splits text into runs per drawing font (glyph fallback). */
@@ -93,11 +93,15 @@ class Renderer {
         if (r.sides.right) line(r.x + r.width, r.y, r.x + r.width, r.y + r.height);
       }
     }
+    // Floating objects stack by their order (higher on top); the rest keep theirs.
+    const stacked = (lines: Page["lines"]) => [...lines].sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
     // Shapes set behind the text first.
-    for (const line of p.lines) if (line.shape?.behind) this.shape(out, p, line);
+    for (const line of stacked(p.lines.filter((l) => l.shape?.behind))) this.turned(out, p, line, () => this.shape(out, p, line));
     // Objects in front of the text last, over it.
-    const ordered = [...p.lines.filter((l) => !l.front), ...p.lines.filter((l) => l.front)];
+    const ordered = [...p.lines.filter((l) => !l.front), ...stacked(p.lines.filter((l) => l.front))];
     for (const line of ordered) {
+      // A turned object's parts are drawn turned about its centre.
+      if (line.turn) out.pushOperators(pushGraphicsState(), ...this.rotation(p, line.turn));
       if (line.shape && !line.shape.behind) this.shape(out, p, line);
       for (const img of line.images) {
         if (img.chart) { await this.chart(out, p, img); continue; }
@@ -117,6 +121,7 @@ class Renderer {
       for (const r of line.rules) {
         out.drawLine({ start: { x: r.x1, y: Y(r.y1) }, end: { x: r.x2, y: Y(r.y2) }, thickness: r.width, color: rgb(0, 0, 0) });
       }
+      if (line.turn) out.pushOperators(popGraphicsState());
     }
     if (p.decor?.borders) this.borders(out, p, p.decor.borders);
   }
@@ -146,14 +151,45 @@ class Renderer {
     }
   }
 
-  /** A shape, or a text box's fill and border: its outline filled and stroked. */
+  /** Draws with a turn about a point (the screen's clockwise degrees; PDF's y runs up). */
+  private turned(out: PDFPage, p: Page, line: Page["lines"][number], draw: () => void) {
+    if (line.turn) out.pushOperators(pushGraphicsState(), ...this.rotation(p, line.turn));
+    draw();
+    if (line.turn) out.pushOperators(popGraphicsState());
+  }
+
+  private rotation(p: Page, t: NonNullable<Page["lines"][number]["turn"]>) {
+    const a = (-t.angle * Math.PI) / 180;
+    const [cos, sin] = [Math.cos(a), Math.sin(a)];
+    const [cx, cy] = [t.cx, p.height - t.cy];
+    return [concatTransformationMatrix(cos, sin, -sin, cos, cx - cx * cos + cy * sin, cy - cx * sin - cy * cos)];
+  }
+
+  /**
+   * A shape, or a text box's fill and border: its outline and details (shaded faces, inner lines) filled
+   * and stroked, dashed as its line is, a line's arrow heads, mirrored as the shape is.
+   */
   private shape(out: PDFPage, p: Page, line: Page["lines"][number]) {
     const s = line.shape!;
     const st = s.style;
-    const fill = st.fill && !isLineShape(st.geometry) ? { color: color(st.fill) } : {};
-    const stroke = st.line ? { borderColor: color(st.line.color), borderWidth: st.line.width } : {};
-    if (!("color" in fill) && !("borderColor" in stroke)) return;
-    out.drawSvgPath(shapePath(st.geometry, s.width, line.height), { x: line.x, y: p.height - line.y, ...fill, ...stroke });
+    const flip = s.flipH || s.flipV;
+    if (flip) {
+      const [cx, cy] = [line.x + s.width / 2, p.height - line.y - line.height / 2];
+      out.pushOperators(pushGraphicsState(), concatTransformationMatrix(s.flipH ? -1 : 1, 0, 0, s.flipV ? -1 : 1, s.flipH ? 2 * cx : 0, s.flipV ? 2 * cy : 0));
+    }
+    const lineShape = isLineShape(st.geometry);
+    const dash = st.line ? dashArray(st.line.dash, st.line.width) : undefined;
+    for (const part of shapeDrawing(st, s.width, line.height)) {
+      const fillColor = part.fill === "line" ? st.line?.color
+        : part.fill === "none" || lineShape || !st.fill ? undefined
+        : part.fill === "shape" ? st.fill : shadeFill(st.fill, part.fill);
+      const stroke = part.stroke && st.line
+        ? { borderColor: color(st.line.color), borderWidth: st.line.width, ...(dash && !part.head ? { borderDashArray: dash } : {}) }
+        : {};
+      if (!fillColor && !("borderColor" in stroke)) continue;
+      out.drawSvgPath(part.d, { x: line.x, y: p.height - line.y, ...(fillColor ? { color: color(fillColor) } : {}), ...stroke });
+    }
+    if (flip) out.pushOperators(popGraphicsState());
   }
 
   /** Text across the page, rotated about its centre, semi-transparent. */
