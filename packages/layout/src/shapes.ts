@@ -326,7 +326,7 @@ function lineEnd(kind: LineEnd, tip: Pt, from: Pt, width: number): ShapePart {
   const len = Math.hypot(dx, dy) || 1;
   const [ux, uy] = [dx / len, dy / len]; // along the line, toward the tip
   const [nx, ny] = [-uy, ux];
-  const size = Math.max(width * 3, 4.5);
+  const size = Math.max(width * 3, 6.5);
   const L = size, W = size / 2;
   const at = (a: number, b: number): Pt => [tip[0] - ux * a + nx * b, tip[1] - uy * a + ny * b];
   switch (kind) {
