@@ -2,7 +2,7 @@ import { Fragment, type Node as PmNode, type Schema, DOMParser as PmDOMParser } 
 import { decryptDocx, type DocumentProperties, encryptDocx, isEncrypted, readDocx, readProperties, withProperties, WrongPasswordError, writeDocx } from "@prime/docx";
 import {
   blankDocument, chartAt, chartFromGrid, insertChart, insertChartAfter, SAMPLE_CHART, setChartData, tableAtCursor, floatNodeOf, inlinePictureResizing, compareDocuments, readAnyFormat, writeFormat, extensionOf, FORMAT_NAMES, outlinePlugin, changeOutlineLevel, setTracking, trackingOn, trackTransaction, createRender, createSchema, exitEmptyListItem, splitParagraph, tabKey, shiftTabKey, backspaceAtParagraphStart, findPlugin, fromProseMirror,
-  caretBetweenAtoms, insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
+  caretBetweenAtoms, pageClicks, insertColumnBreak, insertPageBreak, moveCell, setDropCap, PAGE_GAP, pageSetup, pagination, paragraphStyles, pastePlugin, toggleRun, toProseMirror,
   wordCount, floatEditing, reviewPlugin, blockHandle, moveBlock, insertImage, setPictureWrap, autoFormat,
   changeCase, clearCharFormatting, clearParagraphFormatting, copyFormat, type CopiedFormat, growFont, pasteFormat, pasteOptions,
   pageAt, deletePages, selectedPages, setAltText, gotoBookmark, insertNote, noteAt, insertBibliography, readSources, writeSources, columnResizing, insertToc, referenceAt, refreshPageRefs, updateFields, setLineSpacing, setParagraph, setShowMarks, showMarks, tabStops, toggleList, toggleVertAlign, updateRun, typingParser } from "@prime/editor";
@@ -212,6 +212,12 @@ export function App() {
   const [home, setHome] = useState(() => !/[?&](selftest|file)=/.test(location.search));
   const [hasDocument, setHasDocument] = useState(false);
   const leaveHome = () => { setHome(false); setHasDocument(true); };
+  // Back to the document (a new one, one opened, or the home screen closed): the cursor shows, ready to type.
+  useEffect(() => {
+    if (home) return;
+    const frame = requestAnimationFrame(() => view.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [home]);
   // Review: how tracked changes are shown, and the comments pane (writing = a new comment is being typed).
   const [markup, setMarkup] = useState<Markup>("all");
   const [comments, setComments] = useState<"closed" | "open" | "writing">("closed");
@@ -409,7 +415,7 @@ export function App() {
         keymap(baseKeymap),
         paragraphStyles(file.base, measurer),
         findPlugin(),
-        pastePlugin(() => fileRef.current.base), caretBetweenAtoms(),
+        pastePlugin(() => fileRef.current.base), caretBetweenAtoms(), pageClicks(),
         floatEditing(), inlinePictureResizing(),
         blockHandle(),
         pasteOptions(),

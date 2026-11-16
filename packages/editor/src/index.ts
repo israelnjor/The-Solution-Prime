@@ -14,6 +14,7 @@ export { HIGHLIGHT_COLORS, runAtSelection, setColor, setFont, setFontSize, setHi
 export { backspaceAtParagraphStart, changeLevel, ensureList, exitEmptyListItem, listKind, type ListKind, splitParagraph, toggleList, applyListStyle, BULLET_STYLES, NUMBER_STYLES } from "./lists.js";
 export { addColumn, addRow, deleteColumn, deleteRow, deleteTable, inTable, insertTable, moveCell } from "./tables.js";
 export { caretBetweenAtoms, insertImage, insertPageBreak, linkAt, setLink } from "./insert.js";
+export { caretNear, pageClicks } from "./pageclick.js";
 export { findAll, findNext, findPlugin, findState, type FindQuery, replaceAll, replaceCurrent, setFindQuery } from "./find.js";
 export { cssToRunProps, pastePlugin, toHex, toPt } from "./paste.js";
 export { storyFromProseMirror, storyToProseMirror } from "./convert.js";
