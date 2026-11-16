@@ -58,16 +58,45 @@ export function nextDrawingId(doc: Node): number {
   return max + 1;
 }
 
-/** Word's look for new shapes: the theme's blue, a darker outline; lines just the line; text boxes white. */
-function newStyle(kind: "textbox" | "shape", choice: ShapeChoice): ShapeStyle {
+/**
+ * The soft colours new shapes take (the highlighter's soft shades), each with a deeper outline of its
+ * own colour: one after another, so the shapes of a diagram are told apart. Dark text reads on all.
+ */
+export const SOFT_LOOKS: { fill: string; line: string }[] = [
+  { fill: "DDEBF7", line: "5B9BD5" }, // blue
+  { fill: "E2F0D9", line: "70AD47" }, // green
+  { fill: "FCE4D6", line: "ED7D31" }, // peach
+  { fill: "FFF2CC", line: "BF9000" }, // yellow
+  { fill: "EDE2F6", line: "8E6BBF" }, // lavender
+  { fill: "FFD7E6", line: "D6608C" }, // pink
+  { fill: "D9F2F2", line: "3A9C9C" }, // teal
+];
+
+/**
+ * The look of a new shape: a soft fill and a deeper outline (the n-th of the soft colours); a line in
+ * the deeper colour; a text box white with a thin black border.
+ */
+function newStyle(kind: "textbox" | "shape", choice: ShapeChoice, n: number): ShapeStyle {
   if (kind === "textbox") return { geometry: "rect", fill: "FFFFFF", line: { color: "000000", width: 0.75 } };
-  if (isLine(choice.geometry)) return { geometry: choice.geometry, line: { color: "4472C4", width: 1, ...choice.ends } };
-  if (/^(arc|leftBracket|rightBracket|leftBrace|rightBrace|bracketPair|bracePair)$/.test(choice.geometry)) return { geometry: choice.geometry, line: { color: "4472C4", width: 1 } };
-  return { geometry: choice.geometry, fill: "4472C4", line: { color: "2F528F", width: 1 } };
+  const look = SOFT_LOOKS[n % SOFT_LOOKS.length];
+  if (isLine(choice.geometry)) return { geometry: choice.geometry, line: { color: look.line, width: 1.25, ...choice.ends } };
+  if (/^(arc|leftBracket|rightBracket|leftBrace|rightBrace|bracketPair|bracePair)$/.test(choice.geometry)) return { geometry: choice.geometry, line: { color: look.line, width: 1.25 } };
+  return { geometry: choice.geometry, fill: look.fill, line: { color: look.line, width: 1 } };
+}
+
+/** How many shapes (not text boxes) the document has: the next new one takes the next soft colour. */
+function shapeCount(doc: Node): number {
+  let n = 0;
+  doc.descendants((node) => {
+    const f = node.attrs?.float as FloatInfo | null | undefined;
+    if (f?.kind === "shape" || (f?.kind === "textbox" && f.shape && f.shape.geometry !== "rect")) n++;
+    return true;
+  });
+  return n;
 }
 
 /**
- * Inserts a text box (white, a thin black border, for typing in) or a shape (Word's blue fill and darker
+ * Inserts a text box (white, a thin black border, for typing in) or a shape (a soft fill and a deeper
  * outline; a line just the line), in front of the text, and selects it: where it was drawn on the page
  * (`place`), or at the cursor's paragraph at Word's default size.
  */
@@ -81,7 +110,7 @@ export function insertShape(kind: "textbox" | "shape", choice: ShapeChoice | str
       const line = isLine(pick.geometry);
       const width = place?.width ?? (kind === "textbox" ? 180 : line ? 144 : 72);
       const height = place ? Math.max(place.height, line ? 0.01 : 1) : kind === "textbox" ? 72 : line ? 0.01 : 72;
-      const style = newStyle(kind, pick);
+      const style = newStyle(kind, pick, shapeCount(state.doc));
       const x = place?.x ?? 0;
       const y = place?.y ?? 6;
       const turn = { ...(place?.flipH ? { flipH: true } : {}), ...(place?.flipV ? { flipV: true } : {}) };
