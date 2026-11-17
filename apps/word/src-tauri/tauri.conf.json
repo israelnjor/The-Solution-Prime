@@ -1,7 +1,7 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Prime Word",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "identifier": "com.primeproductivity.word",
   "build": {
     "frontendDist": "../dist",
@@ -43,10 +43,10 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     },
-    "shortDescription": "Prime Word ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a professional word processor by Prime Productivity",
+    "shortDescription": "Prime Word ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a professional word processor by Prime Productivity",
     "publisher": "Prime Productivity",
     "category": "Productivity",
-    "copyright": "Ãƒâ€šÃ‚Â© 2026 Prime Productivity",
+    "copyright": "ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â© 2026 Prime Productivity",
     "fileAssociations": [
       {
         "ext": [

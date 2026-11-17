@@ -197,7 +197,7 @@ const SHORTCUTS: [string, string][] = [
   ["Shift+F7", "Thesaurus"], ["Ctrl+Shift+8", "Show formatting marks"], ["F6", "Move between ribbon, document and status bar"], ["F1", "This help"],
 ];
 
-export function HelpPage() {
+export function HelpPage({ onFeedback }: { onFeedback(): void }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<string>();
   const q = query.trim().toLowerCase();
@@ -211,7 +211,8 @@ export function HelpPage() {
           <input className="help-search" type="search" placeholder="Search help (e.g. signature, PDF, page numbers)" aria-label="Search help"
             value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
         </div>
-        <p className="home-hint">Prime Word works much like Microsoft Word. These are the everyday tasks, and the things Prime Word does that you might not think to look for.</p>
+        <p className="home-hint">Prime Word works much like Microsoft Word. These are the everyday tasks, and the things Prime Word does that you might not think to look for.
+          Something not covered, not working, or hard to use? <button className="link" onClick={onFeedback}>Send feedback</button></p>
         {groups.map((g) => (
           <section key={g} className="help-group" aria-label={g}>
             <h2>{g}</h2>

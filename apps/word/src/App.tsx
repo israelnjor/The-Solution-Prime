@@ -21,6 +21,8 @@ import { Profiler, useCallback, useEffect, useReducer, useRef, useState } from "
 import { FindPanel } from "./FindPanel";
 import { HeaderFooterEditor } from "./HeaderFooterEditor";
 import { appVersion, type AvailableUpdate, scheduleUpdateCheck } from "./updates";
+import { FeedbackDialog } from "./FeedbackDialog";
+import { startOutbox } from "./feedback";
 import { ParagraphDialog } from "./ParagraphDialog";
 import { TemplatePicker } from "./TemplatePicker";
 import { SpellMenu } from "./SpellMenu";
@@ -164,6 +166,9 @@ export function App() {
   const [update, setUpdate] = useState<AvailableUpdate>();
   const [updateLater, setUpdateLater] = useState(false);
   useEffect(() => { void appVersion().then(setVersion); return scheduleUpdateCheck(setUpdate); }, []);
+  // Send feedback (Home, Help, File); reports waiting in the outbox are sent when they can be.
+  const [feedback, setFeedback] = useState(false);
+  useEffect(() => startOutbox(), []);
   const [reading, setReading] = useState(false);
   const [thesaurusOpen, setThesaurusOpen] = useState(false);
   /** A text box being typed in (double-clicked): its position and its layer on the page. */
@@ -1307,7 +1312,7 @@ ${String(e)}`));
           if (c) setChartDialog({ pos, data: c.spec ? (({ border: _, ...spec }) => spec)(c.spec) : SAMPLE_CHART });
         }}
         onChartData={(pos, data) => { if (v) { setChartData(() => fileRef.current.base, pos, data)(v.state, v.dispatch); v.focus(); } }}
-        onInfo={() => setInfo(true)} onAbout={() => showAbout()} onHelp={() => showHelp()} onReadAloud={() => setReading((r) => !r)}
+        onInfo={() => setInfo(true)} onAbout={() => showAbout()} onHelp={() => showHelp()} onFeedback={() => setFeedback(true)} onReadAloud={() => setReading((r) => !r)}
         navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
         onToc={(levels) => { if (v) { insertToc(baseOf, { levels }, pagesRef.current)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
@@ -1446,6 +1451,16 @@ ${String(e)}`));
       {reading && (
         <ReadAloud view={() => view.current ?? undefined} onClose={() => { setReading(false); view.current?.focus(); }} />
       )}
+      {feedback && (
+        <FeedbackDialog
+          context={{
+            screen: home ? "home" : "document", ...(home ? { homePage: homeView.page } : {}), mode,
+            ...(layout ? { pages: layout.pages.length } : {}), ...(v ? { words: countWords(v.state.doc) } : {}),
+            openDocuments: tabs.length, documentFormat: /\.([a-z0-9]+)$/i.exec(file.name)?.[1]?.toLowerCase() ?? "new",
+          }}
+          {...(hasDocument || !home ? { currentDocument: { name: /\.docx$/i.test(file.name) ? file.name : `${file.name.replace(/\.[^.]+$/, "")}.docx`, make: async () => writeDocx(fromProseMirror(view.current!.state.doc, fileRef.current.base)) } } : {})}
+          onClose={() => { setFeedback(false); if (!home) view.current?.focus(); }} />
+      )}
       {update && !updateLater && !(home && homeView.page === "about") && (
         <div className="update-banner" role="status">
           <span>Prime Word {update.version} is available.</span>
@@ -1526,7 +1541,7 @@ ${String(e)}`));
           {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})}
           onLetterhead={() => setDesigningLetterhead(true)} templatesVersion={templatesVersion}
           view={homeView} onView={setHomeView} projects={projects} onProjectsChanged={refreshProjects} projectActions={projectActions}
-          version={version} update={update} />
+          version={version} update={update} onFeedback={() => setFeedback(true)} />
       )}
       {applyingTemplate && v && hasDocument && !home && (
         <ApplyTemplate view={v} base={baseOf} onClose={() => setApplyingTemplate(false)}

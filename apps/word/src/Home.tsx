@@ -85,7 +85,7 @@ function RecoveryList({ recovery, onRestore, onDiscard }: { recovery: Snapshot[]
  * Longer lists have pages of their own ("View all").
  */
 export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf, onLetterhead, templatesVersion,
-  view, onView, projects, onProjectsChanged, projectActions, version, update }: {
+  view, onView, projects, onProjectsChanged, projectActions, version, update, onFeedback }: {
   recovery: Snapshot[];
   onPick(t: Template): void;
   onOpen(): void;
@@ -106,6 +106,8 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
   /** This version of Prime Word, and a newer one the automatic check found (shown in the rail). */
   version: string;
   update?: AvailableUpdate;
+  /** Opens the feedback form. */
+  onFeedback(): void;
 }) {
   const first = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -141,6 +143,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         <button onClick={() => onPick(TEMPLATES[0])}>New blank document</button>
         <button onClick={onOpen}>Open… <kbd>Ctrl+O</kbd></button>
         <button onClick={onConvertPdf}>Convert PDF to Word…</button>
+        <button className="home-rail-feedback" onClick={onFeedback} title="Tell us about a problem, something hard to use, or an idea">Send feedback</button>
         <button className={`home-rail-about ${page === "about" ? "on" : ""}`} aria-current={page === "about" ? "page" : undefined} onClick={() => setPage("about")}
           title="About Prime Word: its version and updates">
           {update ? <><span className="rail-dot" aria-hidden="true" />Update available <small>Prime Word {update.version}</small></>
@@ -149,7 +152,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         <div className="home-rail-foot">Prime Productivity</div>
       </nav>
 
-      {page === "about" ? <AboutPage found={update} /> : page === "help" ? <HelpPage /> : page === "projects" ? (current ? (
+      {page === "about" ? <AboutPage found={update} /> : page === "help" ? <HelpPage onFeedback={onFeedback} /> : page === "projects" ? (current ? (
         <ProjectPage key={current.path} project={current} actions={projectActions} onBack={() => onView({ page: "projects" })}
           onChanged={onProjectsChanged} onForgotten={() => { onProjectsChanged(); onView({ page: "projects" }); }} />
       ) : (

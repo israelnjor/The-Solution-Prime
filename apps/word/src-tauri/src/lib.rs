@@ -306,6 +306,69 @@ fn recovery_delete(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The feedback outbox: reports waiting to be sent, one folder each (report.json and its attachments),
+/// in the app's data folder. Kept until the report has been delivered, across restarts.
+fn outbox_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("feedback-outbox");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// A report's folder (ids are letters, digits and dashes: nothing outside the outbox).
+fn outbox_report(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("bad report id".into());
+    }
+    Ok(outbox_dir(app)?.join(id))
+}
+
+/// A file of a report: report.json, or an attachment a0, a1… (no other names).
+fn outbox_file(app: &AppHandle, id: &str, file: &str) -> Result<PathBuf, String> {
+    let ok = file == "report.json" || (file.starts_with('a') && file.len() <= 4 && file[1..].chars().all(|c| c.is_ascii_digit()) && file.len() > 1);
+    if !ok {
+        return Err("bad report file".into());
+    }
+    Ok(outbox_report(app, id)?.join(file))
+}
+
+/// Writes a file of a report (atomically). The report itself (report.json) is written last, so a
+/// report is only listed once all of it is on disk.
+#[tauri::command]
+fn outbox_save(app: AppHandle, request: Request) -> Result<(), String> {
+    let path = outbox_file(&app, &header(&request, "x-id")?, &header(&request, "x-file")?)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    atomic_write(&path, raw_body(&request)?).map_err(|e| e.to_string())
+}
+
+/// The reports waiting to be sent (those whose report.json is written).
+#[tauri::command]
+fn outbox_list(app: AppHandle) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for entry in fs::read_dir(outbox_dir(&app)?).map_err(|e| e.to_string())?.flatten() {
+        if entry.path().join("report.json").is_file() {
+            out.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn outbox_load(app: AppHandle, id: String, file: String) -> Result<Response, String> {
+    fs::read(outbox_file(&app, &id, &file)?).map(Response::new).map_err(|e| e.to_string())
+}
+
+/// Removes a report that has been delivered.
+#[tauri::command]
+fn outbox_delete(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = outbox_report(&app, &id)?;
+    if dir.exists() {
+        fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// The personal library (templates, signatures, saved blocks): JSON entries in the app's data folder,
 /// one folder per kind. Kinds and ids are checked, so nothing is written outside that folder.
 fn library_file(app: &AppHandle, kind: &str, id: &str) -> Result<PathBuf, String> {
@@ -468,6 +531,10 @@ pub fn run() {
             save_document,
             recovery_save,
             recovery_list,
+            outbox_save,
+            outbox_list,
+            outbox_load,
+            outbox_delete,
             recovery_load,
             recovery_delete,
             library_save,
