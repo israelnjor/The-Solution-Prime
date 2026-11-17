@@ -1061,3 +1061,28 @@ body.pw-drawing::after { content: "Drag on the page to draw · Shift keeps it ev
 
 /* A shape's adjustment handle (Word's yellow diamond): drag it to reshape the shape. */
 .pw-float-handle.pw-adj { width: 8px; height: 8px; margin: -5px 0 0 -5px; background: #ffd23f; border: 1px solid #7a5b00; transform: rotate(45deg); cursor: pointer; z-index: 3; }
+
+/* File → About. */
+.about-page { max-width: 720px; }
+.about-head { display: flex; gap: 18px; align-items: center; margin-bottom: 8px; }
+.about-head h1 { margin: 0; }
+.about-version { margin: 2px 0; font-weight: 600; }
+.about-updates, .about-credits { margin: 14px 0 8px; padding: 14px 16px; border: 1px solid var(--chrome-border); border-radius: 6px; background: #fafbfd; }
+.about-updates h4, .about-credits h4 { margin: 0 0 6px; font-size: 13px; }
+.about-updates p { margin: 4px 0; }
+.about-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0 4px; }
+.about-notes { max-height: 140px; overflow: auto; margin: 4px 0; padding: 6px 8px; background: #fff; border: 1px solid var(--chrome-border); border-radius: 4px; font: 12px/1.45 "Segoe UI", sans-serif; white-space: pre-wrap; }
+.about-updates progress { width: 100%; }
+.about-detail { display: block; margin-top: 2px; word-break: break-word; }
+.about-credits ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+.about-credits { background: #fff; }
+
+/* A newer version found by the automatic check. */
+.update-banner { position: fixed; right: 18px; bottom: 34px; z-index: 50; display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 8px; background: #1f2633; color: #fff; box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); font-size: 13px; }
+.update-banner .link { color: #cfd8ea; }
+
+/* Home's rail: About Prime Word (its version), or an update waiting. */
+.home-rail .home-rail-about { margin-top: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; position: relative; }
+.home-rail .home-rail-about small { opacity: 0.75; font-size: 11px; }
+.home-rail .home-rail-about + .home-rail-foot { margin-top: 6px; }
+.rail-dot { position: absolute; left: -2px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #ffd666; box-shadow: 0 0 0 2px rgb(255 214 102 / 0.35); }

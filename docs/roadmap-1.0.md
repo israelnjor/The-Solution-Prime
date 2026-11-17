@@ -130,8 +130,10 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
    pages and pages printed as outlines, e.g. by Microsoft Print to PDF, read by Windows' own offline
    recogniser — about half a second a page; macOS and Linux not yet). To do, in order:
    1. Code signing (without it Windows SmartScreen warns people off the installer).
-   2. Automatic updates (so fixes reach people after they install).
-   3. About / version.
+   2. Automatic updates (so fixes reach people after they install) ✅ (2026-11-17: signed updates from
+      the GitHub releases, checked daily and from Home → About; proven 0.1.0 → 0.1.1 → 0.1.2; see
+      docs/releasing.md).
+   3. About / version ✅ (2026-11-17: Home → About Prime Word, with the version always in the rail).
    4. User guide (short: the everyday tasks and what is ours — PDF → Word, letterheads, signatures).
    5. Bug-fix pass: real documents (reports, papers, company documents); every problem found is fixed
       and re-checked.

@@ -442,6 +442,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // Updates: checked against the release page in tauri.conf.json, installed only when signed
+        // with Prime Word's key; the app restarts into the new version.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(fonts::FontIndex::default())
         .invoke_handler(tauri::generate_handler![
             recognize_text,

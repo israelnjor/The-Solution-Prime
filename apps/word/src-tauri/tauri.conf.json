@@ -1,7 +1,7 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Prime Word",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "identifier": "com.primeproductivity.word",
   "build": {
     "frontendDist": "../dist",
@@ -43,10 +43,10 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     },
-    "shortDescription": "Prime Word — a professional word processor by Prime Productivity",
+    "shortDescription": "Prime Word ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a professional word processor by Prime Productivity",
     "publisher": "Prime Productivity",
     "category": "Productivity",
-    "copyright": "© 2026 Prime Productivity",
+    "copyright": "Ãƒâ€šÃ‚Â© 2026 Prime Productivity",
     "fileAssociations": [
       {
         "ext": [
@@ -64,6 +64,18 @@
         "startMenuFolder": "Prime Productivity",
         "compression": "lzma",
         "installerIcon": "icons/icon.ico"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA2MUU2MDAwRkVGQzgzNUIKUldSYmcveitBR0FlQnFNQS80TUxPT3hqVWxCaDAzVzVyNWhUdTMwOVhGTkp3OHZ4MUd2Tm9TTHkK",
+      "endpoints": [
+        "https://github.com/israelnjor/The-Solution-Prime/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

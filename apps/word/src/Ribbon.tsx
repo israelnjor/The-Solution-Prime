@@ -99,6 +99,8 @@ export interface RibbonProps {
   onNavPane(): void;
   onReadMode(): void;
   onInfo(): void;
+  /** File → About: the version, updates, and the software Prime Word is built with. */
+  onAbout(): void;
   onThesaurus(): void;
   onChart(): void;
   /** Type in the selected shape (Add Text / Edit Text). */
@@ -314,7 +316,7 @@ function ShapeFormat({ shape, run, view: v, onShapeText, onDrawn }: {
   );
 }
 
-export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onApplyTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap, onShapeText }: RibbonProps) {
+export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onExportPdf, onShare, onDeletePage, onPrint, onFind, onHeaderFooter, onParagraph, mode, onMode, markup, onMarkup, onComments, onNewComment, onHome, onConvertPdf, onEditPicture, onLetterhead, onSaveTemplate, onApplyTemplate, onSignature, onBlocks, onAutoCorrect, painter, onPainter, onFontDialog, onSymbol, onEquation, onDateTime, showMarks, onShowMarks, ruler, onRuler, navPane, onNavPane, onInfo, onAbout, onThesaurus, onChart, onEditChart, onChartData, onProtect, onCompare, onReadAloud, onReadMode, onZoomFit, onToc, onUpdateFields, onCaption, onTableOfFigures, onCrossRef, onNote, onShowNotes, onCitationStyle, onSources, onBibliography, onSortTable, onStyles, onDropCap, onShapeText }: RibbonProps) {
   const [tab, setTab] = useState<Tab>("home");
   // Alt+H / N / P / R: open that tab and put the keyboard on its first control.
   useEffect(() => {
@@ -430,6 +432,7 @@ export function Ribbon({ view: v, doc, onNew, onOpen, onOpenRecent, onSave, onEx
               <button onClick={onConvertPdf} title="Turn a PDF into an editable Word document">Convert PDF</button>
               <button onClick={onInfo} title="Document properties (title, author, tags) and statistics">Info</button>
               <button onClick={onProtect} title="Protect the document with a password (or remove it)">Protect</button>
+              <button onClick={onAbout} title="About Prime Word: its version, updates, and the software it is built with">About</button>
             </div>
             <div className="group" aria-label="Save">
               <button onClick={() => onSave()} title="Save (Ctrl+S)">Save</button>

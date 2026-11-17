@@ -1,3 +1,5 @@
+import { AboutPage } from "./AboutPage";
+import type { AvailableUpdate } from "./updates";
 import { type Template, TEMPLATES } from "@prime/editor";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { isDesktop } from "./platform";
@@ -8,7 +10,7 @@ import { NewProjectDialog, ProjectCard, type ProjectActions, ProjectPage, Projec
 import { projectsAvailable, type ProjectSummary } from "./projects";
 
 /** Which page of the home screen is showing (kept by the app, so Home comes back where it was left). */
-export type HomeView = { page: "home" | "templates" | "projects" | "recovered"; project?: string };
+export type HomeView = { page: "home" | "templates" | "projects" | "recovered" | "about"; project?: string };
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -82,7 +84,7 @@ function RecoveryList({ recovery, onRestore, onDiscard }: { recovery: Snapshot[]
  * Longer lists have pages of their own ("View all").
  */
 export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDiscard, onClose, onConvertPdf, onLetterhead, templatesVersion,
-  view, onView, projects, onProjectsChanged, projectActions }: {
+  view, onView, projects, onProjectsChanged, projectActions, version, update }: {
   recovery: Snapshot[];
   onPick(t: Template): void;
   onOpen(): void;
@@ -100,6 +102,9 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
   projects: ProjectSummary[];
   onProjectsChanged(): void;
   projectActions: ProjectActions;
+  /** This version of Prime Word, and a newer one the automatic check found (shown in the rail). */
+  version: string;
+  update?: AvailableUpdate;
 }) {
   const first = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -134,10 +139,15 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         <button onClick={() => onPick(TEMPLATES[0])}>New blank document</button>
         <button onClick={onOpen}>Open… <kbd>Ctrl+O</kbd></button>
         <button onClick={onConvertPdf}>Convert PDF to Word…</button>
+        <button className={`home-rail-about ${page === "about" ? "on" : ""}`} aria-current={page === "about" ? "page" : undefined} onClick={() => setPage("about")}
+          title="About Prime Word: its version and updates">
+          {update ? <><span className="rail-dot" aria-hidden="true" />Update available <small>Prime Word {update.version}</small></>
+            : <>About Prime Word <small>Version {version || "…"}</small></>}
+        </button>
         <div className="home-rail-foot">Prime Productivity</div>
       </nav>
 
-      {page === "projects" ? (current ? (
+      {page === "about" ? <AboutPage found={update} /> : page === "projects" ? (current ? (
         <ProjectPage key={current.path} project={current} actions={projectActions} onBack={() => onView({ page: "projects" })}
           onChanged={onProjectsChanged} onForgotten={() => { onProjectsChanged(); onView({ page: "projects" }); }} />
       ) : (

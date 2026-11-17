@@ -20,6 +20,7 @@ import { EditorView } from "prosemirror-view";
 import { Profiler, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { FindPanel } from "./FindPanel";
 import { HeaderFooterEditor } from "./HeaderFooterEditor";
+import { appVersion, type AvailableUpdate, scheduleUpdateCheck } from "./updates";
 import { ParagraphDialog } from "./ParagraphDialog";
 import { TemplatePicker } from "./TemplatePicker";
 import { SpellMenu } from "./SpellMenu";
@@ -158,6 +159,11 @@ export function App() {
   const [overflow, setOverflow] = useState<Set<number>>(new Set());
   const [find, setFind] = useState<"find" | "replace" | null>(null);
   const [info, setInfo] = useState(false);
+  // This version, and a newer one the automatic check found (offered in a small banner and on Home).
+  const [version, setVersion] = useState("");
+  const [update, setUpdate] = useState<AvailableUpdate>();
+  const [updateLater, setUpdateLater] = useState(false);
+  useEffect(() => { void appVersion().then(setVersion); return scheduleUpdateCheck(setUpdate); }, []);
   const [reading, setReading] = useState(false);
   const [thesaurusOpen, setThesaurusOpen] = useState(false);
   /** A text box being typed in (double-clicked): its position and its layer on the page. */
@@ -212,6 +218,8 @@ export function App() {
   const [home, setHome] = useState(() => !/[?&](selftest|file)=/.test(location.search));
   const [hasDocument, setHasDocument] = useState(false);
   const leaveHome = () => { setHome(false); setHasDocument(true); };
+  /** About Prime Word: its page on the home screen. */
+  const showAbout = () => { setHomeView({ page: "about" }); setHome(true); };
   // Back to the document (a new one, one opened, or the home screen closed): the cursor shows, ready to type.
   useEffect(() => {
     if (home) return;
@@ -1292,7 +1300,7 @@ ${String(e)}`));
           if (c) setChartDialog({ pos, data: c.spec ? (({ border: _, ...spec }) => spec)(c.spec) : SAMPLE_CHART });
         }}
         onChartData={(pos, data) => { if (v) { setChartData(() => fileRef.current.base, pos, data)(v.state, v.dispatch); v.focus(); } }}
-        onInfo={() => setInfo(true)} onReadAloud={() => setReading((r) => !r)}
+        onInfo={() => setInfo(true)} onAbout={() => showAbout()} onReadAloud={() => setReading((r) => !r)}
         navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
         onToc={(levels) => { if (v) { insertToc(baseOf, { levels }, pagesRef.current)(v.state, v.dispatch); v.focus(); afterLayout(); } }}
@@ -1431,6 +1439,13 @@ ${String(e)}`));
       {reading && (
         <ReadAloud view={() => view.current ?? undefined} onClose={() => { setReading(false); view.current?.focus(); }} />
       )}
+      {update && !updateLater && !(home && homeView.page === "about") && (
+        <div className="update-banner" role="status">
+          <span>Prime Word {update.version} is available.</span>
+          <button className="primary" onClick={() => { setUpdateLater(true); showAbout(); }}>See what's new</button>
+          <button className="link" onClick={() => setUpdateLater(true)} title="Remind me next time Prime Word starts">Later</button>
+        </div>
+      )}
       {info && v && (
         <PropertiesDialog base={fileRef.current.base} doc={v.state.doc} pages={layout?.pages.length} fileName={file.name}
           onSave={(p: DocumentProperties) => {
@@ -1503,7 +1518,8 @@ ${String(e)}`));
           onRestore={(s) => void restore(s)} onDiscard={(s) => void discardRecovery(s)}
           {...(hasDocument ? { onClose: () => setHome(false) } : {})}  onConvertPdf={() => setConverter({})}
           onLetterhead={() => setDesigningLetterhead(true)} templatesVersion={templatesVersion}
-          view={homeView} onView={setHomeView} projects={projects} onProjectsChanged={refreshProjects} projectActions={projectActions} />
+          view={homeView} onView={setHomeView} projects={projects} onProjectsChanged={refreshProjects} projectActions={projectActions}
+          version={version} update={update} />
       )}
       {applyingTemplate && v && hasDocument && !home && (
         <ApplyTemplate view={v} base={baseOf} onClose={() => setApplyingTemplate(false)}
