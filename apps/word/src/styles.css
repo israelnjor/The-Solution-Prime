@@ -1086,3 +1086,22 @@ body.pw-drawing::after { content: "Drag on the page to draw · Shift keeps it ev
 .home-rail .home-rail-about small { opacity: 0.75; font-size: 11px; }
 .home-rail .home-rail-about + .home-rail-foot { margin-top: 6px; }
 .rail-dot { position: absolute; left: -2px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: #ffd666; box-shadow: 0 0 0 2px rgb(255 214 102 / 0.35); }
+
+/* Home → Help. */
+.help-page { max-width: 820px; }
+.help-search { width: min(360px, 100%); padding: 7px 10px; border: 1px solid var(--chrome-border); border-radius: 6px; font: inherit; }
+.help-group { margin: 18px 0 6px; }
+.help-group h2 { margin: 0 0 8px; font-size: 15px; color: #3d4452; }
+.help-topic { border: 1px solid var(--chrome-border); border-radius: 6px; margin: 6px 0; background: #fff; }
+.help-topic summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 10px 14px; cursor: pointer; list-style: none; }
+.help-topic summary::-webkit-details-marker { display: none; }
+.help-topic summary::before { content: "▸"; color: var(--accent); margin-right: -4px; }
+.help-topic[open] summary::before { content: "▾"; }
+.help-topic summary span { color: var(--muted); font-size: 13px; }
+.help-topic[open] summary { border-bottom: 1px solid #eceef2; }
+.help-body { padding: 4px 16px 10px 30px; font-size: 13.5px; line-height: 1.55; }
+.help-body ol, .help-body ul { padding-left: 18px; margin: 6px 0; }
+.help-body li { margin: 4px 0; }
+.help-body kbd, .help-keys kbd { padding: 1px 5px; border: 1px solid #c9ced8; border-bottom-width: 2px; border-radius: 4px; background: #f6f7f9; font: 12px "Segoe UI", sans-serif; }
+.help-keys { border-collapse: collapse; font-size: 13px; }
+.help-keys td { padding: 4px 16px 4px 0; border-bottom: 1px solid #eceef2; }

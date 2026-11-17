@@ -220,6 +220,13 @@ export function App() {
   const leaveHome = () => { setHome(false); setHasDocument(true); };
   /** About Prime Word: its page on the home screen. */
   const showAbout = () => { setHomeView({ page: "about" }); setHome(true); };
+  /** Help: its page on the home screen (also F1, anywhere). */
+  const showHelp = () => { setHomeView({ page: "help" }); setHome(true); };
+  useEffect(() => {
+    const f1 = (e: KeyboardEvent) => { if (e.key === "F1" && !e.ctrlKey && !e.altKey && !e.shiftKey) { e.preventDefault(); showHelp(); } };
+    window.addEventListener("keydown", f1);
+    return () => window.removeEventListener("keydown", f1);
+  }, []);
   // Back to the document (a new one, one opened, or the home screen closed): the cursor shows, ready to type.
   useEffect(() => {
     if (home) return;
@@ -1300,7 +1307,7 @@ ${String(e)}`));
           if (c) setChartDialog({ pos, data: c.spec ? (({ border: _, ...spec }) => spec)(c.spec) : SAMPLE_CHART });
         }}
         onChartData={(pos, data) => { if (v) { setChartData(() => fileRef.current.base, pos, data)(v.state, v.dispatch); v.focus(); } }}
-        onInfo={() => setInfo(true)} onAbout={() => showAbout()} onReadAloud={() => setReading((r) => !r)}
+        onInfo={() => setInfo(true)} onAbout={() => showAbout()} onHelp={() => showHelp()} onReadAloud={() => setReading((r) => !r)}
         navPane={navPane} onNavPane={() => showNav(!navPane)} onReadMode={() => void openPages("read")} onZoomFit={zoomFit}
         ruler={rulerOn} onRuler={() => setRulerOn((on) => { remember("prime-word:ruler", !on); return !on; })}
         onToc={(levels) => { if (v) { insertToc(baseOf, { levels }, pagesRef.current)(v.state, v.dispatch); v.focus(); afterLayout(); } }}

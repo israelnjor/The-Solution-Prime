@@ -1,4 +1,5 @@
 import { AboutPage } from "./AboutPage";
+import { HelpPage } from "./HelpPage";
 import type { AvailableUpdate } from "./updates";
 import { type Template, TEMPLATES } from "@prime/editor";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
@@ -10,7 +11,7 @@ import { NewProjectDialog, ProjectCard, type ProjectActions, ProjectPage, Projec
 import { projectsAvailable, type ProjectSummary } from "./projects";
 
 /** Which page of the home screen is showing (kept by the app, so Home comes back where it was left). */
-export type HomeView = { page: "home" | "templates" | "projects" | "recovered" | "about"; project?: string };
+export type HomeView = { page: "home" | "templates" | "projects" | "recovered" | "about" | "help"; project?: string };
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -134,6 +135,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         {railPage("home", "Home")}
         {showProjects && railPage("projects", "Projects")}
         {railPage("templates", "My templates")}
+        {railPage("help", "Help")}
         {recovery.length > 0 && railPage("recovered", <>Recovered <span className="rail-count">{recovery.length}</span></>)}
         <hr className="rail-divider" />
         <button onClick={() => onPick(TEMPLATES[0])}>New blank document</button>
@@ -147,7 +149,7 @@ export function Home({ recovery, onPick, onOpen, onOpenRecent, onRestore, onDisc
         <div className="home-rail-foot">Prime Productivity</div>
       </nav>
 
-      {page === "about" ? <AboutPage found={update} /> : page === "projects" ? (current ? (
+      {page === "about" ? <AboutPage found={update} /> : page === "help" ? <HelpPage /> : page === "projects" ? (current ? (
         <ProjectPage key={current.path} project={current} actions={projectActions} onBack={() => onView({ page: "projects" })}
           onChanged={onProjectsChanged} onForgotten={() => { onProjectsChanged(); onView({ page: "projects" }); }} />
       ) : (
