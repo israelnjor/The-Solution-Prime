@@ -22,12 +22,23 @@ const SYMBOLS: Record<string, string> = {
 };
 const NARY: Record<string, string> = { sum: "∑", prod: "∏", int: "∫", iint: "∬", oint: "∮", bigcup: "⋃", bigcap: "⋂" };
 const FUNCTIONS = ["sin", "cos", "tan", "sec", "csc", "cot", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "log", "ln", "exp", "max", "min", "det", "gcd"];
+/** Matrix environments and their brackets ("" for none). */
+const MATRICES: Record<string, string> = { matrix: "", pmatrix: "()", bmatrix: "[]", Bmatrix: "{}", vmatrix: "||", Vmatrix: "‖‖" };
+/** Between a case's value and its condition (an em space). */
+const CASE_GAP = " ";
 const ACCENTS: Record<string, string> = { hat: "̂", tilde: "̃", dot: "̇", ddot: "̈", vec: "⃗" };
 const DELIMS: Record<string, string> = { "(": "(", ")": ")", "[": "[", "]": "]", "\\{": "{", "\\}": "}", "|": "|", ".": "" };
 
 // --- LaTeX → OMML ---------------------------------------------------------------------------------
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** Ordinary words inside an equation: upright, in the text font, spaces kept (Word's "normal text"). */
+const words = (text: string) => `<m:r><m:rPr><m:nor/></m:rPr><m:t xml:space="preserve">${esc(text)}</m:t></m:r>`;
+/**
+ * A phrase typed among the maths: a word of 3+ letters (or of 2 with another word after it, "is the"), then any
+ * more words of 2+ letters ("express the integrand at"). Single letters stay variables.
+ */
+const PHRASE = /^(?:[A-Za-z]{3,}|[A-Za-z]{2}(?= +[A-Za-z]{2,}(?![A-Za-z])))(?: +[A-Za-z]{2,}(?![A-Za-z]))*/;
 const run = (text: string, upright = false) => `<m:r>${upright ? '<m:rPr><m:sty m:val="p"/></m:rPr>' : ""}<m:t>${esc(text)}</m:t></m:r>`;
 const val = (tag: string, v: string) => `<m:${tag} m:val="${esc(v)}"/>`;
 
@@ -36,7 +47,7 @@ class Parser {
   constructor(private s: string) {}
 
   private peek() { return this.s[this.i]; }
-  private skipSpace() { while (this.s[this.i] === " ") this.i++; }
+  private skipSpace() { while (this.s[this.i] === " " || this.s[this.i] === "	") this.i++; }
   private command(): string {
     const m = /^\\([A-Za-z]+|.)/.exec(this.s.slice(this.i));
     if (!m) throw new Error("expected a command");
@@ -60,8 +71,20 @@ class Parser {
     for (;;) {
       this.skipSpace();
       const c = this.peek();
-      if (c === undefined || c === "}" || this.s.startsWith("\\right", this.i) || c === "&") break;
+      if (c === undefined || c === "}" || this.s.startsWith("\\right", this.i) || c === "&" || this.s.startsWith("\\\\", this.i) || this.s.startsWith("\\end", this.i)) break;
       if (toRelation && (/[=<>]/.test(c) || /^\\(leq|le|geq|ge|neq|ne|approx|equiv|to|rightarrow|Rightarrow|sim|propto)(?![A-Za-z])/.test(this.s.slice(this.i)))) break;
+      // Words typed among the maths stay words (with their spaces); a function name typed without "\\" is set upright.
+      if (/[A-Za-z]/.test(c) && !/[A-Za-z\\]/.test(this.s[this.i - 1] ?? "")) {
+        const m = PHRASE.exec(this.s.slice(this.i));
+        if (m && !/[\^_]/.test(this.s[this.i + m[0].length] ?? "")) {
+          flush();
+          this.i += m[0].length;
+          const before = this.s[this.i - m[0].length - 1] === " " && out !== "" ? " " : "";
+          const after = this.s[this.i] === " " && /\S/.test(this.s.slice(this.i)) ? " " : "";
+          out += words(before + m[0] + after);
+          continue;
+        }
+      }
       // A plain character that no script follows can join the run before it.
       if (/[A-Za-z0-9.,+\-=<>!'|:;/*]/.test(c) && !/[\^_]/.test(this.s[this.i + 1] ?? "")) {
         if (c === "*") text += "∗";
@@ -111,6 +134,8 @@ class Parser {
     if (c === "{") { this.i++; const e = this.expr(); this.expect("}"); return { xml: e }; }
     if (c !== "\\") { this.i++; return { xml: run(c === "-" ? "−" : c) }; }
     const name = this.command();
+    if (name === "binom") return { xml: `<m:d><m:e><m:f><m:fPr>${val("type", "noBar")}</m:fPr><m:num>${this.arg()}</m:num><m:den>${this.arg()}</m:den></m:f></m:e></m:d>` };
+    if (name === "begin") return { xml: this.environment() };
     if (name === "frac") return { xml: `<m:f><m:num>${this.arg()}</m:num><m:den>${this.arg()}</m:den></m:f>` };
     if (name === "sqrt") {
       this.skipSpace();
@@ -135,17 +160,72 @@ class Parser {
       if (end < 0) throw new Error("expected “}”");
       const text = this.s.slice(this.i, end);
       this.i = end + 1;
-      return { xml: run(text, true) };
+      return { xml: words(text) };
     }
     if (name in ACCENTS) return { xml: `<m:acc><m:accPr>${val("chr", ACCENTS[name])}</m:accPr><m:e>${this.arg()}</m:e></m:acc>` };
     if (name === "bar" || name === "overline") return { xml: `<m:bar><m:barPr>${val("pos", "top")}</m:barPr><m:e>${this.arg()}</m:e></m:bar>` };
     if (FUNCTIONS.includes(name)) {
-      return { xml: `<m:func><m:fName>${run(name, true)}</m:fName><m:e>${this.funcArg()}</m:e></m:func>` };
+      // A base or power belongs to the name, as Word writes it: \log_2 x, \sin^2 x.
+      let fName = run(name, true);
+      let sub: string | undefined;
+      let sup: string | undefined;
+      for (;;) {
+        this.skipSpace();
+        if (this.peek() === "_" && sub === undefined) { this.i++; sub = this.arg(); continue; }
+        if (this.peek() === "^" && sup === undefined) { this.i++; sup = this.arg(); continue; }
+        break;
+      }
+      if (sub !== undefined && sup !== undefined) fName = `<m:sSubSup><m:e>${fName}</m:e><m:sub>${sub}</m:sub><m:sup>${sup}</m:sup></m:sSubSup>`;
+      else if (sub !== undefined) fName = `<m:sSub><m:e>${fName}</m:e><m:sub>${sub}</m:sub></m:sSub>`;
+      else if (sup !== undefined) fName = `<m:sSup><m:e>${fName}</m:e><m:sup>${sup}</m:sup></m:sSup>`;
+      return { xml: `<m:func><m:fName>${fName}</m:fName><m:e>${this.funcArg()}</m:e></m:func>` };
     }
     if (name in SYMBOLS) return { xml: run(SYMBOLS[name]) };
     if (name === "," || name === ";" || name === "quad") return { xml: run(name === "quad" ? " " : " ") };
     if (name === "{" || name === "}") return { xml: run(name) };
     throw new Error(`unknown command \\${name}`);
+  }
+
+  /** {name} after \begin or \end. */
+  private envName(): string {
+    this.expect("{");
+    const m = /^[A-Za-z]+\*?/.exec(this.s.slice(this.i));
+    if (!m) throw new Error("expected a name such as pmatrix or cases");
+    this.i += m[0].length;
+    this.expect("}");
+    return m[0];
+  }
+
+  /** \begin{…} … \end{…}: matrices (cells split by &, rows by \\) and cases (a value & its condition per row). */
+  private environment(): string {
+    const env = this.envName();
+    const brackets = MATRICES[env];
+    if (brackets === undefined && env !== "cases") throw new Error(`unknown \\begin{${env}}: use pmatrix, bmatrix, vmatrix, matrix or cases`);
+    const rows: string[][] = [[]];
+    for (;;) {
+      rows[rows.length - 1].push(this.expr());
+      this.skipSpace();
+      if (this.peek() === "&") { this.i++; continue; }
+      if (this.s.startsWith("\\\\", this.i)) { this.i += 2; rows.push([]); continue; }
+      if (!this.s.startsWith("\\end", this.i)) throw new Error(`\\begin{${env}} without \\end{${env}}`);
+      this.i += 4;
+      const end = this.envName();
+      if (end !== env) throw new Error(`\\begin{${env}} ended by \\end{${end}}`);
+      break;
+    }
+    const last = rows[rows.length - 1];
+    if (rows.length > 1 && last.length === 1 && last[0] === "") rows.pop();
+    if (env === "cases") {
+      const lines = rows.map((r) => `<m:e>${r.join(words(CASE_GAP))}</m:e>`).join("");
+      return `<m:d><m:dPr><m:begChr m:val="{"/><m:endChr m:val=""/></m:dPr><m:e><m:eqArr>${lines}</m:eqArr></m:e></m:d>`;
+    }
+    const cols = Math.max(...rows.map((r) => r.length));
+    const body = rows.map((r) => `<m:mr>${Array.from({ length: cols }, (_, k) => `<m:e>${r[k] ?? ""}</m:e>`).join("")}</m:mr>`).join("");
+    const m = `<m:m><m:mPr><m:mcs><m:mc><m:mcPr><m:count m:val="${cols}"/><m:mcJc m:val="center"/></m:mcPr></m:mc></m:mcs></m:mPr>${body}</m:m>`;
+    if (!brackets) return m;
+    const [open, close] = [...brackets];
+    const pr = open === "(" ? "" : `<m:dPr><m:begChr m:val="${open}"/><m:endChr m:val="${close}"/></m:dPr>`;
+    return `<m:d>${pr}<m:e>${m}</m:e></m:d>`;
   }
 
   /** A function's argument: the next item (sin x, sin(x), sin^2 x is written \sin^2 x as in LaTeX). */
@@ -186,13 +266,37 @@ class Parser {
   done() { this.skipSpace(); if (this.i < this.s.length) throw new Error(`unexpected “${this.s[this.i]}” at ${this.i + 1}`); }
 }
 
-/** OMML for an equation typed as LaTeX; display equations go in an m:oMathPara (their own line, centred). Throws with a short message on a mistake. */
+/**
+ * OMML for an equation typed as LaTeX; display equations go in an m:oMathPara (their own line, centred).
+ * Each line typed is a line of the equation: more than one makes a display equation, one m:oMath per line,
+ * as Word stacks them. Throws with a short message on a mistake.
+ */
 export function latexToOmml(src: string, display = false): string {
-  const p = new Parser(src.trim());
-  const body = p.expr();
-  p.done();
-  const math = `<m:oMath xmlns:m="${M}">${body}</m:oMath>`;
-  return display ? `<m:oMathPara xmlns:m="${M}"><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr>${math.replace(` xmlns:m="${M}"`, "")}</m:oMathPara>` : math;
+  // Each line typed is a line of the equation, except inside \begin…\end (a matrix may span lines).
+  const lines: string[] = [];
+  let open = 0;
+  for (const raw of src.split(/\r?\n/)) {
+    const l = raw.trim();
+    if (open > 0) lines[lines.length - 1] += ` ${l}`;
+    else if (l) lines.push(l);
+    open += (l.match(/\\begin\{/g)?.length ?? 0) - (l.match(/\\end\{/g)?.length ?? 0);
+  }
+  if (lines.length === 0) lines.push("");
+  const maths = lines.map((line, n) => {
+    // "sin x" typed without the backslash is the sine, as \sin x is.
+    const p = new Parser(line.replace(new RegExp(`(^|[^A-Za-z\\\\])(${FUNCTIONS.join("|")})(?![A-Za-z])`, "g"), "$1\\$2"));
+    try {
+      const body = p.expr();
+      p.done();
+      return body;
+    } catch (e) {
+      throw lines.length > 1 ? new Error(`line ${n + 1}: ${(e as Error).message}`) : e;
+    }
+  });
+  // Several lines are an equation array, stacked and centred: Word runs separate m:oMath in one paragraph together.
+  const body = maths.length === 1 ? maths[0] : `<m:eqArr>${maths.map((m) => `<m:e>${m}</m:e>`).join("")}</m:eqArr>`;
+  if (!display && maths.length === 1) return `<m:oMath xmlns:m="${M}">${body}</m:oMath>`;
+  return `<m:oMathPara xmlns:m="${M}"><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr><m:oMath>${body}</m:oMath></m:oMathPara>`;
 }
 
 // --- OMML → LaTeX ---------------------------------------------------------------------------------
@@ -214,6 +318,11 @@ const group = (s: string) => (s.replace(/\s+$/, "").length === 1 ? s.trim() : `{
 /** A command's argument: always braced (\hat{y}, not \haty). */
 const brace = (s: string) => `{${s.trim()}}`;
 
+function matrixLatex(m: Element, env: string): string {
+  const rows = kids(m).filter((k) => k.localName === "mr").map((r) => kids(r).filter((k) => k.localName === "e").map((c) => toLatex(c).trim()).join(" & "));
+  return `\\begin{${env}} ${rows.join(" \\\\ ")} \\end{${env}}`;
+}
+
 function toLatex(e: Element | undefined): string {
   if (!e) return "";
   return kids(e).map(node).join("");
@@ -223,10 +332,15 @@ function node(e: Element): string {
   switch (e.localName) {
     case "r": {
       const text = kids(e).filter((k) => k.localName === "t").map((t) => t.textContent ?? "").join("");
+      if (kid(kid(e, "rPr") ?? e, "nor") && kid(e, "rPr")) {
+        const t = text.trim();
+        return PHRASE.exec(t)?.[0] === t && !FUNCTIONS.includes(t) ? text : `\\text{${text}}`;
+      }
       const upright = prop(e, "rPr", "sty") === "p";
       if (upright && /[A-Za-z]{2,}/.test(text) && !FUNCTIONS.includes(text)) return `\\text{${text}}`;
       if (upright && FUNCTIONS.includes(text)) return `\\${text} `;
-      return [...text].map((c) => (c === "−" ? "-" : c === "∗" ? "*" : BACK[c] ?? c)).join("");
+      // Letters that are variables stay apart ("x d x"), so they never read back as a word.
+      return [...text].map((c, i, all) => (/[A-Za-z]/.test(c) && /[A-Za-z]/.test(all[i - 1] ?? "") ? " " : "") + (c === "−" ? "-" : c === "∗" ? "*" : BACK[c] ?? c)).join("");
     }
     case "f": return `\\frac${brace(toLatex(kid(e, "num")))}${brace(toLatex(kid(e, "den")))}`;
     case "sSup": return `${toLatex(kid(e, "e"))}^${group(toLatex(kid(e, "sup")))}`;
@@ -247,11 +361,35 @@ function node(e: Element): string {
     case "d": {
       const open = prop(e, "dPr", "begChr") ?? "(";
       const close = prop(e, "dPr", "endChr") ?? ")";
+      const only = kids(e).filter((k) => k.localName === "e");
+      const inside = only.length === 1 ? kids(only[0]) : [];
+      if (inside.length === 1) {
+        const x = inside[0];
+        if (x.localName === "f" && prop(x, "fPr", "type") === "noBar" && open === "(" && close === ")")
+          return `\\binom${brace(toLatex(kid(x, "num")))}${brace(toLatex(kid(x, "den")))}`;
+        if (x.localName === "m") {
+          const env = Object.entries(MATRICES).find(([, b]) => b === open + close)?.[0];
+          if (env) return matrixLatex(x, env);
+        }
+        if (x.localName === "eqArr" && open === "{" && close === "") {
+          const rows = kids(x).filter((k) => k.localName === "e").map((r) => {
+            const cells: string[] = [""];
+            for (const k of kids(r)) {
+              const t = k.localName === "r" ? kids(k).filter((n) => n.localName === "t").map((n) => n.textContent ?? "").join("") : "";
+              if (t === CASE_GAP) cells.push("");
+              else cells[cells.length - 1] += node(k);
+            }
+            return cells.map((c) => c.trim()).join(" & ");
+          });
+          return `\\begin{cases} ${rows.join(" \\\\ ")} \\end{cases}`;
+        }
+      }
       const tex = (c: string) => (c === "{" || c === "}" ? `\\${c}` : c || ".");
       // Several m:e (separated by a comma in Word's view) become comma-separated.
       const inner = kids(e).filter((k) => k.localName === "e").map(toLatex).join(prop(e, "dPr", "sepChr") ?? ",");
       return `\\left${tex(open)}${inner}\\right${tex(close)}`;
     }
+    case "m": return matrixLatex(e, "matrix");
     case "limLow": {
       const base = toLatex(kid(e, "e")).trim();
       if (base !== "\\text{lim}" && base !== "lim") throw new Unsupported("limLow");
@@ -264,7 +402,7 @@ function node(e: Element): string {
       return `\\${name}${brace(toLatex(kid(e, "e")))}`;
     }
     case "bar": return `\\bar${brace(toLatex(kid(e, "e")))}`;
-    case "rPr": case "fPr": case "sSupPr": case "sSubPr": case "sSubSupPr": case "radPr": case "naryPr": case "dPr": case "funcPr": case "accPr": case "barPr": case "limLowPr": case "ctrlPr": case "oMathParaPr":
+    case "rPr": case "fPr": case "sSupPr": case "sSubPr": case "sSubSupPr": case "radPr": case "naryPr": case "dPr": case "funcPr": case "accPr": case "barPr": case "limLowPr": case "ctrlPr": case "oMathParaPr": case "mPr": case "eqArrPr":
       return "";
     case "oMath": return toLatex(e);
     default: throw new Unsupported(e.localName);
@@ -278,8 +416,11 @@ export function ommlToLatex(xml: string): { latex: string; display: boolean } | 
     const root = new DOMParser().parseFromString(withNs, "application/xml").documentElement;
     if (!root) return undefined;
     const display = root.localName === "oMathPara";
-    const maths = display ? kids(root).filter((k) => k.localName === "oMath") : [root];
-    return { latex: maths.map(toLatex).join(" ").replace(/\s+/g, " ").trim(), display };
+    let maths = display ? kids(root).filter((k) => k.localName === "oMath") : [root];
+    // An equation that is just an equation array: one line each.
+    const only = maths.length === 1 ? kids(maths[0]) : [];
+    if (only.length === 1 && only[0].localName === "eqArr") maths = kids(only[0]).filter((k) => k.localName === "e");
+    return { latex: maths.map((m) => toLatex(m).replace(/[ \t]+/g, " ").trim()).join("\n"), display };
   } catch {
     return undefined;
   }

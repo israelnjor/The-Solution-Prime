@@ -268,8 +268,13 @@ export class MathTypesetter {
   }
 
   private delimited(e: Element, size: number, display: boolean): MathBox {
-    const beg = prop(e, "dPr", "begChr") ?? "(";
-    const end = prop(e, "dPr", "endChr") ?? ")";
+    // A bracket set to "" is none (a cases brace has no closing one); one not set at all is a parenthesis.
+    const chr = (name: string, missing: string) => {
+      const c = child(child(e, "dPr"), name);
+      return c ? (c.getAttributeNS(M, "val") ?? "") : missing;
+    };
+    const beg = chr("begChr", "(");
+    const end = chr("endChr", ")");
     const sep = prop(e, "dPr", "sepChr") ?? "|";
     const items = kids(e).filter((c) => c.localName === "e").map((c) => this.seq(kids(c), size, display));
     const inner: MathBox[] = [];

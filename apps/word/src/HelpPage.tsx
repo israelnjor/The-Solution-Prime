@@ -128,6 +128,17 @@ const TOPICS: Topic[] = [
     words: "table rows columns merge chart graph",
   },
   {
+    group: "Writing and formatting", title: "Equations and symbols", summary: "Fractions, roots, powers, sums and Greek letters, saved as Word's own maths.",
+    body: <ul>
+      <li>Press <B>Alt+=</B> (or <B>Insert → Equation…</B>). Click the pieces you need (fraction, power, root, sum, integral, Greek letters…), or type them, and watch the preview as you go.</li>
+      <li>Typing works like this: <code>x^{"{2}"}</code> for x², <code>\frac{"{a}{b}"}</code> for a fraction, <code>\sqrt{"{x}"}</code> for a root, <code>\alpha</code> for α.</li>
+      <li>It sits in the line of text; tick <B>Display: on its own line, centred</B> for a standalone equation. Double-click an equation to change it.</li>
+      <li>Equations open in Microsoft Word as real equations, and Word's equations open here.</li>
+      <li>For a single character such as ©, ° or €, use <B>Insert → Symbol…</B>.</li>
+    </ul>,
+    words: "equation math maths mathematics formula fraction square root power exponent integral sum greek latex symbol alt=",
+  },
+  {
     group: "Writing and formatting", title: "Spelling, grammar, thesaurus and reading aloud", summary: "Checks as you type, and help finding the right word.",
     body: <ul>
       <li>Misspelled words are underlined in red, grammar in blue. Right-click one for suggestions. The status bar shows how many are left to review.</li>
@@ -193,7 +204,7 @@ const SHORTCUTS: [string, string][] = [
   ["Ctrl+E / L / R / J", "Centre / Left / Right / Justify"], ["Ctrl+1 / 2 / 5", "Single / Double / 1.5 line spacing"],
   ["Ctrl+Shift+L", "Bullets"], ["Ctrl+Alt+1 / 2 / 3", "Heading 1 / 2 / 3"], ["Ctrl+Shift+N", "Normal style"],
   ["Shift+F3", "Change case"], ["Ctrl+Shift+C / V", "Copy / paste formatting"],
-  ["Ctrl+Enter", "Page break"], ["Ctrl+Alt+F / D", "Footnote / Endnote"], ["Ctrl+Shift+E", "Track changes"],
+  ["Alt+=", "Equation"], ["Ctrl+Enter", "Page break"], ["Ctrl+Alt+F / D", "Footnote / Endnote"], ["Ctrl+Shift+E", "Track changes"],
   ["Shift+F7", "Thesaurus"], ["Ctrl+Shift+8", "Show formatting marks"], ["F6", "Move between ribbon, document and status bar"], ["F1", "This help"],
 ];
 

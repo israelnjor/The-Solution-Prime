@@ -89,7 +89,7 @@ export function FeedbackDialog({ context, currentDocument, onClose }: {
 
   const done = state === "sent" || state === "offline" || state === "unconfigured" || state === "refused";
   return (
-    <div className="hf-overlay" onKeyDown={(e) => {
+    <div className="hf-overlay feedback-overlay" onKeyDown={(e) => {
       if (e.key === "Escape" && state !== "sending") onClose();
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !done) { e.preventDefault(); void send(); }
     }}>

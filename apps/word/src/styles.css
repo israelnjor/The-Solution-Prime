@@ -195,6 +195,8 @@ body { font: 13px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--ink); back
 /* --- Layout tab, header/footer editor --- */
 .field { display: inline-flex; align-items: center; gap: 6px; }
 .hf-overlay { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 0.25); display: grid; place-items: center; }
+/* Feedback opens from Home too, which covers the editor (z-index 70). */
+.hf-overlay.feedback-overlay { z-index: 85; }
 .hf-dialog {
   width: min(760px, 92vw); max-height: 86vh; overflow: auto; display: grid; gap: 10px; padding: 16px 18px;
   background: #fff; border-radius: 8px; box-shadow: 0 10px 40px rgb(0 0 0 / 0.25);
@@ -622,6 +624,11 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .eq-palette { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
 .eq-palette button { min-width: 34px; height: 30px; font: 15px "Cambria Math", "Segoe UI Symbol", serif; border: 1px solid var(--chrome-border); background: #fff; border-radius: 4px; cursor: pointer; }
 .eq-palette button:hover { background: #e8eef8; }
+.eq-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 6px; border-bottom: 1px solid var(--chrome-border); }
+.eq-tabs button { border: none; background: none; padding: 5px 10px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.eq-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.eq-palette { min-height: 66px; align-content: flex-start; }
+.eq-palette.examples button { font: 13px "Segoe UI", sans-serif; padding: 0 10px; }
 .equation-dialog textarea { width: 100%; box-sizing: border-box; font: 14px Consolas, monospace; padding: 6px 8px; border: 1px solid var(--chrome-border); border-radius: 4px; }
 .eq-preview { min-height: 64px; margin: 8px 0; padding: 12px; display: flex; align-items: center; border: 1px solid var(--chrome-border); border-radius: 6px; background: #fff; color: #000; font-size: 16pt; overflow-x: auto; }
 .eq-preview.display { justify-content: center; }

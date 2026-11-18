@@ -15,6 +15,18 @@ const cases = [
   String.raw`\hat{y} = \bar{x} + \vec{v}`,
   String.raw`a_{ij} \times b_{jk}`,
   String.raw`\text{Area} = \pi r^2`,
+  String.raw`\int_1^4 x^3 + 7x + 12 = ?? express the integrand at x = 4`,
+  String.raw`f(x) = sin x + cos x`,
+  String.raw`y = x^2 for all real x`,
+  "\\int_0^1 x dx\ny = 2x + 1\nwhere x is the input",
+  String.raw`A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}`,
+  String.raw`\det \begin{vmatrix} a & b \\ c & d \end{vmatrix} = ad - bc`,
+  String.raw`\begin{bmatrix} x \\ y \\ z \end{bmatrix}`,
+  String.raw`|x| = \begin{cases} x & x \geq 0 \\ -x & x < 0 \end{cases}`,
+  String.raw`\binom{n}{k} = \frac{n!}{k!(n-k)!}`,
+  String.raw`\log_{2} 8 = 3`,
+  String.raw`\sin^2 x + \cos^2 x = 1`,
+  "M = \\begin{pmatrix}\n1 & 0 \\\\\n0 & 1\n\\end{pmatrix}",
 ];
 let ok = true;
 const blocks = [];
@@ -25,7 +37,8 @@ for (const c of cases) {
   const same = again === xml;
   ok &&= same;
   console.log(same ? "ok  " : "FAIL", c, "→", back?.latex);
-  blocks.push({ type: "paragraph", props: {}, content: [{ type: "text", text: `${c}:  ` }, { type: "preserved", preserved: { name: "m:oMath", xml: xml.replace(/ xmlns:m="[^"]+"/, "") } }] });
+  const name = xml.startsWith("<m:oMathPara") ? "m:oMathPara" : "m:oMath";
+  blocks.push({ type: "paragraph", props: {}, content: [{ type: "text", text: `${c.replace(/\n/g, " / ")}:  ` }, { type: "preserved", preserved: { name, xml: xml.replace(/ xmlns:m="[^"]+"/, "") } }] });
 }
 for (const bad of [String.raw`\frac{1}`, String.raw`\unknown x`, String.raw`\left( x`]) {
   try { latexToOmml(bad); console.log("FAIL (accepted)", bad); ok = false; } catch (e) { console.log("ok   rejected", bad, "—", e.message); }
