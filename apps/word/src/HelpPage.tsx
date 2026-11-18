@@ -130,13 +130,15 @@ const TOPICS: Topic[] = [
   {
     group: "Writing and formatting", title: "Equations and symbols", summary: "Fractions, roots, powers, sums and Greek letters, saved as Word's own maths.",
     body: <ul>
-      <li>Press <B>Alt+=</B> (or <B>Insert → Equation…</B>). Click the pieces you need (fraction, power, root, sum, integral, Greek letters…), or type them, and watch the preview as you go.</li>
-      <li>Typing works like this: <code>x^{"{2}"}</code> for x², <code>\frac{"{a}{b}"}</code> for a fraction, <code>\sqrt{"{x}"}</code> for a root, <code>\alpha</code> for α.</li>
+      <li>Press <B>Alt+=</B> (or <B>Insert → Equation…</B>). Click the pieces you need from the tabs (<B>Structures</B>, <B>Greek</B>, <B>Operators</B>, <B>Relations</B>, <B>Sets &amp; logic</B>), or start from one of the <B>Examples</B>, and watch the preview as you go.</li>
+      <li>Typing works like this: <code>x^{"{2}"}</code> for x², <code>\frac{"{a}{b}"}</code> for a fraction, <code>\sqrt{"{x}"}</code> for a root, <code>\alpha</code> for α, <code>\log_2 x</code> for a logarithm to a base.</li>
+      <li>Press <B>Enter</B> for a new line of the equation. Ordinary words (“where x is the input”) keep their spaces.</li>
+      <li>Matrices and cases: in <code>\begin{"{pmatrix}"} 1 &amp; 2 \\ 3 &amp; 4 \end{"{pmatrix}"}</code>, <code>&amp;</code> goes between cells and <code>\\</code> between rows; <B>cases</B> puts a value &amp; its condition on each row.</li>
       <li>It sits in the line of text; tick <B>Display: on its own line, centred</B> for a standalone equation. Double-click an equation to change it.</li>
       <li>Equations open in Microsoft Word as real equations, and Word's equations open here.</li>
       <li>For a single character such as ©, ° or €, use <B>Insert → Symbol…</B>.</li>
     </ul>,
-    words: "equation math maths mathematics formula fraction square root power exponent integral sum greek latex symbol alt=",
+    words: "equation math maths mathematics formula fraction square root power exponent integral sum greek latex symbol alt= matrix determinant cases piecewise binomial logarithm",
   },
   {
     group: "Writing and formatting", title: "Spelling, grammar, thesaurus and reading aloud", summary: "Checks as you type, and help finding the right word.",

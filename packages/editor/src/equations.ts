@@ -339,8 +339,10 @@ function node(e: Element): string {
       const upright = prop(e, "rPr", "sty") === "p";
       if (upright && /[A-Za-z]{2,}/.test(text) && !FUNCTIONS.includes(text)) return `\\text{${text}}`;
       if (upright && FUNCTIONS.includes(text)) return `\\${text} `;
-      // Letters that are variables stay apart ("x d x"), so they never read back as a word.
-      return [...text].map((c, i, all) => (/[A-Za-z]/.test(c) && /[A-Za-z]/.test(all[i - 1] ?? "") ? " " : "") + (c === "−" ? "-" : c === "∗" ? "*" : BACK[c] ?? c)).join("");
+      // Three or more letters that are variables stay apart ("x d x"), so they never read back as a word; "ac" stays "ac".
+      const apart = new Set<number>();
+      for (const m of text.matchAll(/[A-Za-z]{3,}/g)) for (let k = 1; k < m[0].length; k++) apart.add(m.index + k);
+      return [...text].map((c, i) => (apart.has(i) ? " " : "") + (c === "−" ? "-" : c === "∗" ? "*" : BACK[c] ?? c)).join("");
     }
     case "f": return `\\frac${brace(toLatex(kid(e, "num")))}${brace(toLatex(kid(e, "den")))}`;
     case "sSup": return `${toLatex(kid(e, "e"))}^${group(toLatex(kid(e, "sup")))}`;
