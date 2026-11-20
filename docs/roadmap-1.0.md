@@ -6,10 +6,14 @@ nobody uses. Coverage below is counted over the everyday features in each area.
 
 Legend: ✅ done · 🟡 partial (shown/kept but not editable, or basic only) · ❌ missing
 
-## Where we are (2026-11-13, after Waves 0–6 and a round of polish from real use): about 75–78%
+## Where we are (2026-11-18, release 0.1.5): about 78–80%
 
 The 1.0 target is reached. **Feature freeze for 1.0**: from here the work is shipping (see Release
 below); a new feature goes in only if a test user is blocked without it.
+
+**Paused 2026-11-18, resuming about 2026-12-02.** The break is for testing. On return, in order: (1) fix
+what testing found (the bug-fix pass on real documents); (2) test users; (3) code signing once the company
+is registered. Consider multilevel numbering (1, 1.1, 1.1.1) if testers ask for it.
 
 | Area | Feature | Status |
 |---|---|---|
@@ -36,12 +40,12 @@ below); a new feature goes in only if a test user is blocked without it.
 | | Search in the navigation pane (Ctrl+F: results list, matches marked in the outline) | ✅ |
 | | Find options (formatting, wildcards), Go To | ❌ |
 | **Insert** | Page break, table, picture, link, header/footer, page number fields, comment | ✅ |
-| | Equations: insert and edit (LaTeX notation, live preview, saved as Word equations) | ✅ |
-| | Text boxes (insert, type in them, move, resize, fill and border), shapes (13 everyday shapes: insert, fill, outline, wrap) | ✅ |
+| | Equations: insert and edit (Alt+=; LaTeX notation, live preview, saved as Word equations): several lines, words with their spaces, matrices, cases, binomials, functions with bases and powers; a palette in tabs (structures, Greek, operators, relations, sets) and ready-made examples | ✅ |
+| | Text boxes (insert, type in them, move, resize, fill and border), shapes (about 109 of Word's shapes in a gallery: draw by dragging, fill with transparency, outline with dashes and arrowheads, text inside with alignment, rotate and flip, adjustment handles, bring to front / send to back, soft default colours) | ✅ |
 | | Charts: column, bar, line, area, pie, doughnut, scatter, stacked; colour sets, legend, data labels, gridlines, title; a Chart Design tab; data typed, pasted from Excel, or taken from a table in the document; Word's charts shown and editable | ✅ |
 | | Symbol (with ₵ and ₦), date & time (as text or a DATE field) | ✅ |
 | | Section and column breaks, drop cap | ✅ |
-| | SmartArt, WordArt, 3-D charts, shape effects | ❌ |
+| | SmartArt, WordArt, 3-D charts, shape effects (shadow, glow, 3-D), grouping shapes | ❌ |
 | **Design** | Style sets, theme fonts and colours, watermark, page colour, page borders | ✅ |
 | **Layout** | Margins, orientation, size, indents/spacing | ✅ |
 | | Floating objects: move/resize | ✅ |
@@ -134,11 +138,21 @@ Each wave is checked against Word (layout comparison, round trip, Word reopening
       the GitHub releases, checked daily and from Home → About; proven 0.1.0 → 0.1.1 → 0.1.2; see
       docs/releasing.md).
    3. About / version ✅ (2026-11-17: Home → About Prime Word, with the version always in the rail).
-   4. User guide (short: the everyday tasks and what is ours — PDF → Word, letterheads, signatures).
+   4. User guide ✅ (2026-11-17: Home → Help, or F1: everyday tasks and what is ours, with search and the
+      keyboard shortcuts; equations added 2026-11-18).
    5. Bug-fix pass: real documents (reports, papers, company documents); every problem found is fixed
       and re-checked.
    6. Test users: 5–10 people from the target market (colleagues, researchers, small offices) on the
       installer before a wide release.
+   7. In-app feedback ✅ (2026-11-18: Home → Send feedback, or in the ribbon: bug, hard to use, idea or
+      general; email required; screenshot and the open document can be attached; diagnostics included;
+      kept in an outbox when offline and sent when back online). Reports go to **Prime Platform**, a
+      separate repository (`C:\dev\prime-platform`, GitHub `israelnjor/Prime-Platform`, deployed at
+      https://primeplatform.vercel.app with Supabase), whose **Prime Console** is the owner's inbox
+      (installable; push notifications per report). Proven end to end from 0.1.4, push notifications
+      included (both VAPID keys must come from the same `npm run vapid`). Supabase's free plan pauses
+      after about a week unused: resume it from the dashboard (reports wait in the apps' outboxes).
+      See docs/feedback-api.md.
 
 Later (1.x), in order of value to the target market: multilevel numbering (1, 1.1, 1.1.1), restrict
 editing, fuller grammar and style checking, index and table of authorities, paragraph shading, Find

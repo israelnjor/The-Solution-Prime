@@ -79,8 +79,8 @@ export function LetterheadDesigner({ view, base, onNewDocument, onSaved, onClose
         <h3>Letterhead</h3>
         <div className="letterhead-grid">
           <form className="letterhead-form" onSubmit={(e) => e.preventDefault()}>
-            <label>Organisation name<input value={spec.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Accra Community Library" autoFocus /></label>
-            <label>Tagline (optional)<input value={spec.tagline ?? ""} onChange={(e) => set("tagline", e.target.value)} placeholder="e.g. Knowledge for everyone" /></label>
+            <label>Organisation name<input value={spec.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Prime Productivity" autoFocus /></label>
+            <label>Tagline (optional)<input value={spec.tagline ?? ""} onChange={(e) => set("tagline", e.target.value)} placeholder="e.g. Tools that work for you" /></label>
             <label>Address (one line each)<textarea rows={2} value={spec.address.join("\n")} onChange={(e) => set("address", lines(e.target.value))} /></label>
             <label>Phone, e-mail, website (one per line)<textarea rows={3} value={spec.contacts.join("\n")} onChange={(e) => set("contacts", lines(e.target.value))} /></label>
             <div className="row">

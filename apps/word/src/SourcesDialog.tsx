@@ -6,7 +6,7 @@ import { useState } from "react";
 const TYPES: [SourceType, string][] = [["Book", "Book"], ["JournalArticle", "Journal article"], ["InternetSite", "Website"], ["Report", "Report"]];
 const EMPTY: Source = { tag: "", type: "Book", authors: [], title: "" };
 
-/** "Mensah, Ama" per line → people; a line without a comma is an organisation. */
+/** "Surname, First name" per line → people; a line without a comma is an organisation. */
 const parseAuthors = (text: string): Person[] => text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
   const i = l.indexOf(",");
   return i < 0 ? { last: l } : { last: l.slice(0, i).trim(), first: l.slice(i + 1).trim() || undefined };
@@ -58,7 +58,7 @@ export function SourcesDialog({ view, doc, startNew, onChanged, onClose }: {
               {TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select></label>
             <label className="wide">Authors (one per line: Last, First — or an organisation)
-              <textarea rows={3} value={authors} onChange={(e) => setAuthors(e.target.value)} placeholder={"Mensah, Ama\nOwusu, Kwame"} autoFocus /></label>
+              <textarea rows={3} value={authors} onChange={(e) => setAuthors(e.target.value)} placeholder={"Surname, First name\nSurname, First name"} autoFocus /></label>
             <label className="wide">Title<input value={editing.title} onChange={(e) => set("title", e.target.value)} /></label>
             {field("Year", "year", "2024")}
             {editing.type === "JournalArticle" ? (

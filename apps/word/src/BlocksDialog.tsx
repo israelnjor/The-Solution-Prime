@@ -175,7 +175,7 @@ function SignatureBlockMaker({ onSave, onCancel }: { onSave(name: string, part: 
           <option value="">(room to sign by hand)</option>
           {signatures.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select></label>
-        <label>Name<input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="e.g. Ama Mensah" autoFocus /></label>
+        <label>Name<input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Your full name" autoFocus /></label>
         <label>Title (optional)<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Head Librarian" /></label>
         <label>Organisation (optional)<input value={organisation} onChange={(e) => setOrganisation(e.target.value)} /></label>
         <label className="choice"><input type="checkbox" checked={line} onChange={(e) => setLine(e.target.checked)} /> A line to sign on</label>
@@ -198,7 +198,7 @@ function AddressMaker({ onSave, onCancel }: { onSave(name: string, part: Part, r
     <div className="blocks-maker">
       <form className="letterhead-form" onSubmit={(e) => e.preventDefault()}>
         <label>Address (one line each)<textarea rows={6} value={lines} onChange={(e) => setLines(e.target.value)} autoFocus
-          placeholder={"Accra Community Library\n12 Independence Avenue\nAccra, Ghana"} /></label>
+          placeholder={"Prime Productivity\nStreet and number\nTown, Country"} /></label>
         <label className="choice"><input type="checkbox" checked={bold} onChange={(e) => setBold(e.target.checked)} /> First line in bold</label>
         <fieldset><legend>Whose address is it?</legend>
           <label className="choice"><input type="radio" name="address-role" checked={role === "sender"} onChange={() => setRole("sender")} />
@@ -286,7 +286,7 @@ function StampMaker({ onSave, onCancel }: { onSave(name: string, part: Part): vo
           <label className="choice"><input type="radio" checked={shape === "round"} onChange={() => setShape("round")} /> Round</label>
           <label className="choice"><input type="radio" checked={shape === "oblong"} onChange={() => setShape("oblong")} /> Oblong</label>
         </fieldset>
-        <label>Organisation<input value={outer} onChange={(e) => setOuter(e.target.value)} placeholder="e.g. Accra Community Library" autoFocus /></label>
+        <label>Organisation<input value={outer} onChange={(e) => setOuter(e.target.value)} placeholder="e.g. Prime Productivity" autoFocus /></label>
         <label>Centre text<input value={centre} onChange={(e) => setCentre(e.target.value)} placeholder="e.g. Received, Approved, Paid" /></label>
         <label className="choice"><input type="checkbox" checked={date} onChange={(e) => setDate(e.target.checked)} /> Today's date</label>
         <label className="choice">Colour <input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label>

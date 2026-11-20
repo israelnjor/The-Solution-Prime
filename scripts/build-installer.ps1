@@ -29,11 +29,14 @@ $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
 # The version: set when given (tauri.conf.json is where the app reads it from).
 if ($Version) {
   if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must look like 0.1.1" }
-  $text = Get-Content $conf -Raw
+  # Read and write as UTF-8 (no BOM): Windows PowerShell's Get-Content reads it as ANSI, which garbles
+  # characters such as the © and — in the file a little more on every build.
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  $text = [IO.File]::ReadAllText($conf, $utf8)
   $text = [regex]::Replace($text, '"version":\s*"[^"]+"', "`"version`": `"$Version`"", 1)
-  [IO.File]::WriteAllText($conf, $text)
+  [IO.File]::WriteAllText($conf, $text, $utf8)
 }
-$version = (Get-Content $conf -Raw | ConvertFrom-Json).version
+$version = ([IO.File]::ReadAllText($conf, [Text.Encoding]::UTF8) | ConvertFrom-Json).version
 
 # Signing for updates: the private key stays on this computer (never in the repository).
 $key = Join-Path $env:USERPROFILE ".prime-word\updater.key"

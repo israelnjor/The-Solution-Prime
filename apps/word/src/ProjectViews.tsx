@@ -103,7 +103,7 @@ export function NewProjectDialog({ onCreated, onClose }: { onCreated(p: ProjectS
     <div className="hf-overlay" onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}>
       <div className="hf-dialog project-dialog" role="dialog" aria-label="New project">
         <h3>New project</h3>
-        <label>Name<input ref={input} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} placeholder="e.g. Casa Viola — Lashibi sale"
+        <label>Name<input ref={input} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} placeholder="e.g. Prime Word"
           aria-label="Project name" onKeyDown={(e) => { if (e.key === "Enter") void create(); }} /></label>
         <div className="project-colors" role="radiogroup" aria-label="Colour">
           {PROJECT_COLORS.map((c) => (

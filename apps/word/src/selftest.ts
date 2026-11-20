@@ -543,9 +543,9 @@ export function letterheadSelfTest() {
     const form = document.querySelector(".letterhead-form")!;
     const [name, tagline] = [...form.querySelectorAll("input")];
     const [address, contacts] = [...form.querySelectorAll("textarea")];
-    type(name, "Accra Community Library");
-    type(tagline, "Knowledge for everyone");
-    type(address, "12 Independence Avenue\nAccra, Ghana");
+    type(name, "Prime Productivity");
+    type(tagline, "Tools that work for you");
+    type(address, "Street and number\nTown, Country");
     type(contacts, "+233 30 222 0000\ninfo@acl.org.gh");
     await wait(800);
     if (new URLSearchParams(location.search).get("save") === "0") return console.log("[selftest] align", JSON.stringify({ filled: true }));
@@ -635,7 +635,7 @@ export function blocksSelfTest(view: { state: { doc: { attrs: Record<string, unk
     await open();
     click("Stamp", dialog());
     await wait(300);
-    type(dialog().querySelector<HTMLInputElement>("input:not([type])"), "Accra Community Library");
+    type(dialog().querySelector<HTMLInputElement>("input:not([type])"), "Prime Productivity");
     type(dialog().querySelector<HTMLInputElement>(".sig-name input"), "Selftest stamp");
     await wait(400);
     if (new URLSearchParams(location.search).get("save") === "0") return console.log("[selftest] align", JSON.stringify({ stamp: true }));
@@ -643,7 +643,7 @@ export function blocksSelfTest(view: { state: { doc: { attrs: Record<string, unk
     await wait(600);
     click("Address", dialog());
     await wait(300);
-    type(dialog().querySelector("textarea"), "Accra Community Library\n12 Independence Avenue\nAccra, Ghana");
+    type(dialog().querySelector("textarea"), "Prime Productivity\nStreet and number\nTown, Country");
     type(dialog().querySelector<HTMLInputElement>(".sig-name input"), "Selftest address");
     await wait(300);
     click("Save block", dialog());
@@ -1003,7 +1003,7 @@ export function citationsSelfTest(view: EditorView) {
     click("References", document.querySelector("nav")!); await wait(150);
     setValue(document.querySelector<HTMLSelectElement>(".cite-select"), "new"); await wait(300);
     const dialog = () => document.querySelector(".sources-dialog")!;
-    setValue(dialog().querySelector("textarea"), "Mensah, Ama\nOwusu, Kwame");
+    setValue(dialog().querySelector("textarea"), "Doe, Jane\nRoe, Richard");
     const inputs = () => [...dialog().querySelectorAll<HTMLInputElement>("input")];
     setValue(inputs()[0], "Climate and Farming in Ghana");
     setValue(inputs()[1], "2024");
